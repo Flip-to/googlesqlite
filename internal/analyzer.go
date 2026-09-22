@@ -238,6 +238,7 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureArrayZip,
 	googlesql.LanguageFeatureFeatureUnnestAndFlattenArrays,
 	googlesql.LanguageFeatureFeatureGroupingSets,
+	googlesql.LanguageFeatureFeatureGroupByAll,
 	googlesql.LanguageFeatureFeatureGroupingBuiltin,
 	googlesql.LanguageFeatureFeatureV14UuidType,
 	// Pipe-syntax queries (`FROM t |> EXTEND ... |> SELECT ...`).
