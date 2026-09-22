@@ -34,3 +34,73 @@ cases:
     expected:
       rows:
         - [true, false]
+  # LIKE pattern semantics, from googlesql/compliance/functions_testlib_like.cc
+  # and googlesql/public/functions/like.cc: '_' matches one character, '%'
+  # any run (newlines included), a backslash escapes the next character,
+  # regex metacharacters are literal, and matching is case-sensitive.
+  - desc: LIKE underscore matches exactly one character
+    sql: |-
+      SELECT 'abc' LIKE '_bc', 'abc' LIKE 'a_c', 'ac' LIKE 'a_c', 'abbc' LIKE 'a_c',
+             'abc' LIKE 'ab_', 'abc' LIKE '___', 'abcd' LIKE '___', 'aXcXeX' LIKE 'a_c_e_'
+    expected:
+      rows:
+        - [true, true, false, false, true, true, false, true]
+  - desc: LIKE escaped percent is a literal percent
+    sql: |-
+      SELECT 'abc' LIKE r'ab\%', 'ab%' LIKE r'ab\%', r'ab\%' LIKE r'ab\%', 'ab\\' LIKE r'ab\%'
+    expected:
+      rows:
+        - [false, true, false, false]
+  - desc: LIKE escaped underscore is a literal underscore
+    sql: |-
+      SELECT 'ab' LIKE r'ab\_', 'ab_' LIKE r'ab\_', 'abc' LIKE r'ab\_', r'ab\_' LIKE r'ab\_'
+    expected:
+      rows:
+        - [false, true, false, false]
+  - desc: LIKE escaped backslash is a literal backslash
+    sql: |-
+      SELECT r'a\c' LIKE r'a\\c', r'a\\c' LIKE r'a\\c', 'abc' LIKE r'a\\c',
+             r'a\c' LIKE r'a\\%c', r'a\xxxc' LIKE r'a\\%c', '\\' LIKE r'\\'
+    expected:
+      rows:
+        - [true, false, false, true, true, true]
+  - desc: LIKE backslash before an ordinary character matches that character
+    sql: |-
+      SELECT 'a' LIKE r'\a', 'b' LIKE r'\a', r'\a' LIKE r'\a'
+    expected:
+      rows:
+        - [true, false, false]
+  - desc: LIKE pattern ending in a backslash is an error
+    sql: SELECT '' LIKE '\\'
+    expected:
+      error:
+        contains: "backslash"
+  - desc: LIKE treats regex metacharacters literally
+    sql: |-
+      SELECT 'abc' LIKE 'a.c', 'a.c' LIKE 'a.c', 'abc' LIKE 'a.*', 'a.*' LIKE 'a.*'
+    expected:
+      rows:
+        - [false, true, false, true]
+  - desc: LIKE mixes escaped and unescaped wildcards
+    sql: |-
+      SELECT '%barfoobar' LIKE r'\%barfoo%', 'barfoobar' LIKE r'\%foo%',
+             '_barfoobar' LIKE r'\_barfoo%', 'barfoobar' LIKE r'\_foo%'
+    expected:
+      rows:
+        - [true, false, true, false]
+  - desc: LIKE is case-sensitive
+    sql: SELECT 'abc' LIKE 'ABC', 'ABC' LIKE 'abc', 'ABc' LIKE 'aBC'
+    expected:
+      rows:
+        - [false, false, false]
+  - desc: LIKE percent matches across a newline
+    sql: SELECT 'a\nb' LIKE 'a%b', 'a\nb' LIKE 'a_b'
+    expected:
+      rows:
+        - [true, true]
+  - desc: LIKE ANY uses the same pattern rules
+    sql: |-
+      SELECT 'fb_summer' LIKE ANY ('%facebook%', r'fb\_%'), 'fbxsummer' LIKE ANY ('%facebook%', r'fb\_%')
+    expected:
+      rows:
+        - [true, false]
