@@ -11,3 +11,23 @@ cases:
     expected:
       rows:
         - [0]
+  - desc: MOD(25, 12) from the reference Examples table
+    sql: SELECT MOD(25, 12)
+    expected:
+      rows:
+        - [1]
+  - desc: MOD(25, 0) is an error per the reference Examples table
+    sql: SELECT MOD(25, 0)
+    expected:
+      error:
+        contains: "zero"
+  - desc: MOD of two INT64 arguments returns INT64
+    sql: SELECT FORMAT('%d', MOD(10, 3))
+    expected:
+      rows:
+        - ["1"]
+  - desc: MOD of INT64 keeps the sign of X
+    sql: SELECT MOD(-7, 3), MOD(7, -3)
+    expected:
+      rows:
+        - [-1, 1]
