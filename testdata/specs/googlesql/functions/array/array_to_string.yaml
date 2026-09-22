@@ -6,3 +6,25 @@ cases:
     expected:
       rows:
         - ["a,b,c"]
+  # From googlesql/compliance/functions_testlib_2.cc: a NULL array,
+  # delimiter or null_text returns NULL.
+  - desc: NULL array returns NULL
+    sql: SELECT ARRAY_TO_STRING(CAST(NULL AS ARRAY<STRING>), ",")
+    expected:
+      rows:
+        - [null]
+  - desc: NULL delimiter returns NULL
+    sql: SELECT ARRAY_TO_STRING(["a", "b"], CAST(NULL AS STRING))
+    expected:
+      rows:
+        - [null]
+  - desc: NULL null_text returns NULL
+    sql: SELECT ARRAY_TO_STRING(["a", "b"], ",", CAST(NULL AS STRING))
+    expected:
+      rows:
+        - [null]
+  - desc: empty array returns the empty string
+    sql: SELECT ARRAY_TO_STRING(CAST([] AS ARRAY<STRING>), ",")
+    expected:
+      rows:
+        - [""]
