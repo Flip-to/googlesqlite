@@ -27,6 +27,13 @@ func BindArrayToString(args ...value.Value) (value.Value, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("ARRAY_TO_STRING: invalid number of arguments: got %d, want at least 2", len(args))
 	}
+	// A NULL array, delimiter or null_text returns NULL
+	// (googlesql/compliance/functions_testlib_2.cc).
+	for _, arg := range args {
+		if arg == nil {
+			return nil, nil
+		}
+	}
 	arr, err := args[0].ToArray()
 	if err != nil {
 		return nil, err
