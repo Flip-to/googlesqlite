@@ -2628,6 +2628,9 @@ func (c *Catalog) tvfHandleForSpec(spec *TVFSpec) (*googlesql.TableValuedFunctio
 		}
 		argTypes = append(argTypes, argType)
 	}
+	if spec.IsTemplated {
+		return c.templatedTVFHandle(storageName, spec, argTypes)
+	}
 	columns := make([]*googlesql.TVFSchemaColumn, 0, len(spec.OutputColumns))
 	for _, col := range spec.OutputColumns {
 		typ, err := col.Type.ToGoogleSQLType()
@@ -2659,6 +2662,38 @@ func (c *Catalog) tvfHandleForSpec(spec *TVFSpec) (*googlesql.TableValuedFunctio
 	return tvf.TableValuedFunction, nil
 }
 
+// templatedTVFHandle registers a TVF with an ANY TABLE / ANY TYPE
+// parameter as a TemplatedSQLTVF, so the analyzer resolves the body
+// (and the output schema) against each call site's argument types.
+func (c *Catalog) templatedTVFHandle(storageName string, spec *TVFSpec, argTypes []*googlesql.FunctionArgumentType) (*googlesql.TableValuedFunction, error) {
+	resultType, err := googlesql.NewFunctionArgumentType5(
+		googlesql.SignatureArgumentKindArgTypeRelation,
+		m1(googlesql.NewFunctionArgumentTypeOptions()),
+		-1,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build templated TVF result type: %w", err)
+	}
+	sig, err := googlesql.NewFunctionSignature3(resultType, argTypes, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build templated TVF signature: %w", err)
+	}
+	argNames := make([]string, 0, len(spec.Args))
+	for _, arg := range spec.Args {
+		argNames = append(argNames, arg.Name)
+	}
+	location, err := googlesql.NewParseResumeLocationFromString(spec.Code)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build templated TVF body location: %w", err)
+	}
+	tvf, err := googlesql.NewTemplatedSQLTVF([]string{storageName}, sig, argNames, location, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build templated TVF handle: %w", err)
+	}
+	c.tvfOwners = append(c.tvfOwners, tvf)
+	return tvf.TableValuedFunction, nil
+}
+
 func (c *Catalog) copyTVFSpec(spec *TVFSpec, newNamePath []string) *TVFSpec {
 	return &TVFSpec{
 		IsTemp:        spec.IsTemp,
@@ -2666,6 +2701,8 @@ func (c *Catalog) copyTVFSpec(spec *TVFSpec, newNamePath []string) *TVFSpec {
 		Args:          spec.Args,
 		OutputColumns: spec.OutputColumns,
 		Body:          spec.Body,
+		IsTemplated:   spec.IsTemplated,
+		Code:          spec.Code,
 	}
 }
 
