@@ -91,7 +91,9 @@ func applyScriptVariables(ctx context.Context, query string, conn *Conn) string 
 		// SELECT so it has something to do.
 		return "SELECT 1"
 	}
-	return strings.Join(keep, "; ")
+	// Re-join with the separator that was removed, so a query the
+	// pre-pass did not rewrite reaches the analyzer byte for byte.
+	return strings.Join(keep, ";")
 }
 
 // evaluateScriptVariableExpr asks the underlying SQLite to compute
@@ -135,19 +137,18 @@ func evaluateScriptVariableExpr(ctx context.Context, conn *Conn, expr string) st
 	return "(" + expr + ")"
 }
 
-// splitTopLevelStatements splits on `;` while respecting single
-// quotes, double quotes and backticks. Triple-quoted strings are
-// not common in scripts; the simple form here is enough for the
-// statement boundaries the rewriter needs.
+// splitTopLevelStatements splits on `;` while skipping quoted
+// strings, backticked identifiers and comments, so neither a `;`
+// nor a quote inside any of them moves a statement boundary.
 func splitTopLevelStatements(query string) []string {
 	var stmts []string
 	start := 0
 	for i := 0; i < len(query); i++ {
-		c := query[i]
-		switch c {
-		case '\'', '"', '`':
-			end := scanQuoted(query, i, c)
+		if end, ok := skipLiteralOrComment(query, i); ok {
 			i = end - 1
+			continue
+		}
+		switch query[i] {
 		case ';':
 			stmts = append(stmts, query[start:i])
 			start = i + 1
@@ -157,6 +158,37 @@ func splitTopLevelStatements(query string) []string {
 		stmts = append(stmts, query[start:])
 	}
 	return stmts
+}
+
+// skipLiteralOrComment reports whether a quoted string, a backticked
+// identifier or a comment (`--`, `#`, `/* */`) starts at query[i],
+// and if so returns the byte index just past it.
+func skipLiteralOrComment(query string, i int) (int, bool) {
+	c := query[i]
+	switch {
+	case c == '\'' || c == '"':
+		if strings.HasPrefix(query[i:], strings.Repeat(string(c), 3)) {
+			delim := strings.Repeat(string(c), 3)
+			if end := strings.Index(query[i+3:], delim); end >= 0 {
+				return i + 3 + end + 3, true
+			}
+			return len(query), true
+		}
+		return scanQuoted(query, i, c), true
+	case c == '`':
+		return scanQuoted(query, i, c), true
+	case c == '#', c == '-' && strings.HasPrefix(query[i:], "--"):
+		if end := strings.IndexByte(query[i:], '\n'); end >= 0 {
+			return i + end, true
+		}
+		return len(query), true
+	case c == '/' && strings.HasPrefix(query[i:], "/*"):
+		if end := strings.Index(query[i+2:], "*/"); end >= 0 {
+			return i + 2 + end + 2, true
+		}
+		return len(query), true
+	}
+	return 0, false
 }
 
 // scanQuoted returns the byte index past the closing quote at
@@ -255,9 +287,7 @@ func substituteScriptVariables(stmt string, conn *Conn) string {
 	i := 0
 	for i < len(stmt) {
 		c := stmt[i]
-		switch c {
-		case '\'', '"', '`':
-			end := scanQuoted(stmt, i, c)
+		if end, ok := skipLiteralOrComment(stmt, i); ok {
 			b.WriteString(stmt[i:end])
 			i = end
 			continue

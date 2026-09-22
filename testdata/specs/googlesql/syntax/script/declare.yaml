@@ -8,3 +8,38 @@ cases:
     expected:
       rows:
         - [42]
+  # The DECLARE / SET pre-pass splits the query text on ';'. Comments
+  # are ignored by the parser (lexical.md "Comments"), so a quote or a
+  # ';' inside a comment must not move a statement boundary, and a
+  # query the pre-pass leaves alone must reach the analyzer unchanged.
+  - desc: apostrophe in a -- comment does not alter a later string literal
+    sql: |-
+      SELECT s FROM UNNEST([
+        -- the callers' comment
+        'a;b;c'
+      ]) AS s
+    expected:
+      rows:
+        - ["a;b;c"]
+  - desc: apostrophe in a # comment does not alter a later string literal
+    sql: |-
+      SELECT s FROM UNNEST([
+        # it's a comment
+        'a;b'
+      ]) AS s
+    expected:
+      rows:
+        - ["a;b"]
+  - desc: apostrophe in a /* */ comment does not alter a later string literal
+    sql: |-
+      SELECT s FROM UNNEST([ /* it's a comment */ 'a;b' ]) AS s
+    expected:
+      rows:
+        - ["a;b"]
+  - desc: semicolon inside a comment is not a statement boundary
+    sql: |-
+      DECLARE x INT64 DEFAULT 7; -- it's; still a comment
+      SELECT x
+    expected:
+      rows:
+        - [7]
