@@ -3,6 +3,7 @@ package googlesqlite_test
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -135,5 +136,42 @@ func TestTVFAnyTableArgument(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestTVFAnyTableArgumentAcrossConnections creates a templated TVF on
+// one connection and calls it on another, which reloads the TVF from
+// the persisted catalog rather than the in-memory one.
+func TestTVFAnyTableArgumentAcrossConnections(t *testing.T) {
+	t.Parallel()
+	db, err := sql.Open("googlesqlite", "file:"+filepath.Join(t.TempDir(), "tvf.db"))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	creator, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := creator.ExecContext(ctx,
+		"CREATE TABLE FUNCTION CountRows(t ANY TABLE) AS (SELECT COUNT(*) AS n FROM t)"); err != nil {
+		t.Fatalf("CREATE TABLE FUNCTION: %v", err)
+	}
+
+	caller, err := db.Conn(ctx) // creator is still checked out, so this is a new connection
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer caller.Close()
+	defer creator.Close()
+	var n int64
+	if err := caller.QueryRowContext(ctx,
+		"SELECT n FROM CountRows((SELECT x FROM UNNEST([1, 2, 3]) AS x))").Scan(&n); err != nil {
+		t.Fatalf("call on a second connection: %v", err)
+	}
+	if n != 3 {
+		t.Errorf("n = %d, want 3", n)
 	}
 }
