@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
+	"time"
 
 	_ "github.com/goccy/googlesqlite"
 )
@@ -164,6 +166,8 @@ func TestTVFAnyTableArgumentAcrossConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtime.GC() // the templated TVF handle must survive collection too
+	time.Sleep(10 * time.Millisecond)
 	defer caller.Close()
 	defer creator.Close()
 	var n int64

@@ -2629,7 +2629,7 @@ func (c *Catalog) tvfHandleForSpec(spec *TVFSpec) (*googlesql.TableValuedFunctio
 		argTypes = append(argTypes, argType)
 	}
 	if spec.IsTemplated {
-		return templatedTVFHandle(storageName, spec, argTypes)
+		return c.templatedTVFHandle(storageName, spec, argTypes)
 	}
 	columns := make([]*googlesql.TVFSchemaColumn, 0, len(spec.OutputColumns))
 	for _, col := range spec.OutputColumns {
@@ -2665,7 +2665,7 @@ func (c *Catalog) tvfHandleForSpec(spec *TVFSpec) (*googlesql.TableValuedFunctio
 // templatedTVFHandle registers a TVF with an ANY TABLE / ANY TYPE
 // parameter as a TemplatedSQLTVF, so the analyzer resolves the body
 // (and the output schema) against each call site's argument types.
-func templatedTVFHandle(storageName string, spec *TVFSpec, argTypes []*googlesql.FunctionArgumentType) (*googlesql.TableValuedFunction, error) {
+func (c *Catalog) templatedTVFHandle(storageName string, spec *TVFSpec, argTypes []*googlesql.FunctionArgumentType) (*googlesql.TableValuedFunction, error) {
 	resultType, err := googlesql.NewFunctionArgumentType5(
 		googlesql.SignatureArgumentKindArgTypeRelation,
 		m1(googlesql.NewFunctionArgumentTypeOptions()),
@@ -2690,6 +2690,7 @@ func templatedTVFHandle(storageName string, spec *TVFSpec, argTypes []*googlesql
 	if err != nil {
 		return nil, fmt.Errorf("failed to build templated TVF handle: %w", err)
 	}
+	c.tvfOwners = append(c.tvfOwners, tvf)
 	return tvf.TableValuedFunction, nil
 }
 
