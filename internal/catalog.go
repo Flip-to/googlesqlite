@@ -1680,8 +1680,14 @@ func (c *Catalog) getOrCreateSubCatalog(parent *googlesql.SimpleCatalog, name st
 	if existing, ok := subs[name]; ok {
 		return existing
 	}
-	sub := newSimpleCatalog(name)
-	if sub == nil {
+	// A sub-catalog only holds the tables, functions and TVFs
+	// registered under its path; builtins resolve at the root. Building
+	// it with newSimpleCatalog registered the full builtin function set
+	// in every project / dataset / INFORMATION_SCHEMA sub-catalog, and
+	// every DROP rebuilds all of them, which grew the wasm heap by tens
+	// of MB per DROP.
+	sub, err := googlesql.NewSimpleCatalog(name, tf())
+	if err != nil || sub == nil {
 		return nil
 	}
 	_ = parent.AddCatalog(sub)
