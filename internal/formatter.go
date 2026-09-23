@@ -1194,6 +1194,24 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if image, ok := floatLiteralImageForNumericCast(ctx, n.node); ok {
+		lit, err := literalFromGoogleSQLValue(*m1(googlesql.NewValueString(image)))
+		if err != nil {
+			return "", err
+		}
+		strType, err := json.Marshal(newType(m1(tf().MakeSimpleType(googlesql.TypeKindTypeString))))
+		if err != nil {
+			return "", err
+		}
+		encodedStrType, err := encodeGoValue(m1(tf().MakeSimpleType(googlesql.TypeKindTypeString)), string(strType))
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf(
+			"googlesqlite_cast(%s, '%s', '%s', %t)",
+			lit, encodedStrType, encodedToType, m1(n.node.ReturnNullOnError()),
+		), nil
+	}
 	expr, err := newNode(m1(n.node.Expr())).FormatSQL(ctx)
 	if err != nil {
 		return "", err
@@ -3320,4 +3338,53 @@ func unwrapCast(expr googlesql.ResolvedExprNode) googlesql.ResolvedExprNode {
 		}
 		expr = inner
 	}
+}
+
+var floatLiteralImageRe = regexp.MustCompile(`^-?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+
+// floatLiteralImageForNumericCast returns the source text of a
+// floating-point literal cast to NUMERIC or BIGNUMERIC. When the
+// analyzer does not fold literal casts (see analyzeStatementLocked),
+// CAST(1.123456789012345678 AS NUMERIC) arrives as a cast of a DOUBLE
+// literal, and going through float64 would lose digits. The analyzer
+// itself converts such casts from the literal's image, so do the same.
+func floatLiteralImageForNumericCast(ctx context.Context, cast *googlesql.ResolvedCast) (string, bool) {
+	if cast == nil {
+		return "", false
+	}
+	if f, _ := cast.Format(); f != nil {
+		return "", false
+	}
+	toKind := m1(m1(cast.Type()).Kind())
+	if toKind != googlesql.TypeKindTypeNumeric && toKind != googlesql.TypeKindTypeBignumeric {
+		return "", false
+	}
+	lit, ok := m1(cast.Expr()).(*googlesql.ResolvedLiteral)
+	if !ok || m1(m1(lit.Type()).Kind()) != googlesql.TypeKindTypeDouble {
+		return "", false
+	}
+	query, ok := sourceQueryFromContext(ctx)
+	if !ok {
+		return "", false
+	}
+	loc, _ := lit.GetParseLocationRangeOrNULL()
+	if loc == nil {
+		return "", false
+	}
+	image, err := loc.GetTextFrom(query)
+	if err != nil {
+		return "", false
+	}
+	image = strings.ReplaceAll(strings.TrimSpace(image), " ", "")
+	if !floatLiteralImageRe.MatchString(image) {
+		return "", false
+	}
+	want, err := m1(lit.Value()).DoubleValue()
+	if err != nil {
+		return "", false
+	}
+	if got, err := strconv.ParseFloat(image, 64); err != nil || got != want {
+		return "", false
+	}
+	return image, true
 }
