@@ -1504,9 +1504,10 @@ func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode 
 	// build a UTC TimeZone for SetDefaultTimeZone, so
 	// CAST(TIMESTAMP '2024-01-01 03:00:00+00' AS DATE) folded to
 	// 2023-12-31. For statements that involve TIMESTAMP, leave literal
-	// casts to the runtime, which uses UTC. Folding stays on otherwise:
-	// unfolded, a NUMERIC literal such as CAST(1.123456789 AS NUMERIC)
-	// reaches the runtime as a DOUBLE and loses precision.
+	// casts to the runtime, which uses UTC. Unfolded, a floating-point
+	// literal cast such as CAST(1.123456789 AS NUMERIC) reaches the
+	// formatter as a DOUBLE; CastNode.FormatSQL recovers the literal's
+	// source image so the NUMERIC/BIGNUMERIC value stays exact.
 	unfold := timestampCastRe.MatchString(query)
 	if unfold {
 		if ferr := a.opt.SetFoldLiteralCast(false); ferr == nil {
@@ -1597,6 +1598,7 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
 			ctx = a.context(ctx, funcMap, tvfMap)
 			ctx = withSystemVars(ctx, conn.systemVars)
 			ctx = withConn(ctx, conn)
+			ctx = withSourceQuery(ctx, query)
 			action, err := a.newStmtAction(ctx, query, stmtArgs, stmtNode)
 			if err != nil {
 				return nil, err
