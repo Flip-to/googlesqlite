@@ -695,6 +695,20 @@ func (n *AggregateFunctionCallNode) FormatSQL(ctx context.Context) (string, erro
 		delLit, _ := literalFromValue(value.FloatValue(dp.Delta))
 		args = append(args, epsLit, delLit)
 	}
+	// HAVING MAX / MIN on any other aggregate: pass each row's key as a
+	// googlesqlite_having marker; the Aggregator replays only the rows
+	// at the extreme key (helper.Aggregator.replayHaving).
+	if havingMod := m1(n.node.HavingModifier()); havingMod != nil {
+		havingExpr, herr := newNode(m1(havingMod.HavingExpr())).FormatSQL(ctx)
+		if herr != nil {
+			return "", herr
+		}
+		isMax := true
+		if k, kerr := havingMod.Kind(); kerr == nil && k == googlesql.ResolvedAggregateHavingModifierEnums_HavingModifierKindMin {
+			isMax = false
+		}
+		args = append(args, fmt.Sprintf("googlesqlite_having(%s, %t)", havingExpr, isMax))
+	}
 	funcMap := funcMapFromContext(ctx)
 	if spec, exists := funcMap[funcName]; exists {
 		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
@@ -849,6 +863,11 @@ func (n *AnalyticFunctionCallNode) FormatSQL(ctx context.Context) (string, error
 			return n.formatNative(ctx, custom, orderColumns, true)
 		}
 	}
+	// SQLite's SUM / AVG / MIN / MAX are only correct for INT64 and
+	// STRING arguments; see internal/functions/window/typed.go.
+	if typed, ok := typedWindowFuncs[rawName]; ok && !n.requiresPredecessorEmulation() && !n.nativeSafeArgument() {
+		return n.formatNative(ctx, typed, orderColumns, true)
+	}
 	if native := nativeWindowFuncForName(rawName); native != "" && !n.requiresPredecessorEmulation() {
 		return n.formatNative(ctx, native, orderColumns, false)
 	}
@@ -913,6 +932,27 @@ func (n *AnalyticFunctionCallNode) FormatSQL(ctx context.Context) (string, error
 // `<name>(DISTINCT x) OVER (...)`. Used when the formatter sees the
 // DISTINCT modifier on functions whose plain native form is a SQLite
 // built-in (which doesn't accept DISTINCT in OVER).
+var typedWindowFuncs = map[string]string{
+	"sum": "googlesqlite_window_typed_sum",
+	"avg": "googlesqlite_window_typed_avg",
+	"min": "googlesqlite_window_typed_min",
+	"max": "googlesqlite_window_typed_max",
+}
+
+// nativeSafeArgument reports whether the first argument's type is one
+// SQLite's built-in aggregates handle exactly (INT64, BOOL, STRING).
+func (n *AnalyticFunctionCallNode) nativeSafeArgument() bool {
+	args := m1(n.node.ArgumentList())
+	if len(args) == 0 {
+		return true
+	}
+	switch m1(m1(args[0].Type()).Kind()) {
+	case googlesql.TypeKindTypeInt64, googlesql.TypeKindTypeInt32, googlesql.TypeKindTypeBool, googlesql.TypeKindTypeString:
+		return true
+	}
+	return false
+}
+
 var distinctAwareNativeWindowFuncs = map[string]string{
 	"sum":   "googlesqlite_window_sum_distinct",
 	"count": "googlesqlite_window_count_distinct",
@@ -1749,6 +1789,10 @@ func (n *FilterScanNode) FormatSQL(ctx context.Context) (string, error) {
 		containsTokens = containsTokens || strings.Contains(currentQuery, token)
 	}
 
+	// A filter over window functions (QUALIFY) must run after they are
+	// computed. Appending WHERE to "SELECT f(x) OVER (...) FROM t" would
+	// filter the rows first and change every window result.
+	containsTokens = containsTokens || strings.Contains(currentQuery, " OVER ")
 	if !queryWrappedInParens && containsTokens {
 		return fmt.Sprintf("( %s ) WHERE %s", input, filter), nil
 	}

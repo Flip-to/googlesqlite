@@ -62,19 +62,28 @@ func TestRangeValue(t *testing.T) {
 		}
 	})
 
-	t.Run("comparisons unsupported", func(t *testing.T) {
+	t.Run("comparisons", func(t *testing.T) {
+		// Ranges order by start, then end; an unbounded start sorts
+		// first and an unbounded end last.
+		d := func(n int64) value.Value { t, _ := value.DateFromInt64Value(n); return value.DateValue(t) }
+		unboundedStart := &value.RangeValue{End: d(10)}
+		bounded := &value.RangeValue{Start: d(1), End: d(10)}
+		unboundedEnd := &value.RangeValue{Start: d(1)}
+		if lt, err := unboundedStart.LT(bounded); err != nil || !lt {
+			t.Fatalf("[UNBOUNDED, 10) < [1, 10): %v %v", lt, err)
+		}
+		if gt, err := unboundedEnd.GT(bounded); err != nil || !gt {
+			t.Fatalf("[1, UNBOUNDED) > [1, 10): %v %v", gt, err)
+		}
+		if gte, err := bounded.GTE(bounded); err != nil || !gte {
+			t.Fatalf("GTE self: %v %v", gte, err)
+		}
+		if lte, err := bounded.LTE(unboundedEnd); err != nil || !lte {
+			t.Fatalf("LTE: %v %v", lte, err)
+		}
 		r := &value.RangeValue{}
-		if _, err := r.GT(r); err == nil {
-			t.Fatal("GT")
-		}
-		if _, err := r.GTE(r); err == nil {
-			t.Fatal("GTE")
-		}
-		if _, err := r.LT(r); err == nil {
-			t.Fatal("LT")
-		}
-		if _, err := r.LTE(r); err == nil {
-			t.Fatal("LTE")
+		if _, err := r.GT(value.IntValue(1)); err == nil {
+			t.Fatal("GT with INT64 should fail")
 		}
 		if _, err := r.Add(r); err == nil {
 			t.Fatal("Add")

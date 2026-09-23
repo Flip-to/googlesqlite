@@ -98,7 +98,10 @@ func loadCorpus(t testing.TB) []queryCase {
 			return err
 		}
 		rel, _ := filepath.Rel(root, path)
-		parts := strings.SplitN(string(data), "\n-- @query\n", 2)
+		// Normalise CRLF (Windows checkouts) so the "-- @query" marker
+		// is found and the setup is split from the timed query.
+		text := strings.ReplaceAll(string(data), "\r\n", "\n")
+		parts := strings.SplitN(text, "\n-- @query\n", 2)
 		var setup, query string
 		if len(parts) == 2 {
 			setup = strings.TrimSpace(parts[0])

@@ -98,6 +98,20 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		// keyed under their custom registration names so they're
 		// looked up by the formatter's distinctAwareNativeWindowFuncs
 		// path rather than via predecessor name.
+		// Typed SUM / AVG / MIN / MAX for DOUBLE and NUMERIC arguments;
+		// see internal/functions/window/typed.go.
+		windowFuncMap["sum_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_sum", Func: window.NewSumWindowNative()},
+		}
+		windowFuncMap["avg_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_avg", Func: window.NewAvgWindowNative()},
+		}
+		windowFuncMap["min_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_min", Func: window.NewMinWindowNative()},
+		}
+		windowFuncMap["max_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_max", Func: window.NewMaxWindowNative()},
+		}
 		windowFuncMap["sum_distinct"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_sum_distinct", Func: window.NewSumDistinctWindowNative()},
 		}
@@ -196,6 +210,11 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 			// SQLite cannot hold a composite value, so group on its
 			// encoding: equal values encode identically.
 			return v, nil
+		case *value.IntervalValue:
+			// Equal intervals can be written differently
+			// (INTERVAL 1 MONTH = INTERVAL 30 DAY); group on the
+			// normalised key. The selected column keeps its own text.
+			return value.DistinctKey(decoded)
 		}
 		return decoded.Interface(), nil
 	}, deterministic); err != nil {

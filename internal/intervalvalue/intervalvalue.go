@@ -26,7 +26,9 @@ package intervalvalue
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -69,12 +71,21 @@ func (iv *IntervalValue) String() string {
 	if !iv.IsCanonical() {
 		src = iv.Canonicalize()
 	}
-	out := fmt.Sprintf("%d-%d %d %d:%d:%d", src.Years, int32abs(src.Months), src.Days, src.Hours, int32abs(src.Minutes), int32abs(src.Seconds))
+	// The Y-M and H:M:S.F groups each carry one sign in front, so a
+	// negative group whose leading field is zero (-0-3, -0:0:1) keeps it.
+	ymSign := ""
+	if src.Years < 0 || src.Months < 0 {
+		ymSign = "-"
+	}
+	timeSign := ""
+	if src.Hours < 0 || src.Minutes < 0 || src.Seconds < 0 || src.SubSecondNanos < 0 {
+		timeSign = "-"
+	}
+	out := fmt.Sprintf("%s%d-%d %d %s%d:%d:%d",
+		ymSign, int32abs(src.Years), int32abs(src.Months), src.Days,
+		timeSign, int32abs(src.Hours), int32abs(src.Minutes), int32abs(src.Seconds))
 	if src.SubSecondNanos != 0 {
-		mantStr := fmt.Sprintf("%09d", src.SubSecondNanos)
-		for len(mantStr) > 0 && mantStr[len(mantStr)-1:] == "0" {
-			mantStr = mantStr[0 : len(mantStr)-1]
-		}
+		mantStr := strings.TrimRight(fmt.Sprintf("%09d", int32abs(src.SubSecondNanos)), "0")
 		out = fmt.Sprintf("%s.%s", out, mantStr)
 	}
 	return out
@@ -104,45 +115,45 @@ func (i intervalPart) String() string {
 // canonicalParts indicates the parse order for canonical format.
 var canonicalParts = []intervalPart{yearsPart, monthsPart, daysPart, hoursPart, minutesPart, secondsPart, subsecsPart}
 
+var canonicalIntervalRe = regexp.MustCompile(`^([+-]?)(\d+)-(\d+) ([+-]?\d+) ([+-]?)(\d+):(\d+):(\d+)(?:\.(\d{1,9}))?$`)
+
 // ParseInterval parses an interval in canonical string format and returns the IntervalValue it represents.
+// The canonical format is [sign]Y-M [sign]D [sign]H:M:S[.F]; the sign in
+// front of a group applies to every field in it.
 func ParseInterval(value string) (*IntervalValue, error) {
-	iVal := &IntervalValue{}
-	for _, part := range canonicalParts {
-		remaining, v, err := getPartValue(part, value)
+	m := canonicalIntervalRe.FindStringSubmatch(strings.TrimSpace(value))
+	if m == nil {
+		return nil, fmt.Errorf("invalid interval %q", value)
+	}
+	atoi := func(s string) (int32, error) {
+		n, err := strconv.ParseInt(s, 10, 32)
+		return int32(n), err
+	}
+	var parts [7]int32
+	for k, idx := range []int{2, 3, 4, 6, 7, 8} {
+		n, err := atoi(m[idx])
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid interval %q: %w", value, err)
 		}
-		switch part {
-		case yearsPart:
-			iVal.Years = v
-		case monthsPart:
-			iVal.Months = v
-			if iVal.Years < 0 {
-				iVal.Months = -v
-			}
-		case daysPart:
-			iVal.Days = v
-		case hoursPart:
-			iVal.Hours = v
-		case minutesPart:
-			iVal.Minutes = v
-			if iVal.Hours < 0 {
-				iVal.Minutes = -v
-			}
-		case secondsPart:
-			iVal.Seconds = v
-			if iVal.Hours < 0 {
-				iVal.Seconds = -v
-			}
-		case subsecsPart:
-			iVal.SubSecondNanos = v
-			if iVal.Hours < 0 {
-				iVal.SubSecondNanos = -v
-			}
-		default:
-			return nil, fmt.Errorf("encountered invalid part %s during parse", part)
+		parts[k] = n
+	}
+	if m[9] != "" {
+		// Fractional seconds as exact nanoseconds, not through float64.
+		n, err := atoi((m[9] + "000000000")[:9])
+		if err != nil {
+			return nil, fmt.Errorf("invalid interval %q: %w", value, err)
 		}
-		value = remaining
+		parts[6] = n
+	}
+	iVal := &IntervalValue{
+		Years: parts[0], Months: parts[1], Days: parts[2],
+		Hours: parts[3], Minutes: parts[4], Seconds: parts[5], SubSecondNanos: parts[6],
+	}
+	if m[1] == "-" {
+		iVal.Years, iVal.Months = -iVal.Years, -iVal.Months
+	}
+	if m[5] == "-" {
+		iVal.Hours, iVal.Minutes, iVal.Seconds, iVal.SubSecondNanos = -iVal.Hours, -iVal.Minutes, -iVal.Seconds, -iVal.SubSecondNanos
 	}
 	return iVal, nil
 }
