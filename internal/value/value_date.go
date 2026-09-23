@@ -15,9 +15,11 @@ func (d DateValue) AddDateWithInterval(v int, interval string) (Value, error) {
 	case "WEEK":
 		return DateValue(time.Time(d).AddDate(0, 0, v*7)), nil
 	case "MONTH":
-		return DateValue(time.Time(d).AddDate(0, v, 0)), nil
+		return DateValue(addMonthsClamped(time.Time(d), v)), nil
+	case "QUARTER":
+		return DateValue(addMonthsClamped(time.Time(d), 3*v)), nil
 	case "YEAR":
-		return DateValue(time.Time(d).AddDate(v, 0, 0)), nil
+		return DateValue(addMonthsClamped(time.Time(d), 12*v)), nil
 	default:
 		return DateValue(time.Time(d).AddDate(0, 0, v)), nil
 	}
@@ -27,16 +29,7 @@ func (d DateValue) Add(v Value) (Value, error) {
 	src := time.Time(d)
 	switch vv := v.(type) {
 	case *IntervalValue:
-		return DatetimeValue(time.Date(
-			src.Year()+int(vv.Years),
-			time.Month(int(src.Month())+int(vv.Months)),
-			src.Day()+int(vv.Days),
-			src.Hour()+int(vv.Hours),
-			src.Minute()+int(vv.Minutes),
-			src.Second()+int(vv.Seconds),
-			src.Nanosecond()+int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return DatetimeValue(addInterval(src, vv, 1)), nil
 	case IntValue:
 		return DateValue(time.Time(d).AddDate(0, 0, int(vv))), nil
 	}
@@ -47,16 +40,7 @@ func (d DateValue) Sub(v Value) (Value, error) {
 	src := time.Time(d)
 	switch vv := v.(type) {
 	case *IntervalValue:
-		return DatetimeValue(time.Date(
-			src.Year()-int(vv.Years),
-			time.Month(int(src.Month())-int(vv.Months)),
-			src.Day()-int(vv.Days),
-			src.Hour()-int(vv.Hours),
-			src.Minute()-int(vv.Minutes),
-			src.Second()-int(vv.Seconds),
-			src.Nanosecond()-int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return DatetimeValue(addInterval(src, vv, -1)), nil
 	case IntValue:
 		return DateValue(time.Time(d).AddDate(0, 0, -int(vv))), nil
 	}

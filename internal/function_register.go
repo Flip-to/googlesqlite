@@ -100,6 +100,15 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		// path rather than via predecessor name.
 		// Typed SUM / AVG / MIN / MAX for DOUBLE and NUMERIC arguments;
 		// see internal/functions/window/typed.go.
+		windowFuncMap["first_value_ignore_nulls"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_first_value_ignore_nulls", Func: window.NewFirstValueIgnoreNullsWindowNative()},
+		}
+		windowFuncMap["last_value_ignore_nulls"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_last_value_ignore_nulls", Func: window.NewLastValueIgnoreNullsWindowNative()},
+		}
+		windowFuncMap["nth_value_ignore_nulls"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_nth_value_ignore_nulls", Func: window.NewNthValueIgnoreNullsWindowNative()},
+		}
 		windowFuncMap["sum_typed"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_typed_sum", Func: window.NewSumWindowNative()},
 		}

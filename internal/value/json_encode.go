@@ -15,6 +15,15 @@ func EncodeJSON(v Value) (string, error) {
 	switch vv := v.(type) {
 	case nil:
 		return "null", nil
+	case IntValue:
+		// INT64 values outside [-2^53, 2^53] are quoted so JSON readers
+		// that use doubles do not lose precision (json_functions.md
+		// TO_JSON_STRING).
+		const maxExact = 1 << 53
+		if vv > maxExact || vv < -maxExact {
+			return strconv.Quote(strconv.FormatInt(int64(vv), 10)), nil
+		}
+		return strconv.FormatInt(int64(vv), 10), nil
 	case DateValue, DatetimeValue, TimeValue, TimestampValue:
 		s, err := vv.ToString()
 		if err != nil {

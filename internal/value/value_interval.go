@@ -285,3 +285,26 @@ func SQLEquals(a, b Value) (*bool, error) {
 	t := true
 	return &t, nil
 }
+
+// addInterval adds sign*iv to t the way GoogleSQL does: months first,
+// clamping the day to the end of the resulting month (DATE '2024-01-31'
+// + INTERVAL 1 MONTH is 2024-02-29), then days, then the time part.
+// time.Date normalises day overflow into the next month instead.
+func addInterval(t time.Time, iv *IntervalValue, sign int) time.Time {
+	months, days, nanos := intervalParts(iv.IntervalValue)
+	t = addMonthsClamped(t, sign*int(months))
+	t = t.AddDate(0, 0, sign*int(days))
+	return t.Add(time.Duration(int64(sign) * nanos))
+}
+
+// addMonthsClamped adds m months and clamps the day to the last day of
+// the target month.
+func addMonthsClamped(t time.Time, m int) time.Time {
+	y, mo, d := t.Date()
+	first := time.Date(y, mo, 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location()).AddDate(0, m, 0)
+	last := first.AddDate(0, 1, -1).Day()
+	if d > last {
+		d = last
+	}
+	return time.Date(first.Year(), first.Month(), d, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+}

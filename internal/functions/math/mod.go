@@ -3,6 +3,7 @@ package math
 import (
 	"fmt"
 	"math"
+	"math/big"
 
 	"github.com/goccy/googlesqlite/internal/value"
 )
@@ -21,6 +22,23 @@ func MOD(x, y value.Value) (value.Value, error) {
 			}
 			return xi % yi, nil
 		}
+	}
+	// NUMERIC MOD is exact: x - y * TRUNC(x / y), with the sign of x.
+	if xn, ok := x.(*value.NumericValue); ok {
+		yr, err := y.ToRat()
+		if err != nil {
+			return nil, err
+		}
+		if yr.Sign() == 0 {
+			return nil, fmt.Errorf("MOD: zero divided")
+		}
+		q := new(big.Rat).Quo(xn.Rat, yr)
+		tq := new(big.Rat).SetInt(new(big.Int).Quo(q.Num(), q.Denom()))
+		isBig := xn.IsBigNumeric
+		if yn, ok := y.(*value.NumericValue); ok && yn.IsBigNumeric {
+			isBig = true
+		}
+		return numericResult(new(big.Rat).Sub(xn.Rat, new(big.Rat).Mul(yr, tq)), isBig), nil
 	}
 	xv, err := x.ToFloat64()
 	if err != nil {

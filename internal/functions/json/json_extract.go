@@ -41,5 +41,13 @@ var BindJsonExtract = helper.Scalar2(func(a, b value.Value) (value.Value, error)
 	if err != nil {
 		return nil, err
 	}
-	return JSON_EXTRACT(v, path)
+	ret, err := JSON_EXTRACT(v, path)
+	if ret == nil && err == nil {
+		// A JSON input keeps a matched null as JSON 'null'
+		// (json_functions.md JSON_EXTRACT); STRING input maps it to NULL.
+		if _, isJSON := a.(value.JsonValue); isJSON && jsonPathMatchesNull(v, path) {
+			return value.JsonValue("null"), nil
+		}
+	}
+	return ret, err
 })

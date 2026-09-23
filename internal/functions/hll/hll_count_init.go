@@ -16,6 +16,10 @@ type HLL_COUNT_INIT struct {
 }
 
 func (f *HLL_COUNT_INIT) Step(input value.Value, precision int64, opt *helper.Option) (e error) {
+	// NULL inputs are skipped; with no non-NULL input the sketch is NULL.
+	if input == nil {
+		return nil
+	}
 	f.once.Do(func() {
 		log2m, err := helper.SafeInt(precision)
 		if err != nil {

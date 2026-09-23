@@ -863,6 +863,14 @@ func (n *AnalyticFunctionCallNode) FormatSQL(ctx context.Context) (string, error
 			return n.formatNative(ctx, custom, orderColumns, true)
 		}
 	}
+	// SQLite's FIRST_VALUE / LAST_VALUE / NTH_VALUE have no IGNORE
+	// NULLS mode, so the modifier was silently dropped.
+	if m1(n.node.NullHandlingModifier()) == googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierIgnoreNulls {
+		switch rawName {
+		case "first_value", "last_value", "nth_value":
+			return n.formatNative(ctx, "googlesqlite_window_"+rawName+"_ignore_nulls", orderColumns, true)
+		}
+	}
 	// SQLite's SUM / AVG / MIN / MAX are only correct for INT64 and
 	// STRING arguments; see internal/functions/window/typed.go.
 	if typed, ok := typedWindowFuncs[rawName]; ok && !n.requiresPredecessorEmulation() && !n.nativeSafeArgument() {
@@ -1195,9 +1203,19 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		// AT TIME ZONE is passed as an optional sixth argument so the
+		// runtime can tell an absent zone from an explicit NULL one.
+		timeZoneSQL := ""
+		if tz, _ := n.node.TimeZone(); tz != nil {
+			tzSQL, err := newNode(tz).FormatSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			timeZoneSQL = ", " + tzSQL
+		}
 		return fmt.Sprintf(
-			"googlesqlite_cast_format(%s, %s, '%s', '%s', %t)",
-			expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
+			"googlesqlite_cast_format(%s, %s, '%s', '%s', %t%s)",
+			expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), timeZoneSQL,
 		), nil
 	}
 	return fmt.Sprintf(

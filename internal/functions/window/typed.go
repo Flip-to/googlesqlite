@@ -142,3 +142,72 @@ func (a *minMaxWindowNative) Done() (any, error) {
 	}
 	return value.EncodeValue(best)
 }
+
+// navIgnoreNullsWindow implements FIRST_VALUE / LAST_VALUE / NTH_VALUE
+// with IGNORE NULLS, which SQLite's built-ins do not support: the
+// result is the first, last or n-th non-NULL value in the frame.
+type navIgnoreNullsWindow struct {
+	frame frameValues
+	kind  string // "first", "last" or "nth"
+	n     int64
+}
+
+func NewFirstValueIgnoreNullsWindowNative() func() any {
+	return func() any { return &navIgnoreNullsWindow{kind: "first"} }
+}
+
+func NewLastValueIgnoreNullsWindowNative() func() any {
+	return func() any { return &navIgnoreNullsWindow{kind: "last"} }
+}
+
+func NewNthValueIgnoreNullsWindowNative() func() any {
+	return func() any { return &navIgnoreNullsWindow{kind: "nth"} }
+}
+
+func (a *navIgnoreNullsWindow) Step(args ...any) error {
+	values, err := value.ConvertArgs(args...)
+	if err != nil {
+		return err
+	}
+	values, _ = helper.ParseOptions(values...)
+	values, _ = parseWindowOptions(values...)
+	var v value.Value
+	if len(values) > 0 {
+		v = values[0]
+	}
+	if a.kind == "nth" && len(values) > 1 && values[1] != nil {
+		n, err := values[1].ToInt64()
+		if err != nil {
+			return err
+		}
+		a.n = n
+	}
+	a.frame.values = append(a.frame.values, v)
+	return nil
+}
+
+func (a *navIgnoreNullsWindow) Inverse(_ ...any) error { a.frame.popFront(); return nil }
+
+func (a *navIgnoreNullsWindow) Done() (any, error) {
+	var found value.Value
+	var seen int64
+	for _, v := range a.frame.values {
+		if v == nil {
+			continue
+		}
+		seen++
+		switch a.kind {
+		case "first":
+			return value.EncodeValue(v)
+		case "nth":
+			if seen == a.n {
+				return value.EncodeValue(v)
+			}
+		}
+		found = v
+	}
+	if a.kind == "last" && found != nil {
+		return value.EncodeValue(found)
+	}
+	return nil, nil
+}

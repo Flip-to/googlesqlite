@@ -9,9 +9,17 @@ import (
 func ARRAY_CONCAT(args ...value.Value) (value.Value, error) {
 	arr := &value.ArrayValue{}
 	for _, arg := range args {
+		// Any NULL array makes the result NULL (array_functions.md
+		// ARRAY_CONCAT); it used to dereference nil and panic.
+		if arg == nil {
+			return nil, nil
+		}
 		subarr, err := arg.ToArray()
 		if err != nil {
 			return nil, err
+		}
+		if subarr == nil {
+			return nil, nil
 		}
 		arr.Values = append(arr.Values, subarr.Values...)
 	}

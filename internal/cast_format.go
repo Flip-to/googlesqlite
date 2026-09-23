@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	googlesql "github.com/goccy/go-googlesql"
@@ -19,8 +20,8 @@ import (
 // string" / "Format string as bytes"). Other type pairs fall back to
 // the plain CAST.
 func bindCastFormat(args ...value.Value) (value.Value, error) {
-	if len(args) != 5 {
-		return nil, fmt.Errorf("CAST FORMAT: invalid number of arguments: got %d, want 5", len(args))
+	if len(args) != 5 && len(args) != 6 {
+		return nil, fmt.Errorf("CAST FORMAT: invalid number of arguments: got %d, want 5 or 6", len(args))
 	}
 	var fromType, toType Type
 	for i, dst := range []*Type{&fromType, &toType} {
@@ -36,7 +37,7 @@ func bindCastFormat(args ...value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	if args[0] == nil || args[1] == nil {
+	if args[0] == nil || args[1] == nil || (len(args) == 6 && args[5] == nil) {
 		return nil, nil
 	}
 	fail := func(err error) (value.Value, error) {
@@ -49,11 +50,39 @@ func bindCastFormat(args ...value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
+	rawFormat := format
 	format = strings.ToUpper(strings.TrimSpace(format))
 	switch v := args[0].(type) {
 	case value.BytesValue:
 		if toType.Kind == int(googlesql.TypeKindTypeString) {
 			s, err := formatBytesAsString([]byte(v), format)
+			if err != nil {
+				return fail(err)
+			}
+			return value.StringValue(s), nil
+		}
+	case value.DateValue, value.DatetimeValue, value.TimestampValue, value.TimeValue:
+		if toType.Kind == int(googlesql.TypeKindTypeString) {
+			t, err := v.ToTime()
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := v.(value.TimestampValue); ok {
+				// Timestamps render in the default time zone (UTC) unless
+				// AT TIME ZONE names another one.
+				loc := time.UTC
+				if len(args) == 6 {
+					name, err := args[5].ToString()
+					if err != nil {
+						return nil, err
+					}
+					if loc, err = zoneLocation(name); err != nil {
+						return fail(err)
+					}
+				}
+				t = t.In(loc)
+			}
+			s, err := formatDateTimeElements(t, rawFormat)
 			if err != nil {
 				return fail(err)
 			}

@@ -7,11 +7,17 @@ import (
 
 type MIN struct {
 	initialized bool
+	nan         value.Value
 	min         value.Value
 }
 
 func (f *MIN) Step(v value.Value, opt *helper.Option) error {
 	if v == nil {
+		return nil
+	}
+	// Any NaN input makes the result NaN (aggregate_functions.md).
+	if value.IsNaN(v) {
+		f.nan = v
 		return nil
 	}
 	if f.initialized {
@@ -30,5 +36,8 @@ func (f *MIN) Step(v value.Value, opt *helper.Option) error {
 }
 
 func (f *MIN) Done() (value.Value, error) {
+	if f.nan != nil {
+		return f.nan, nil
+	}
 	return f.min, nil
 }

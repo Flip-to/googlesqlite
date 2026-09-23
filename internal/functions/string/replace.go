@@ -23,6 +23,11 @@ func REPLACE(originalValue, fromValue, toValue value.Value) (value.Value, error)
 		if err != nil {
 			return nil, err
 		}
+		// An empty search value replaces nothing (string_functions.md
+		// REPLACE); strings.ReplaceAll would insert between every rune.
+		if from == "" {
+			return value.StringValue(v), nil
+		}
 		return value.StringValue(strings.ReplaceAll(v, from, to)), nil
 	case value.BytesValue:
 		v, err := originalValue.ToBytes()
@@ -36,6 +41,9 @@ func REPLACE(originalValue, fromValue, toValue value.Value) (value.Value, error)
 		to, err := toValue.ToBytes()
 		if err != nil {
 			return nil, err
+		}
+		if len(from) == 0 {
+			return value.BytesValue(v), nil
 		}
 		return value.BytesValue(bytes.ReplaceAll(v, from, to)), nil
 	}

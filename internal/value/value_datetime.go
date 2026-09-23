@@ -13,16 +13,7 @@ type DatetimeValue time.Time
 func (d DatetimeValue) Add(v Value) (Value, error) {
 	src := time.Time(d)
 	if vv, ok := v.(*IntervalValue); ok {
-		return DatetimeValue(time.Date(
-			src.Year()+int(vv.Years),
-			time.Month(int(src.Month())+int(vv.Months)),
-			src.Day()+int(vv.Days),
-			src.Hour()+int(vv.Hours),
-			src.Minute()+int(vv.Minutes),
-			src.Second()+int(vv.Seconds),
-			src.Nanosecond()+int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return DatetimeValue(addInterval(src, vv, 1)), nil
 	}
 	return nil, fmt.Errorf("failed to use add operator for datetime and %T type", v)
 }
@@ -30,16 +21,7 @@ func (d DatetimeValue) Add(v Value) (Value, error) {
 func (d DatetimeValue) Sub(v Value) (Value, error) {
 	src := time.Time(d)
 	if vv, ok := v.(*IntervalValue); ok {
-		return DatetimeValue(time.Date(
-			src.Year()-int(vv.Years),
-			time.Month(int(src.Month())-int(vv.Months)),
-			src.Day()-int(vv.Days),
-			src.Hour()-int(vv.Hours),
-			src.Minute()-int(vv.Minutes),
-			src.Second()-int(vv.Seconds),
-			src.Nanosecond()-int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return DatetimeValue(addInterval(src, vv, -1)), nil
 	}
 	dst, err := v.ToTime()
 	if err != nil {
