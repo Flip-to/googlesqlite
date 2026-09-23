@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"runtime"
 	"sync"
 	"time"
 
@@ -58,6 +59,9 @@ const (
 type Catalog struct {
 	db           *sql.DB
 	lastSyncedAt time.Time
+	// retiredCatalogs counts SimpleCatalogs replaced by resetCatalog
+	// since the last forced GC (see releaseRetiredCatalogs).
+	retiredCatalogs int
 	mu           sync.Mutex
 	tables       []*TableSpec
 	functions    []*FunctionSpec
@@ -2084,6 +2088,7 @@ func (c *Catalog) deleteTVFSpecByName(name string) error {
 }
 
 func (c *Catalog) resetCatalog(tables []*TableSpec, functions []*FunctionSpec, tvfs []*TVFSpec) error {
+	c.releaseRetiredCatalogs()
 	c.catalog = newSimpleCatalog(catalogName)
 	if c.catalog == nil {
 		return fmt.Errorf("failed to create catalog")
@@ -2151,6 +2156,40 @@ func (c *Catalog) resetCatalog(tables []*TableSpec, functions []*FunctionSpec, t
 		}
 	}
 	return nil
+}
+
+// retiredCatalogGCInterval is how many SimpleCatalogs resetCatalog may
+// retire before it forces a garbage collection to reclaim them.
+const retiredCatalogGCInterval = 8
+
+// releaseRetiredCatalogs bounds the wasm heap under sustained DROP /
+// temp-object cleanup traffic.
+//
+// go-googlesql exposes no way to remove a table or function from a
+// SimpleCatalog, so resetCatalog rebuilds the whole catalog (including
+// every builtin function, roughly 1.5 MB of wasm memory) and drops the
+// old one. The old catalog's wasm memory is released only by its Go
+// finalizer, i.e. after a GC cycle. The Go side of a catalog is a tiny
+// handle, so retiring catalogs creates almost no Go allocation pressure
+// and GC can go hundreds of resets without running. Meanwhile every
+// rebuild needs fresh wasm memory, the wasm linear memory (a Go-heap
+// byte slice that never shrinks) keeps growing, and the heap climbs to
+// gigabytes over a long session, until GC thrashing and paging make
+// every query, even SELECT 1, orders of magnitude slower.
+//
+// Forcing a collection every few resets lets the finalizers free the
+// retired catalogs before the next rebuild, so their memory is reused
+// instead of growing the linear memory.
+func (c *Catalog) releaseRetiredCatalogs() {
+	if c.catalog == nil {
+		return
+	}
+	c.retiredCatalogs++
+	if c.retiredCatalogs < retiredCatalogGCInterval {
+		return
+	}
+	c.retiredCatalogs = 0
+	runtime.GC()
 }
 
 func (c *Catalog) saveTableSpec(ctx context.Context, conn *Conn, spec *TableSpec) error {
