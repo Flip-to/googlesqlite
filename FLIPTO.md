@@ -66,8 +66,6 @@ unzip -oq "$(go env GOROOT)/lib/time/zoneinfo.zip" -d /tmp/zoneinfo
 the driver, offline. It filters out cases that need features BigQuery
 does not have, and it ranks failures by how likely they are to be
 silent wrong answers. See `docs/compliance_run_results.md` for the
-latest report and the exact command. (The runner and report arrive with
-Flip-to PR #3.)
 
 Every fix PR should re-run the suite, check that no previously passing
 case now fails, and record the before and after pass counts in its
@@ -84,7 +82,7 @@ or says "none" if there isn't one.
 | change | Flip-to PR | upstream | compliance passed |
 |---|---|---|---|
 | Build DATE values in UTC and decode TIMESTAMP values in UTC. Before this, DATE results shifted by one day on hosts west of UTC. Also avoid `time.Duration` overflow in `DATE_FROM_UNIX_DATE` outside 1677..2262. | #5 | none | 2757 to 2876 |
-| Add the `specctl run-compliance` runner and the first compliance report. | #3 (open) | none | baseline 2757 |
+| Add the `specctl run-compliance` runner and the first compliance report. | #3 | none | baseline 2757 |
 
 ### Fixes carried before the compliance run
 
