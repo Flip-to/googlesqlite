@@ -568,6 +568,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "safe_divide", BindFunc: helper.Scalar2(mathfn.SAFE_DIVIDE)},
 	{Name: "safe_multiply", BindFunc: helper.Scalar2(mathfn.SAFE_MULTIPLY)},
 	{Name: "safe_negate", BindFunc: helper.Scalar1(mathfn.SAFE_NEGATE)},
+	{Name: "unary_minus", BindFunc: helper.Scalar1(mathfn.UNARY_MINUS)},
 	{Name: "safe_add", BindFunc: helper.Scalar2(mathfn.SAFE_ADD)},
 	{Name: "safe_subtract", BindFunc: helper.Scalar2(mathfn.SAFE_SUBTRACT)},
 	{Name: "mod", BindFunc: helper.Scalar2(mathfn.MOD)},

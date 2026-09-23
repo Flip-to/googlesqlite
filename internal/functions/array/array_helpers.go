@@ -1,6 +1,8 @@
 package array
 
 import (
+	"fmt"
+
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
@@ -13,6 +15,12 @@ func generateArray(start, end, step value.Value) (value.Value, error) {
 		return nil, err
 	}
 	arr := &value.ArrayValue{}
+	// A zero step never reaches end; without this check the loop below
+	// appends forever and exhausts memory (compliance
+	// array_functions.test: "Sequence step cannot be 0.").
+	if isZero, err := step.EQ(value.IntValue(0)); err == nil && isZero {
+		return nil, fmt.Errorf("sequence step cannot be 0")
+	}
 	isPositiveStepValue, err := step.GT(value.IntValue(0))
 	if err != nil {
 		return nil, err
@@ -26,6 +34,9 @@ func generateArray(start, end, step value.Value) (value.Value, error) {
 	}
 	cur := start
 	for {
+		if len(arr.Values) >= maxGeneratedArrayLen {
+			return nil, fmt.Errorf("GENERATE_ARRAY: result exceeds %d elements", maxGeneratedArrayLen)
+		}
 		arr.Values = append(arr.Values, cur)
 		after, err := cur.Add(step)
 		if err != nil {
@@ -52,3 +63,7 @@ func generateArray(start, end, step value.Value) (value.Value, error) {
 	}
 	return arr, nil
 }
+
+// maxGeneratedArrayLen bounds GENERATE_ARRAY and friends so a bad range
+// fails with an error instead of consuming all memory.
+const maxGeneratedArrayLen = 10_000_000

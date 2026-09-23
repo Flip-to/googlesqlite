@@ -472,6 +472,9 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
 	if t == nil {
 		return v, nil
 	}
+	if out, handled, err := castScalarStrict(m1(t.Kind()), v); handled {
+		return out, err
+	}
 	// Googlesql_TypeNode carries Kind directly, no upcast needed.
 	switch m1(t.Kind()) {
 	case googlesql.TypeKindTypeInt32, googlesql.TypeKindTypeInt64, googlesql.TypeKindTypeUint32, googlesql.TypeKindTypeUint64:
@@ -493,6 +496,12 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
 		}
 		return value.FloatValue(f64), nil
 	case googlesql.TypeKindTypeString, googlesql.TypeKindTypeEnum:
+		switch tv := v.(type) {
+		case value.TimestampValue:
+			return value.StringValue(tv.SQLString()), nil
+		case value.DatetimeValue:
+			return value.StringValue(tv.SQLString()), nil
+		}
 		if b, ok := v.(value.BytesValue); ok {
 			// BYTES to STRING reinterprets the bytes as UTF-8; ToString
 			// would return the base64 storage encoding instead.

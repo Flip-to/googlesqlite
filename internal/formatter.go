@@ -2009,6 +2009,7 @@ func (n *AnonymizedAggregateScanNode) FormatSQL(ctx context.Context) (string, er
 	for _, opt := range m1(n.node.AnonymizationOptionList()) {
 		name, _ := opt.Name()
 		valExpr, _ := opt.Value()
+		valExpr = unwrapCast(valExpr)
 		valSQL, err := newNode(valExpr).FormatSQL(ctx)
 		if err != nil {
 			continue
@@ -2104,6 +2105,7 @@ func (n *DifferentialPrivacyAggregateScanNode) FormatSQL(ctx context.Context) (s
 	for _, opt := range m1(n.node.OptionList()) {
 		name, _ := opt.Name()
 		valExpr, _ := opt.Value()
+		valExpr = unwrapCast(valExpr)
 		valSQL, err := newNode(valExpr).FormatSQL(ctx)
 		if err != nil {
 			continue
@@ -3283,4 +3285,21 @@ func (n *AnalyticFunctionCallNode) hasRangeFrame() bool {
 		return false
 	}
 	return m1(frame.FrameUnit()) == googlesql.ResolvedWindowFrameEnums_FrameUnitRange
+}
+
+// unwrapCast returns the operand of a ResolvedCast. Literal casts are
+// not folded by the analyzer (see newAnalyzerOptions), so an option
+// such as epsilon=1000 arrives as CAST(1000 AS DOUBLE).
+func unwrapCast(expr googlesql.ResolvedExprNode) googlesql.ResolvedExprNode {
+	for {
+		c, ok := expr.(*googlesql.ResolvedCast)
+		if !ok {
+			return expr
+		}
+		inner, err := c.Expr()
+		if err != nil || inner == nil {
+			return expr
+		}
+		expr = inner
+	}
 }

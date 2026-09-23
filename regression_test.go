@@ -2140,10 +2140,11 @@ ORDER BY 3
 		got = append(got, v)
 	}
 	// After ORDER BY 3 (string ascending): the dates come first, then
-	// the literal 'null' string.
+	// the literal 'null' string. CAST(DATETIME AS STRING) separates date
+	// and time with a space (compliance/testdata/cast_function.test).
 	want := []triple{
-		{rn1: 3, rn2: 2, v: "2024-01-01T00:00:00"},
-		{rn1: 2, rn2: 1, v: "2024-01-07T00:00:00"},
+		{rn1: 3, rn2: 2, v: "2024-01-01 00:00:00"},
+		{rn1: 2, rn2: 1, v: "2024-01-07 00:00:00"},
 		{rn1: 1, rn2: 3, v: "null"},
 	}
 	if len(got) != len(want) {

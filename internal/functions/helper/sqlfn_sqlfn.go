@@ -134,3 +134,14 @@ func scalarArity(args []value.Value, want int) error {
 	}
 	return nil
 }
+
+// Scalar3KeepNull wraps a 3-arg function that handles NULL arguments
+// itself.
+func Scalar3KeepNull(fn func(a, b, c value.Value) (value.Value, error)) BindFunction {
+	return func(args ...value.Value) (value.Value, error) {
+		if err := scalarArity(args, 3); err != nil {
+			return nil, err
+		}
+		return fn(args[0], args[1], args[2])
+	}
+}

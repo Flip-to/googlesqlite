@@ -2,6 +2,7 @@ package approx_aggregate
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -20,6 +21,17 @@ func (f *APPROX_TOP_SUM) Step(v, weight value.Value, num int64, opt *helper.Opti
 		f.valueMap = map[value.Value]*value.StructValue{}
 		f.num = num
 	})
+	// approximate_aggregate_functions.md APPROX_TOP_SUM: negative and
+	// NaN weights are an error.
+	if weight != nil {
+		w, err := weight.ToFloat64()
+		if err != nil {
+			return err
+		}
+		if w < 0 || math.IsNaN(w) {
+			return fmt.Errorf("APPROX_TOP_SUM does not support negative or NaN weights in the second argument; got %v", weight)
+		}
+	}
 	val, exists := f.valueMap[v]
 	if exists {
 		if weight != nil {

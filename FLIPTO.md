@@ -86,8 +86,9 @@ next PR replaces that with the merge commit.
 
 | change | landed in | Flip-to PR | upstream | compliance passed |
 |---|---|---|---|---|
-| NULL and NaN comparison semantics. `x IN (..., NULL)`, `NOT IN` and `IN UNNEST` are three-valued (`3 NOT IN (1, 2, NULL)` was true), and `IN UNNEST` no longer panics on NULL elements. STRUCT `=` / `!=` return NULL when a field comparison is NULL. IS [NOT] DISTINCT FROM treats NaN as equal to NaN, also inside STRUCT and ARRAY. ORDER BY and window ORDER BY on DOUBLE put NaN right after NULL (it sorted last). Windowed VAR/STDDEV/COVAR/CORR share the plain aggregates' moments code (NULL for too few rows, NaN propagation). | this PR | this PR | none | 3177 to 3229 |
-| Numeric aggregates and windows follow GoogleSQL rules. SUM/AVG are exact and report `int64` / `numeric` / `double` overflow; NaN and infinities propagate; window SUM/AVG/MIN/MAX over DOUBLE, NUMERIC and BIGNUMERIC no longer use SQLite built-ins, which sum NaN as 0, slide inf-inf to NULL and order NUMERIC as text; SUM(DISTINCT) keeps DOUBLE. Statistical aggregates (VAR/STDDEV/COVAR/CORR) return NULL for too few rows, use exact NUMERIC arithmetic and do not overflow on extreme DOUBLEs. HAVING MAX/MIN works on every aggregate. QUALIFY filters after window functions (it filtered before them). INTERVAL: comparison, + and -, DISTINCT and GROUP BY by value, negative parts keep their sign, fractional seconds parsed exactly. RANGE ordering. The bench harness reads CRLF corpus files. | this PR | this PR | none | 2944 to 3176 |
+| Divergences measured on real BigQuery by the flipto-dbt differential probes (flipto-dbt PR 365). S1: casts involving TIMESTAMP run in UTC (the analyzer folded them in America/Los_Angeles; literal-cast folding is now off for statements that mention TIMESTAMP). TIMESTAMP / DATETIME cast to STRING in BigQuery's text form. TIMESTAMP_DIFF DAY counts 24-hour units; EXTRACT(WEEK) is Sunday-based and WEEK(<weekday>) works. SUBSTR counts characters (S26). BETWEEN with a NULL bound (S5). NULLIF with a NULL argument no longer panics (L2). Unary minus on a column works (L1). String casts trim whitespace and follow BigQuery's literal rules; FLOAT64 to INT64 rounds half away from zero (S14, S15). ABS keeps INT64 (S17). A zero step in GENERATE_ARRAY / GENERATE_DATE_ARRAY / GENERATE_TIMESTAMP_ARRAY is an error, not an endless loop (L11) or NULL; generated arrays are capped at 10,000,000 elements. APPROX_TOP_SUM rejects negative weights. | this PR | this PR | none | 3229 to 3254 |
+| NULL and NaN comparison semantics. `x IN (..., NULL)`, `NOT IN` and `IN UNNEST` are three-valued (`3 NOT IN (1, 2, NULL)` was true), and `IN UNNEST` no longer panics on NULL elements. STRUCT `=` / `!=` return NULL when a field comparison is NULL. IS [NOT] DISTINCT FROM treats NaN as equal to NaN, also inside STRUCT and ARRAY. ORDER BY and window ORDER BY on DOUBLE put NaN right after NULL (it sorted last). Windowed VAR/STDDEV/COVAR/CORR share the plain aggregates' moments code (NULL for too few rows, NaN propagation). | [`78d7888`](https://github.com/Flip-to/googlesqlite/commit/78d7888) | [#9](https://github.com/Flip-to/googlesqlite/pull/9) | none | 3177 to 3229 |
+| Numeric aggregates and windows follow GoogleSQL rules. SUM/AVG are exact and report `int64` / `numeric` / `double` overflow; NaN and infinities propagate; window SUM/AVG/MIN/MAX over DOUBLE, NUMERIC and BIGNUMERIC no longer use SQLite built-ins, which sum NaN as 0, slide inf-inf to NULL and order NUMERIC as text; SUM(DISTINCT) keeps DOUBLE. Statistical aggregates (VAR/STDDEV/COVAR/CORR) return NULL for too few rows, use exact NUMERIC arithmetic and do not overflow on extreme DOUBLEs. HAVING MAX/MIN works on every aggregate. QUALIFY filters after window functions (it filtered before them). INTERVAL: comparison, + and -, DISTINCT and GROUP BY by value, negative parts keep their sign, fractional seconds parsed exactly. RANGE ordering. The bench harness reads CRLF corpus files. | [`9b76c96`](https://github.com/Flip-to/googlesqlite/commit/9b76c96) | [#8](https://github.com/Flip-to/googlesqlite/pull/8) | none | 2944 to 3177 |
 | BYTES functions use the bytes rather than their base64 storage text: CAST(BYTES AS STRING), ASCII, LIKE, TRIM/LTRIM/RTRIM, INSTR, SPLIT, REGEXP_* (matched byte by byte), STRING_AGG and ARRAY_TO_STRING over BYTES (which return BYTES). Also: CAST ... FORMAT for BYTES and STRING (HEX, BASE2/8/16/32/64, BASE64M, ASCII, UTF-8); an explicit empty STRING_AGG delimiter is kept; windowed STRING_AGG skips NULLs; INSTR returns 0 past the end and counts characters; REGEXP_INSTR reports the capture group and rejects more than one. | [`86e88fc`](https://github.com/Flip-to/googlesqlite/commit/86e88fc) | [#7](https://github.com/Flip-to/googlesqlite/pull/7) | none | 2876 to 2944 |
 | Add FLIPTO.md with the fork changelog. | [`4c8c12f`](https://github.com/Flip-to/googlesqlite/commit/4c8c12f) | [#6](https://github.com/Flip-to/googlesqlite/pull/6) | none | unchanged |
 | Add the `specctl run-compliance` runner and the first compliance report. | [`a761def`](https://github.com/Flip-to/googlesqlite/commit/a761def) | [#3](https://github.com/Flip-to/googlesqlite/pull/3) | none | baseline 2757 |
@@ -130,16 +131,19 @@ These were merged into the fork's integration branch before
 
 ### Known open divergences
 
-Tracked in `docs/compliance_run_results.md`. Not yet fixed:
+Tracked in `docs/compliance_run_results.md` and in flipto-dbt
+`analyses/emulator_differential_results.md`. Not yet fixed:
+
+- A statement that contains both TIMESTAMP and a NUMERIC literal cast
+  analyzes with literal-cast folding off, so the NUMERIC literal can
+  lose precision through DOUBLE. A full fix needs go-googlesql to
+  expose a UTC TimeZone for AnalyzerOptions.SetDefaultTimeZone.
+- The GoogleSQL compliance suite assumes an America/Los_Angeles default
+  time zone; its TIMESTAMP-to-string and naive-TIMESTAMP cases disagree
+  with BigQuery (UTC) and are expected to fail here.
 
 - RANGE window frames ordered by a DOUBLE key that contains NaN or
   infinities: SQLite drops rows or builds wrong frames, and the
   driver's emulation fallback calls unregistered functions. Needs a Go
   frame implementation.
 
-- The GoogleSQL analyzer folds constant expressions in
-  America/Los_Angeles. On every host,
-  `CAST(TIMESTAMP '1970-01-01 00:00:01+00' AS DATE)` returns
-  `1969-12-31`. go-googlesql v0.4.0 has no public way to build the
-  `TimeZone` that `AnalyzerOptions.SetDefaultTimeZone` takes, so this
-  needs a go-googlesql change.
