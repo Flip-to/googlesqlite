@@ -185,6 +185,7 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureSqlGraphReturnExtensions,
 	googlesql.LanguageFeatureFeatureGroupByGraphPath,
 	googlesql.LanguageFeatureFeatureGroupByStruct,
+	googlesql.LanguageFeatureFeatureGroupByArray,
 	// Features that the rewriters above transform into ordinary
 	// expressions. Each is gated upstream so enabling them is
 	// safe — they only fire when the corresponding construct
