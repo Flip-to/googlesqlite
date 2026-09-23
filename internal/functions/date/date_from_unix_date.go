@@ -8,7 +8,9 @@ import (
 )
 
 func DATE_FROM_UNIX_DATE(unixdate int64) (value.Value, error) {
-	t := time.Unix(int64(time.Duration(unixdate)*24*time.Hour/time.Second), 0)
+	// Seconds, not time.Duration (which overflows past about 292 years),
+	// and UTC so the host time zone cannot shift the civil date.
+	t := time.Unix(unixdate*86400, 0).UTC()
 	return value.DateValue(t), nil
 }
 
