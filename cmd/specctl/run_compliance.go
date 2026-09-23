@@ -247,16 +247,6 @@ func (fr *fileRunner) open(ctx context.Context) error {
 	return nil
 }
 
-func (fr *fileRunner) close() {
-	if fr.conn != nil {
-		fr.conn.Close()
-	}
-	if fr.db != nil {
-		fr.db.Close()
-	}
-	fr.conn, fr.db = nil, nil
-}
-
 // exec runs one statement and returns its rows. timedOut is true when
 // the statement exceeded the timeout; the connection is then unusable.
 func (fr *fileRunner) exec(ctx context.Context, q string) (rows [][]any, timedOut bool, err error) {

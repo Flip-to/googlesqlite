@@ -37,7 +37,8 @@ func runWorker(ctx context.Context, path string, start int, timeout time.Duratio
 	if err := fr.open(ctx); err != nil {
 		return fmt.Errorf("open: %w", err)
 	}
-	defer fr.close()
+	// No close on exit: closing waits for any statement abandoned after
+	// a timeout, and the process is about to exit anyway.
 	for _, c := range cases {
 		if c.Index < start {
 			if c.Prepare {
