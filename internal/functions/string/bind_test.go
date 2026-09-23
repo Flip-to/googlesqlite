@@ -1066,9 +1066,12 @@ func TestInstrBytesAndNegativePos(t *testing.T) {
 	if got == nil {
 		t.Errorf("INSTR neg pos returned nil")
 	}
-	// position past length -> error.
-	if _, err := strfn.BindInstr(value.StringValue("ab"), value.StringValue("a"), value.IntValue(100)); err == nil {
-		t.Errorf("INSTR pos too large should fail")
+	// position past length -> 0 (string_functions.md INSTR: "Returns 0
+	// if position is greater than the length of value").
+	if got, err := strfn.BindInstr(value.StringValue("ab"), value.StringValue("a"), value.IntValue(100)); err != nil {
+		t.Errorf("INSTR pos too large: %v", err)
+	} else if i, _ := got.ToInt64(); i != 0 {
+		t.Errorf("INSTR pos too large: got %d, want 0", i)
 	}
 	// Different source / search types -> error.
 	if _, err := strfn.BindInstr(value.StringValue("ab"), value.BytesValue("a")); err == nil {

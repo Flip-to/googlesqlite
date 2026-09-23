@@ -11,8 +11,10 @@ import (
 type STRING_AGG struct {
 	values []*helper.OrderedValue
 	delim  string
-	opt    *helper.Option
-	once   sync.Once
+	// isBytes is set when aggregating BYTES; the result is then BYTES.
+	isBytes bool
+	opt     *helper.Option
+	once    sync.Once
 }
 
 func (f *STRING_AGG) Step(v value.Value, delim string, opt *helper.Option) error {
@@ -20,12 +22,14 @@ func (f *STRING_AGG) Step(v value.Value, delim string, opt *helper.Option) error
 		return nil
 	}
 	f.once.Do(func() {
-		if delim == "" {
-			delim = ","
-		}
+		// The binder supplies "," when the delimiter is omitted; an
+		// explicit empty delimiter is kept.
 		f.delim = delim
 		f.opt = opt
 	})
+	if _, ok := v.(value.BytesValue); ok {
+		f.isBytes = true
+	}
 	f.values = append(f.values, &helper.OrderedValue{
 		OrderBy: opt.OrderBy,
 		Value:   v,
@@ -44,7 +48,7 @@ func (f *STRING_AGG) Done() (value.Value, error) {
 
 	foundNotNilValue := false
 	for _, v := range f.values {
-		text, err := v.Value.ToString()
+		text, err := value.RawText(v.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -53,6 +57,9 @@ func (f *STRING_AGG) Done() (value.Value, error) {
 	}
 	if !foundNotNilValue {
 		return nil, nil
+	}
+	if f.isBytes {
+		return value.BytesValue(strings.Join(values, f.delim)), nil
 	}
 	return value.StringValue(strings.Join(values, f.delim)), nil
 }

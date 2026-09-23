@@ -66,6 +66,7 @@ unzip -oq "$(go env GOROOT)/lib/time/zoneinfo.zip" -d /tmp/zoneinfo
 the driver, offline. It filters out cases that need features BigQuery
 does not have, and it ranks failures by how likely they are to be
 silent wrong answers. See `docs/compliance_run_results.md` for the
+latest report and the exact command.
 
 Every fix PR should re-run the suite, check that no previously passing
 case now fails, and record the before and after pass counts in its
@@ -73,50 +74,57 @@ changelog entry below.
 
 ## Changelog
 
-Newest first. Pass counts are for the compliance suite with the host
-on UTC-3. "Upstream" names the matching PR on `goccy/googlesqlite`,
-or says "none" if there isn't one.
+Newest first. "Landed in" links the commit on `flipto/main` that
+brought the change in; for a PR it is the merge commit. Pass counts are
+for the compliance suite with the host on UTC-3. "Upstream" names the
+matching PR on `goccy/googlesqlite`, or says "none" if there isn't one.
+
+A new PR adds its row with "this PR" in the "Landed in" column. The
+next PR replaces that with the merge commit.
 
 ### Fixes from compliance-suite divergences
 
-| change | Flip-to PR | upstream | compliance passed |
-|---|---|---|---|
-| Build DATE values in UTC and decode TIMESTAMP values in UTC. Before this, DATE results shifted by one day on hosts west of UTC. Also avoid `time.Duration` overflow in `DATE_FROM_UNIX_DATE` outside 1677..2262. | #5 | none | 2757 to 2876 |
-| Add the `specctl run-compliance` runner and the first compliance report. | #3 | none | baseline 2757 |
+| change | landed in | Flip-to PR | upstream | compliance passed |
+|---|---|---|---|---|
+| BYTES functions use the bytes rather than their base64 storage text: CAST(BYTES AS STRING), ASCII, LIKE, TRIM/LTRIM/RTRIM, INSTR, SPLIT, REGEXP_* (matched byte by byte), STRING_AGG and ARRAY_TO_STRING over BYTES (which return BYTES). Also: CAST ... FORMAT for BYTES and STRING (HEX, BASE2/8/16/32/64, BASE64M, ASCII, UTF-8); an explicit empty STRING_AGG delimiter is kept; windowed STRING_AGG skips NULLs; INSTR returns 0 past the end and counts characters; REGEXP_INSTR reports the capture group and rejects more than one. | this PR | this PR | none | 2876 to 2944 |
+| Add FLIPTO.md with the fork changelog. | [`4c8c12f`](https://github.com/Flip-to/googlesqlite/commit/4c8c12f) | [#6](https://github.com/Flip-to/googlesqlite/pull/6) | none | unchanged |
+| Add the `specctl run-compliance` runner and the first compliance report. | [`a761def`](https://github.com/Flip-to/googlesqlite/commit/a761def) | [#3](https://github.com/Flip-to/googlesqlite/pull/3) | none | baseline 2757 |
+| Build DATE values in UTC and decode TIMESTAMP values in UTC. Before this, DATE results shifted by one day on hosts west of UTC. Also avoid `time.Duration` overflow in `DATE_FROM_UNIX_DATE` outside 1677..2262. | [`c8a1097`](https://github.com/Flip-to/googlesqlite/commit/c8a1097) | [#5](https://github.com/Flip-to/googlesqlite/pull/5) | none | 2757 to 2876 |
 
 ### Fixes carried before the compliance run
 
 These were merged into the fork's integration branch before
 `flipto/main` existed. Each one has a test in the repository.
 
-| change | upstream |
-|---|---|
-| udf: format a SQL function body with column ids (UDF parameter used in a subquery) | goccy/googlesqlite#102 |
-| tvf: format a templated TVF body with its own column state (aggregate in a subquery) | goccy/googlesqlite#101 |
-| analyzer: allow ARRAY grouping keys and group composites by encoding | goccy/googlesqlite#100 |
-| value: give `%T` its literal form for NUMERIC, BIGNUMERIC, JSON, INTERVAL | goccy/googlesqlite#99 |
-| value: round NUMERIC and BIGNUMERIC products to the type's scale | goccy/googlesqlite#98 |
-| approx_aggregate: sort APPROX_QUANTILES input and ignore NULLs by default | goccy/googlesqlite#97 |
-| driver: clean up temp objects when QueryContext fails mid-script | goccy/googlesqlite#96 |
-| value: round NUMERIC and BIGNUMERIC quotients to the type's scale | goccy/googlesqlite#95 |
-| catalog: resolve a quoted dotted prefix in scalar UDF paths | goccy/googlesqlite#94 |
-| json: encode DATE, DATETIME, TIME and TIMESTAMP as JSON strings in TO_JSON_STRING | goccy/googlesqlite#93 |
-| catalog: skip cleanup of a temp table the script already dropped | goccy/googlesqlite#92 |
-| script: evaluate ASSERT instead of treating it as a no-op | goccy/googlesqlite#91 |
-| ddl: support DROP TABLE FUNCTION | goccy/googlesqlite#90 |
-| catalog: resolve a quoted dotted prefix in table and TVF paths | goccy/googlesqlite#89 |
-| tvf: support ANY TABLE and TABLE<...> parameters | goccy/googlesqlite#88 |
-| catalog: keep TVF handles alive while the catalog references them | goccy/googlesqlite#87 |
-| string: return a NULL array from SPLIT when an argument is NULL | goccy/googlesqlite#86 |
-| formatter: keep the outer row in a correlated LEFT JOIN UNNEST | goccy/googlesqlite#85 |
-| value: render FLOAT64 as text the way BigQuery does (CAST, CONCAT, FORMAT, TO_JSON_STRING) | goccy/googlesqlite#58 (third-party) |
-| operator: IS [NOT] TRUE / FALSE never return NULL | goccy/googlesqlite#71 (third-party) |
-| catalog: do not register builtins in sub-catalogs (memory growth on DROP TABLE); LIKE `_` and escapes | none found |
-| array: return NULL from ARRAY_TO_STRING when an argument is NULL; script splitting respects comments | none found |
-| FLOAT64 arithmetic on values nested in STRUCT and ARRAY | none found |
-| GROUP BY ALL, including composite grouping keys | none found |
-| math: return INT64 from MOD of two INT64 arguments | none found |
-| deps: bump grpc to 1.83.2 and otel/sdk to 1.45.0 (security fixes) | none |
+| change | landed in | upstream |
+|---|---|---|
+| value: render FLOAT64 as text the way BigQuery does (CAST, CONCAT, FORMAT, TO_JSON_STRING) | [`274b9b1`](https://github.com/Flip-to/googlesqlite/commit/274b9b1) | [goccy/googlesqlite#58](https://github.com/goccy/googlesqlite/pull/58) (third-party) |
+| operator: IS [NOT] TRUE / FALSE never return NULL | [`59ef8e7`](https://github.com/Flip-to/googlesqlite/commit/59ef8e7) | [goccy/googlesqlite#71](https://github.com/goccy/googlesqlite/pull/71) (third-party) |
+| udf: format a SQL function body with column ids (UDF parameter used in a subquery) | [`2a652e6`](https://github.com/Flip-to/googlesqlite/commit/2a652e6) | [goccy/googlesqlite#102](https://github.com/goccy/googlesqlite/pull/102) |
+| tvf: format a templated TVF body with its own column state (aggregate in a subquery) | [`25424da`](https://github.com/Flip-to/googlesqlite/commit/25424da) | [goccy/googlesqlite#101](https://github.com/goccy/googlesqlite/pull/101) |
+| analyzer: allow ARRAY grouping keys and group composites by encoding | [`a549f13`](https://github.com/Flip-to/googlesqlite/commit/a549f13) | [goccy/googlesqlite#100](https://github.com/goccy/googlesqlite/pull/100) |
+| value: give `%T` its literal form for NUMERIC, BIGNUMERIC, JSON, INTERVAL | [`4f69e91`](https://github.com/Flip-to/googlesqlite/commit/4f69e91) | [goccy/googlesqlite#99](https://github.com/goccy/googlesqlite/pull/99) |
+| approx_aggregate: sort APPROX_QUANTILES input and ignore NULLs by default | [`e0f0399`](https://github.com/Flip-to/googlesqlite/commit/e0f0399) | [goccy/googlesqlite#97](https://github.com/goccy/googlesqlite/pull/97) |
+| value: round NUMERIC and BIGNUMERIC products to the type's scale | [`3194b19`](https://github.com/Flip-to/googlesqlite/commit/3194b19) | [goccy/googlesqlite#98](https://github.com/goccy/googlesqlite/pull/98) |
+| value: round NUMERIC and BIGNUMERIC quotients to the type's scale | [`0823ac1`](https://github.com/Flip-to/googlesqlite/commit/0823ac1) | [goccy/googlesqlite#95](https://github.com/goccy/googlesqlite/pull/95) |
+| driver: clean up temp objects when QueryContext fails mid-script | [`bdcd061`](https://github.com/Flip-to/googlesqlite/commit/bdcd061) | [goccy/googlesqlite#96](https://github.com/goccy/googlesqlite/pull/96) |
+| catalog: resolve a quoted dotted prefix in scalar UDF paths | [`feed715`](https://github.com/Flip-to/googlesqlite/commit/feed715) | [goccy/googlesqlite#94](https://github.com/goccy/googlesqlite/pull/94) |
+| json: encode DATE, DATETIME, TIME and TIMESTAMP as JSON strings in TO_JSON_STRING | [`a613dfc`](https://github.com/Flip-to/googlesqlite/commit/a613dfc) | [goccy/googlesqlite#93](https://github.com/goccy/googlesqlite/pull/93) |
+| float64: arithmetic on values nested in STRUCT and ARRAY | [`55eb981`](https://github.com/Flip-to/googlesqlite/commit/55eb981) | none found |
+| script: evaluate ASSERT instead of treating it as a no-op | [`80e0cdf`](https://github.com/Flip-to/googlesqlite/commit/80e0cdf) | [goccy/googlesqlite#91](https://github.com/goccy/googlesqlite/pull/91) |
+| catalog: skip cleanup of a temp table the script already dropped | [`80e0cdf`](https://github.com/Flip-to/googlesqlite/commit/80e0cdf) | [goccy/googlesqlite#92](https://github.com/goccy/googlesqlite/pull/92) |
+| deps: bump grpc to 1.83.2 (xDS missing :authority DoS) | [`bb33cf3`](https://github.com/Flip-to/googlesqlite/commit/bb33cf3) | none |
+| deps: bump grpc to 1.83.1, otel/sdk to 1.45.0, and tools deps with security fixes | [`da30ae6`](https://github.com/Flip-to/googlesqlite/commit/da30ae6) | none |
+| catalog: do not register builtins in sub-catalogs (memory growth on DROP TABLE); LIKE `_` and escapes | [`2996694`](https://github.com/Flip-to/googlesqlite/commit/2996694) | none found |
+| array: return NULL from ARRAY_TO_STRING when an argument is NULL; script splitting respects comments | [`8935cec`](https://github.com/Flip-to/googlesqlite/commit/8935cec) | none found |
+| ddl: support DROP TABLE FUNCTION | [`2d1c5f4`](https://github.com/Flip-to/googlesqlite/commit/2d1c5f4) | [goccy/googlesqlite#90](https://github.com/goccy/googlesqlite/pull/90) |
+| catalog: resolve a quoted dotted prefix in table and TVF paths | [`46dad9a`](https://github.com/Flip-to/googlesqlite/commit/46dad9a) | [goccy/googlesqlite#89](https://github.com/goccy/googlesqlite/pull/89) |
+| tvf: support ANY TABLE and TABLE<...> parameters | [`87922d2`](https://github.com/Flip-to/googlesqlite/commit/87922d2) | [goccy/googlesqlite#88](https://github.com/goccy/googlesqlite/pull/88) |
+| catalog: keep TVF handles alive while the catalog references them | [`bada781`](https://github.com/Flip-to/googlesqlite/commit/bada781) | [goccy/googlesqlite#87](https://github.com/goccy/googlesqlite/pull/87) |
+| formatter: keep the outer row in a correlated LEFT JOIN UNNEST | [`f766d8c`](https://github.com/Flip-to/googlesqlite/commit/f766d8c) | [goccy/googlesqlite#85](https://github.com/goccy/googlesqlite/pull/85) |
+| GROUP BY ALL, including composite grouping keys | [`e980e02`](https://github.com/Flip-to/googlesqlite/commit/e980e02) | none found |
+| string: return a NULL array from SPLIT when an argument is NULL | [`078f675`](https://github.com/Flip-to/googlesqlite/commit/078f675) | [goccy/googlesqlite#86](https://github.com/goccy/googlesqlite/pull/86) |
+| math: return INT64 from MOD of two INT64 arguments | [`af134ab`](https://github.com/Flip-to/googlesqlite/commit/af134ab) | none found |
 
 ### Known open divergences
 

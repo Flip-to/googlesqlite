@@ -105,11 +105,14 @@ func (a *arrayAggWindowNative) Done() (any, error) {
 // delimiter is passed as the second positional arg (per the
 // predecessor's signature). Default is ",".
 type stringAggWindowNative struct {
-	values      []string
+	// values holds one entry per row in the frame; nil marks a NULL row,
+	// which STRING_AGG skips but Inverse must still remove.
+	values      []*string
 	delim       string
 	delimSet    bool
 	distinct    bool
 	ignoreNulls bool
+	isBytes     bool
 	once        sync.Once
 }
 
@@ -133,25 +136,25 @@ func (a *stringAggWindowNative) Step(stepArgs ...any) error {
 		return nil
 	}
 	if !a.delimSet && len(values) > 1 && values[1] != nil {
-		s, err := values[1].ToString()
-		if err == nil && s != "" {
+		s, err := value.RawText(values[1])
+		if err == nil {
 			a.delim = s
 		}
 		a.delimSet = true
 	}
 	v := values[0]
 	if v == nil {
-		if a.ignoreNulls {
-			return nil
-		}
-		a.values = append(a.values, "")
+		a.values = append(a.values, nil)
 		return nil
 	}
-	s, err := v.ToString()
+	if _, ok := v.(value.BytesValue); ok {
+		a.isBytes = true
+	}
+	s, err := value.RawText(v)
 	if err != nil {
 		return err
 	}
-	a.values = append(a.values, s)
+	a.values = append(a.values, &s)
 	return nil
 }
 
@@ -170,7 +173,11 @@ func (a *stringAggWindowNative) Done() (any, error) {
 		out  []string
 		seen = map[string]struct{}{}
 	)
-	for _, s := range a.values {
+	for _, sp := range a.values {
+		if sp == nil {
+			continue
+		}
+		s := *sp
 		if a.distinct {
 			if _, ok := seen[s]; ok {
 				continue
@@ -178,6 +185,12 @@ func (a *stringAggWindowNative) Done() (any, error) {
 			seen[s] = struct{}{}
 		}
 		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	if a.isBytes {
+		return value.EncodeValue(value.BytesValue(strings.Join(out, a.delim)))
 	}
 	return value.EncodeValue(value.StringValue(strings.Join(out, a.delim)))
 }

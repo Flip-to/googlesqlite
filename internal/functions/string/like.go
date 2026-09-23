@@ -11,13 +11,18 @@ import (
 )
 
 func LIKE(a, b value.Value) (value.Value, error) {
-	va, err := a.ToString()
+	va, err := value.RawText(a)
 	if err != nil {
 		return nil, err
 	}
-	vb, err := b.ToString()
+	vb, err := value.RawText(b)
 	if err != nil {
 		return nil, err
+	}
+	if _, ok := a.(value.BytesValue); ok {
+		// BYTES LIKE matches byte by byte: map each byte to one rune so
+		// '_' consumes a single byte rather than a UTF-8 character.
+		va, vb = bytesAsRunes(va), bytesAsRunes(vb)
 	}
 	re, err := likeRegexp(vb)
 	if err != nil {
@@ -78,3 +83,12 @@ func likePatternToRegexp(pattern string) (string, error) {
 // BindLike: per GoogleSQL three-valued logic, LIKE with a NULL operand
 // returns NULL, not FALSE — Scalar2 propagates that.
 var BindLike = helper.Scalar2(LIKE)
+
+// bytesAsRunes maps every byte to the rune with the same value.
+func bytesAsRunes(s string) string {
+	r := make([]rune, len(s))
+	for i := 0; i < len(s); i++ {
+		r[i] = rune(s[i])
+	}
+	return string(r)
+}

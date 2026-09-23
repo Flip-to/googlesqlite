@@ -266,9 +266,9 @@ func BindStringAgg() func() *helper.Aggregator {
 		return helper.NewAggregator(
 			func(args []value.Value, opt *helper.Option) error {
 				if len(args) == 1 {
-					return fn.Step(args[0], "", opt)
+					return fn.Step(args[0], ",", opt)
 				}
-				delim, err := args[1].ToString()
+				delim, err := value.RawText(args[1])
 				if err != nil {
 					return err
 				}

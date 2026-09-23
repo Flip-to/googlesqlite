@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	googlesql "github.com/goccy/go-googlesql"
 	"github.com/goccy/go-json"
@@ -492,6 +493,14 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
 		}
 		return value.FloatValue(f64), nil
 	case googlesql.TypeKindTypeString, googlesql.TypeKindTypeEnum:
+		if b, ok := v.(value.BytesValue); ok {
+			// BYTES to STRING reinterprets the bytes as UTF-8; ToString
+			// would return the base64 storage encoding instead.
+			if !utf8.Valid(b) {
+				return nil, fmt.Errorf("invalid UTF-8 in BYTES to STRING cast")
+			}
+			return value.StringValue(b), nil
+		}
 		s, err := v.ToString()
 		if err != nil {
 			return nil, err
