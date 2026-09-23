@@ -1810,7 +1810,11 @@ func (a *Analyzer) analyzeTemplatedTVFWithRuntimeArguments(ctx context.Context, 
 	if !ok {
 		return nil, fmt.Errorf("unexpected templated TVF statement %s", query)
 	}
-	concrete, err := newTVFSpec(ctx, a.namePath, stmt)
+	// The body is a separate analysis whose column ids restart at 1, so
+	// format it with fresh per-statement state: the caller's columnRefMap
+	// is keyed by name#id and would hand the body the caller's columns.
+	bodyCtx := a.context(ctx, funcMapFromContext(ctx), tvfMapFromContext(ctx))
+	concrete, err := newTVFSpec(bodyCtx, a.namePath, stmt)
 	if err != nil {
 		return nil, err
 	}
