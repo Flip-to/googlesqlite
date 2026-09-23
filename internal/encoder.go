@@ -395,11 +395,13 @@ func structValueFromLiteral(v googlesql.Value) (*value.StructValue, error) {
 	n, _ := v.NumFields()
 	for i := range n {
 		field, _ := v.Field(i)
+		// Anonymous fields keep the empty name the analyzer declared,
+		// exactly as the runtime MakeStruct path does; values stay
+		// positional in Keys/Values, so they never collapse. BigQuery
+		// renders them as "" in TO_JSON_STRING.
 		var name string
-		if int(i) < len(fieldNames) && fieldNames[int(i)] != "" {
+		if int(i) < len(fieldNames) {
 			name = fieldNames[int(i)]
-		} else {
-			name = fmt.Sprintf("_field_%d", i)
 		}
 		val, err := valueFromGoogleSQLValue(*field)
 		if err != nil {
