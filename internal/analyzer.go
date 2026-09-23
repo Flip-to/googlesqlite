@@ -1499,7 +1499,30 @@ func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode 
 	if err := a.declareParameterTypes(mode, args); err != nil {
 		return nil, fmt.Errorf("failed to declare parameter types: %w", err)
 	}
+	// The analyzer folds literal casts in its built-in default time zone
+	// (America/Los_Angeles), and go-googlesql v0.4.0 exposes no way to
+	// build a UTC TimeZone for SetDefaultTimeZone, so
+	// CAST(TIMESTAMP '2024-01-01 03:00:00+00' AS DATE) folded to
+	// 2023-12-31. For statements that involve TIMESTAMP, leave literal
+	// casts to the runtime, which uses UTC. Folding stays on otherwise:
+	// unfolded, a NUMERIC literal such as CAST(1.123456789 AS NUMERIC)
+	// reaches the runtime as a DOUBLE and loses precision.
+	unfold := timestampCastRe.MatchString(query)
+	if unfold {
+		if ferr := a.opt.SetFoldLiteralCast(false); ferr == nil {
+			defer func() { _ = a.opt.SetFoldLiteralCast(true) }()
+		}
+	}
 	out, err := googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
+	if unfold && err != nil && strings.Contains(err.Error(), "Invalid cast from") {
+		// Without literal-cast folding the analyzer types a bare NULL
+		// as INT64 and then rejects its coercion to types such as
+		// GEOGRAPHY (UNION ALL ... NULL). Retry with folding for this
+		// statement only; see newAnalyzerOptions for why it is off.
+		if ferr := a.opt.SetFoldLiteralCast(true); ferr == nil {
+			out, err = googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to analyze: %w", err)
 	}
@@ -3070,3 +3093,7 @@ func getArgsFromParams(values []driver.NamedValue, params []*googlesql.ResolvedP
 	}
 	return args, nil
 }
+
+// timestampCastRe matches statements where unfolded literal casts are
+// needed to keep TIMESTAMP conversions in UTC.
+var timestampCastRe = regexp.MustCompile(`(?i)\bTIMESTAMP\b`)

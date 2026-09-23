@@ -160,9 +160,15 @@ func (t TimestampValue) ToRat() (*big.Rat, error) {
 	return nil, fmt.Errorf("failed to convert *big.Rat from timestamp %v", t)
 }
 
+// SQLString is the canonical text BigQuery gives for CAST(ts AS STRING)
+// and FORMAT %t in the default (UTC) time zone: a space separator,
+// fractional seconds without trailing zeros, and a +00 offset.
+func (t TimestampValue) SQLString() string {
+	return time.Time(t).UTC().Format("2006-01-02 15:04:05.999999") + "+00"
+}
+
 func (t TimestampValue) Format(verb rune) string {
-	const timestampPrintableFormat = "2006-01-02 15:04:05"
-	formatted := time.Time(t).UTC().Format(timestampPrintableFormat) + "+00"
+	formatted := t.SQLString()
 	switch verb {
 	case 't':
 		return formatted

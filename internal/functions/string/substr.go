@@ -23,7 +23,8 @@ func SUBSTR(val value.Value, pos int64, length *int64) (value.Value, error) {
 		}
 		startIdx := actualPos
 		endIdx := min(actualPos+actualLen, runesLen)
-		return value.StringValue(v[startIdx:endIdx]), nil
+		// Slice the runes: startIdx and endIdx count characters, not bytes.
+		return value.StringValue(string(runes[startIdx:endIdx])), nil
 	case value.BytesValue:
 		v, err := val.ToBytes()
 		if err != nil {
