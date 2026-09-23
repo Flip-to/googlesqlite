@@ -122,10 +122,25 @@ func parseCase(lines []string) (Case, bool) {
 			idx++
 			continue
 		}
+		// A header may span lines, e.g. a long [parameters=...] list.
+		if strings.HasPrefix(l, "[") && !strings.HasSuffix(l, "]") && strings.Contains(l, "=") {
+			j := idx + 1
+			for j < len(lines) && !strings.HasSuffix(strings.TrimSpace(lines[j]), "]") && strings.TrimSpace(lines[j]) != "--" {
+				j++
+			}
+			if j < len(lines) && strings.TrimSpace(lines[j]) != "--" {
+				for k := idx + 1; k <= j; k++ {
+					l += " " + strings.TrimSpace(lines[k])
+				}
+				idx = j
+			}
+		}
 		if strings.HasPrefix(l, "[") && strings.HasSuffix(l, "]") {
 			body := l[1 : len(l)-1]
 			eq := strings.Index(body, "=")
 			if eq < 0 {
+				// Bare flag such as [prepare_database].
+				c.Attrs[strings.TrimSpace(body)] = ""
 				idx++
 				continue
 			}
@@ -157,7 +172,15 @@ func parseCase(lines []string) (Case, bool) {
 	if sepIdx < 0 {
 		return Case{}, false
 	}
-	c.SQL = strings.TrimSpace(strings.Join(lines[idx:sepIdx], "\n"))
+	sqlLines := make([]string, 0, sepIdx-idx)
+	for _, sl := range lines[idx:sepIdx] {
+		// `\--` escapes a SQL comment line that would read as a separator.
+		if strings.HasPrefix(strings.TrimSpace(sl), `\--`) {
+			sl = strings.Replace(sl, `\--`, "--", 1)
+		}
+		sqlLines = append(sqlLines, sl)
+	}
+	c.SQL = strings.TrimSpace(strings.Join(sqlLines, "\n"))
 	c.Expected = strings.TrimSpace(strings.Join(lines[sepIdx+1:], "\n"))
 	if c.SQL == "" {
 		return Case{}, false
