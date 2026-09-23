@@ -42,6 +42,13 @@ func TestDateIgnoresHostTimeZone(t *testing.T) {
 		{"SELECT CAST(DATE_FROM_UNIX_DATE(-719162) AS STRING)", "0001-01-01"},
 		{"SELECT CAST(DATE_FROM_UNIX_DATE(0) AS STRING)", "1970-01-01"},
 		{"SELECT CAST(DATE_FROM_UNIX_DATE(2932896) AS STRING)", "9999-12-31"},
+		// civil_time.test convert_timestamp_to_date and
+		// default_timezone_utc.test cast_timestamp_to_date. The UNNEST
+		// keeps the analyzer from constant-folding the conversion.
+		{"SELECT CAST(DATE(ts) AS STRING) FROM UNNEST([TIMESTAMP '0001-01-01 00:00:00+00']) ts", "0001-01-01"},
+		{"SELECT CAST(CAST(ts AS DATE) AS STRING) FROM UNNEST([TIMESTAMP '1970-01-01 00:00:01+00']) ts", "1970-01-01"},
+		// civil_time.test current_datetime_2.
+		{"SELECT current_datetime = datetime(current_timestamp)", true},
 	}
 	for _, c := range cases {
 		var got any

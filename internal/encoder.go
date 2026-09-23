@@ -159,7 +159,7 @@ func valueFromGoogleSQLValue(v googlesql.Value) (value.Value, error) {
 		microSecondsInSecond := int64(time.Second) / int64(time.Microsecond)
 		sec := microsec / microSecondsInSecond
 		remainder := microsec - (sec * microSecondsInSecond)
-		return timestampValueFromLiteral(time.Unix(sec, remainder*int64(time.Microsecond)))
+		return timestampValueFromLiteral(time.Unix(sec, remainder*int64(time.Microsecond)).UTC())
 	case googlesql.TypeKindTypeNumeric, googlesql.TypeKindTypeBignumeric:
 		return numericValueFromLiteral(m1(v.GetSQLLiteral()))
 	case googlesql.TypeKindTypeInterval:
