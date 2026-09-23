@@ -386,3 +386,17 @@ func CurrentTime(ctx context.Context) *time.Time {
 	}
 	return value.(*time.Time)
 }
+
+type sourceQueryKey struct{}
+
+// withSourceQuery records the exact text handed to the analyzer so that
+// formatters can recover a literal's source image from its parse
+// location.
+func withSourceQuery(ctx context.Context, query string) context.Context {
+	return context.WithValue(ctx, sourceQueryKey{}, query)
+}
+
+func sourceQueryFromContext(ctx context.Context) (string, bool) {
+	q, ok := ctx.Value(sourceQueryKey{}).(string)
+	return q, ok
+}
