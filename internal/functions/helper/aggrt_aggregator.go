@@ -21,6 +21,9 @@ import (
 type Aggregator struct {
 	distinctMap map[string]struct{}
 	distinctNil bool
+	// having buffers rows while a HAVING MAX / HAVING MIN modifier is
+	// in effect; only rows at the extreme key reach step, at Done.
+	having      []havingRow
 	step        func([]value.Value, *Option) error
 	done        func() (value.Value, error)
 }
@@ -31,6 +34,20 @@ func (a *Aggregator) Step(stepArgs ...any) error {
 		return err
 	}
 	values, opt := ParseOptions(values...)
+	if opt.Having != nil {
+		a.having = append(a.having, havingRow{values: values, opt: opt})
+		return nil
+	}
+	return a.process(values, opt)
+}
+
+type havingRow struct {
+	values []value.Value
+	opt    *Option
+}
+
+// process applies IGNORE NULLS and DISTINCT, then steps the aggregate.
+func (a *Aggregator) process(values []value.Value, opt *Option) error {
 	if opt.IgnoreNulls {
 		// Skip the whole row. Dropping only the NULL arguments would
 		// shift the rest, so APPROX_QUANTILES(x, 4 IGNORE NULLS) saw
@@ -54,7 +71,7 @@ func (a *Aggregator) Step(stepArgs ...any) error {
 			}
 			a.distinctNil = true
 		} else {
-			key, err := values[0].ToString()
+			key, err := value.DistinctKey(values[0])
 			if err != nil {
 				return err
 			}
@@ -68,6 +85,9 @@ func (a *Aggregator) Step(stepArgs ...any) error {
 }
 
 func (a *Aggregator) Done() (any, error) {
+	if err := a.replayHaving(); err != nil {
+		return nil, err
+	}
 	ret, err := a.done()
 	if err != nil {
 		return nil, err
@@ -130,4 +150,60 @@ func SortAggregatedValues(values []*OrderedValue, opt *Option) []*OrderedValue {
 		return false
 	})
 	return values
+}
+
+// replayHaving steps only the buffered rows whose HAVING key equals
+// the MAX (or MIN) key of the group. Per aggregate-function-calls.md
+// the extreme is MAX(having_expression) / MIN(...), which ignores
+// NULLs, and rows match by SQL equality, so NULL keys never match.
+func (a *Aggregator) replayHaving() error {
+	if len(a.having) == 0 {
+		return nil
+	}
+	rows := a.having
+	a.having = nil
+	var best value.Value
+	for _, r := range rows {
+		k := r.opt.Having.Value
+		if k == nil {
+			continue
+		}
+		if best == nil {
+			best = k
+			continue
+		}
+		var better bool
+		var err error
+		if r.opt.Having.IsMax {
+			better, err = k.GT(best)
+		} else {
+			better, err = k.LT(best)
+		}
+		if err != nil {
+			return err
+		}
+		if better {
+			best = k
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	for _, r := range rows {
+		k := r.opt.Having.Value
+		if k == nil {
+			continue
+		}
+		eq, err := k.EQ(best)
+		if err != nil {
+			return err
+		}
+		if !eq {
+			continue
+		}
+		if err := a.process(r.values, r.opt); err != nil {
+			return err
+		}
+	}
+	return nil
 }

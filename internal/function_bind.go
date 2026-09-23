@@ -115,6 +115,17 @@ func bindDistinct(args ...value.Value) (value.Value, error) {
 	return helper.DISTINCT()
 }
 
+func bindHaving(args ...value.Value) (value.Value, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("HAVING: invalid number of arguments: got %d, want 2", len(args))
+	}
+	isMax, err := args[1].ToBool()
+	if err != nil {
+		return nil, err
+	}
+	return helper.HAVING(args[0], isMax)
+}
+
 func bindIgnoreNulls(args ...value.Value) (value.Value, error) {
 	if len(args) != 0 {
 		return nil, fmt.Errorf("IGNORE_NULLS: invalid number of arguments: got %d, want 0", len(args))
