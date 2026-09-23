@@ -2,7 +2,10 @@ package value
 
 import (
 	"fmt"
+	"math"
 	"math/big"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -131,8 +134,31 @@ func (fv FloatValue) ToRat() (*big.Rat, error) {
 	return r, nil
 }
 
+// Format renders fv the way BigQuery's FORMAT does: 15 significant
+// digits, 17 when 15 do not round-trip, and a trailing ".0" on an
+// integral value. %T spells NaN and the infinities as a CAST literal.
 func (fv FloatValue) Format(verb rune) string {
-	return fmt.Sprint(fv)
+	f := float64(fv)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		s := "nan"
+		if math.IsInf(f, 1) {
+			s = "inf"
+		} else if math.IsInf(f, -1) {
+			s = "-inf"
+		}
+		if verb == 'T' {
+			return fmt.Sprintf("CAST(%q AS FLOAT64)", s)
+		}
+		return s
+	}
+	s := strconv.FormatFloat(f, 'g', 15, 64)
+	if r, err := strconv.ParseFloat(s, 64); err != nil || r != f {
+		s = strconv.FormatFloat(f, 'g', 17, 64)
+	}
+	if !strings.ContainsAny(s, ".e") {
+		s += ".0"
+	}
+	return s
 }
 
 func (fv FloatValue) Interface() any {

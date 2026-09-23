@@ -176,3 +176,25 @@ func TestFloatValue(t *testing.T) {
 		}
 	})
 }
+
+// TestFloatValueFormatNonFinite pins the BigQuery spelling of NaN and the
+// infinities: %t prints nan, inf, -inf; %T prints a CAST literal, e.g.
+// FORMAT('%T', CAST('nan' AS FLOAT64)) is CAST("nan" AS FLOAT64).
+func TestFloatValueFormatNonFinite(t *testing.T) {
+	for _, tc := range []struct {
+		f     float64
+		t, bT string
+	}{
+		{math.NaN(), "nan", `CAST("nan" AS FLOAT64)`},
+		{math.Inf(1), "inf", `CAST("inf" AS FLOAT64)`},
+		{math.Inf(-1), "-inf", `CAST("-inf" AS FLOAT64)`},
+	} {
+		fv := value.FloatValue(tc.f)
+		if got := fv.Format('t'); got != tc.t {
+			t.Errorf("%v %%t: got %q, want %q", tc.f, got, tc.t)
+		}
+		if got := fv.Format('T'); got != tc.bT {
+			t.Errorf("%v %%T: got %q, want %q", tc.f, got, tc.bT)
+		}
+	}
+}
