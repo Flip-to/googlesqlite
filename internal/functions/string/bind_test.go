@@ -987,9 +987,10 @@ func TestFormat_ValidationErrors(t *testing.T) {
 	if _, err := strfn.BindFormat(value.StringValue("%d"), value.StringValue("x")); err == nil {
 		t.Errorf("FORMAT %%d with string should fail")
 	}
-	// %o with negative.
-	if _, err := strfn.BindFormat(value.StringValue("%o"), value.IntValue(-1)); err == nil {
-		t.Errorf("FORMAT %%o negative should fail")
+	// %o with a negative value prints a signed octal, as in BigQuery
+	// (flipto-dbt emulator_differential_results.md L8).
+	if got, err := strfn.BindFormat(value.StringValue("%o"), value.IntValue(-8)); err != nil || got != value.StringValue("-10") {
+		t.Errorf("FORMAT %%o -8 = %v, %v; want -10", got, err)
 	}
 }
 

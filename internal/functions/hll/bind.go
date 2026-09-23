@@ -78,7 +78,8 @@ func BindHllCountMergePartial() func() *helper.Aggregator {
 
 func BindHllCountExtract(args ...value.Value) (value.Value, error) {
 	if args[0] == nil {
-		return nil, nil
+		// hll_functions.md: EXTRACT of a NULL sketch is 0.
+		return value.IntValue(0), nil
 	}
 	b, err := args[0].ToBytes()
 	if err != nil {

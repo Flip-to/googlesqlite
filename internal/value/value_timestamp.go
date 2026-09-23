@@ -32,16 +32,7 @@ func (t TimestampValue) AddValueWithPart(v int64, part string) (Value, error) {
 func (t TimestampValue) Add(v Value) (Value, error) {
 	src := time.Time(t)
 	if vv, ok := v.(*IntervalValue); ok {
-		return TimestampValue(time.Date(
-			src.Year()+int(vv.Years),
-			time.Month(int(src.Month())+int(vv.Months)),
-			src.Day()+int(vv.Days),
-			src.Hour()+int(vv.Hours),
-			src.Minute()+int(vv.Minutes),
-			src.Second()+int(vv.Seconds),
-			src.Nanosecond()+int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return TimestampValue(addInterval(src, vv, 1)), nil
 	}
 	return nil, fmt.Errorf("failed to use add operator for timestamp and %T type", v)
 }
@@ -49,16 +40,7 @@ func (t TimestampValue) Add(v Value) (Value, error) {
 func (t TimestampValue) Sub(v Value) (Value, error) {
 	src := time.Time(t)
 	if vv, ok := v.(*IntervalValue); ok {
-		return TimestampValue(time.Date(
-			src.Year()-int(vv.Years),
-			time.Month(int(src.Month())-int(vv.Months)),
-			src.Day()-int(vv.Days),
-			src.Hour()-int(vv.Hours),
-			src.Minute()-int(vv.Minutes),
-			src.Second()-int(vv.Seconds),
-			src.Nanosecond()-int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return TimestampValue(addInterval(src, vv, -1)), nil
 	}
 	dst, err := v.ToTime()
 	if err != nil {

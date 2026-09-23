@@ -99,10 +99,6 @@ func validateOctal(arg value.Value) error {
 	if _, ok := arg.(value.IntValue); !ok {
 		return fmt.Errorf("octal format (%%o) required int64 type")
 	}
-	i64, _ := arg.ToInt64()
-	if i64 < 0 {
-		return fmt.Errorf("octal format (%%o) required positive value")
-	}
 	return nil
 }
 
@@ -110,10 +106,7 @@ func validateHexInteger(arg value.Value) error {
 	if _, ok := arg.(value.IntValue); !ok {
 		return fmt.Errorf("hexadecimal integer format (%%x or %%X) required int64 type")
 	}
-	i64, _ := arg.ToInt64()
-	if i64 < 0 {
-		return fmt.Errorf("hexadecimal integer format (%%x or %%X) required positive value")
-	}
+	// Negative values print with a sign: FORMAT('%x', -7) is '-7'.
 	return nil
 }
 
@@ -175,8 +168,12 @@ func validatePercent(arg value.Value) error {
 
 func parseInteger(param *FormatParam, args []value.Value) ([]rune, error) {
 	format := "%"
-	if param.flag == FormatFlagZero {
+	switch param.flag {
+	case FormatFlagZero:
 		format += "0"
+	case FormatFlagMinus:
+		// Left-justify within the width.
+		format += "-"
 	}
 	width, args, err := param.width.format(args)
 	if err != nil {
@@ -220,8 +217,6 @@ func parseInteger(param *FormatParam, args []value.Value) ([]rune, error) {
 			targetIdx--
 		}
 		return numWithComma, nil
-	case FormatFlagMinus:
-		return nil, fmt.Errorf("currently doesn't support - flag for integer value")
 	case FormatFlagSharp:
 		return nil, fmt.Errorf("currently doesn't support # flag for integer value")
 	}
@@ -253,7 +248,9 @@ func parseFloat(param *FormatParam, args []value.Value) ([]rune, error) {
 	}
 	format := strconv.FormatFloat(v, byte(floatFmt), precision, 64)
 	remain := width - len(format)
-	if remain > 0 {
+	if remain > 0 && param.flag == FormatFlagMinus {
+		format += strings.Repeat(" ", remain)
+	} else if remain > 0 {
 		if param.flag == FormatFlagZero {
 			format = strings.Repeat("0", remain) + format
 		} else {
@@ -267,8 +264,6 @@ func parseFloat(param *FormatParam, args []value.Value) ([]rune, error) {
 		}
 	case FormatFlagSpace:
 		format = " " + format
-	case FormatFlagMinus:
-		return nil, fmt.Errorf("currently doesn't support - flag for float value")
 	case FormatFlagSharp:
 		return nil, fmt.Errorf("currently doesn't support # flag for float value")
 	case FormatFlagQuote:
@@ -478,6 +473,17 @@ func parseFormat(format string, args ...value.Value) (string, error) {
 			return "", fmt.Errorf("not enough arguments for format")
 		}
 		args := formatArgs[:num]
+		// NULL argument handling (string_functions.md FORMAT): %t and %T
+		// print NULL; any other specifier makes the whole result NULL.
+		if num > 0 && args[num-1] == nil {
+			if specifier != 't' && specifier != 'T' {
+				return "", errFormatNull
+			}
+			result = append(result, []rune("NULL")...)
+			formatArgs = formatArgs[num:]
+			ctx.progress(1)
+			continue
+		}
 		if err := param.validateArgs(info, args); err != nil {
 			return "", fmt.Errorf("invalid argument type: %w", err)
 		}
@@ -493,8 +499,14 @@ func parseFormat(format string, args ...value.Value) (string, error) {
 		result = append(result, text...)
 		ctx.progress(1)
 	}
+	if len(formatArgs) > 0 {
+		return "", fmt.Errorf("too many arguments to FORMAT for pattern %q", format)
+	}
 	return string(result), nil
 }
+
+// errFormatNull signals that FORMAT's result is NULL.
+var errFormatNull = fmt.Errorf("FORMAT: NULL argument")
 
 func parseFormatFlag(ctx *FormatContext) FormatFlag {
 	switch ctx.current() {

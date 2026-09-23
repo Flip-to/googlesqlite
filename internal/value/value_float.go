@@ -177,3 +177,9 @@ func (fv FloatValue) Format(verb rune) string {
 func (fv FloatValue) Interface() any {
 	return float64(fv)
 }
+
+// IsNaN reports whether v is a FLOAT64 NaN.
+func IsNaN(v Value) bool {
+	f, ok := v.(FloatValue)
+	return ok && f != f
+}

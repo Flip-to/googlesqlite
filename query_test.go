@@ -6201,8 +6201,10 @@ WITH examples AS (
 				{"abc", int64(5), `"abc  "`},
 				{"abc", int64(2), `"ab"`},
 				{"例子", int64(4), `"例子  "`},
-				{nil, int64(2), nil},
-				{"abc", nil, nil},
+				// FORMAT('%T', NULL) is "NULL" in BigQuery
+				// (flipto-dbt emulator_differential_results.md S6).
+				{nil, int64(2), "NULL"},
+				{"abc", nil, "NULL"},
 			},
 		},
 		{
@@ -6215,7 +6217,7 @@ WITH examples AS (
 			expectedRows: [][]any{
 				{"abc", int64(8), "def", `"abcdefde"`},
 				{"abc", int64(5), "-", `"abc--"`},
-				{"abc", int64(5), nil, nil},
+				{"abc", int64(5), nil, "NULL"}, // FORMAT('%T', NULL), S6
 				{"例子", int64(5), "中文", `"例子中文中"`},
 			},
 		},
@@ -7616,7 +7618,9 @@ SELECT
   JSON_EXTRACT('{"a":null}', "$.b"),
   JSON_EXTRACT(JSON '{"a":null}', "$.a"),
   JSON_EXTRACT(JSON '{"a":null}', "$.b")`,
-			expectedRows: [][]any{{nil, nil, nil, nil}},
+			// A JSON input keeps a matched null as JSON 'null'; only a
+			// missing path is SQL NULL (json_functions.md JSON_EXTRACT).
+			expectedRows: [][]any{{nil, nil, "null", nil}},
 		},
 		{
 			name:         "json_query",
@@ -7680,7 +7684,9 @@ SELECT
   JSON_QUERY('{"a":null}', "$.b"),
   JSON_QUERY(JSON '{"a":null}', "$.a"),
   JSON_QUERY(JSON '{"a":null}', "$.b")`,
-			expectedRows: [][]any{{nil, nil, nil, nil}},
+			// json_functions.md JSON_QUERY: a JSON input keeps a matched
+			// null as JSON 'null'.
+			expectedRows: [][]any{{nil, nil, "null", nil}},
 		},
 		{
 			name:         "json_extract_scalar with number",
@@ -8125,7 +8131,7 @@ FROM (
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01"`},
 				{`b"0123456789@ABCDE"`},
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x00\x02\x80"`},
-				{nil},
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
 			},
 		},
 		{
@@ -8261,9 +8267,9 @@ FROM (
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01"`},
 				{`b"0123456789@ABCDE"`},
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x00\x02\x80"`},
-				{nil},
-				{nil},
-				{nil},
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
 			},
 		},
 

@@ -6,10 +6,16 @@ import (
 )
 
 func GREATEST(args ...value.Value) (value.Value, error) {
-	var max value.Value
+	var max, nan value.Value
 	for _, arg := range args {
 		if arg == nil {
 			return nil, nil
+		}
+		// NaN in any argument makes the result NaN
+		// (mathematical_functions.md GREATEST / LEAST).
+		if value.IsNaN(arg) {
+			nan = arg
+			continue
 		}
 		if max == nil {
 			max = arg
@@ -22,6 +28,9 @@ func GREATEST(args ...value.Value) (value.Value, error) {
 		if gt {
 			max = arg
 		}
+	}
+	if nan != nil {
+		return nan, nil
 	}
 	return max, nil
 }
