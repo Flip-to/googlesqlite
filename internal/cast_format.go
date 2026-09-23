@@ -17,8 +17,8 @@ import (
 // bindCastFormat implements CAST(expr AS type FORMAT fmt). Arguments:
 // expr, format, JSON-encoded from type, JSON-encoded to type, safe.
 // BYTES <-> STRING formats follow format-elements.md ("Format bytes as
-// string" / "Format string as bytes"). Other type pairs fall back to
-// the plain CAST.
+// string" / "Format string as bytes"); date/time <-> STRING follow the
+// date and time sections. Other type pairs fall back to the plain CAST.
 func bindCastFormat(args ...value.Value) (value.Value, error) {
 	if len(args) != 5 && len(args) != 6 {
 		return nil, fmt.Errorf("CAST FORMAT: invalid number of arguments: got %d, want 5 or 6", len(args))
@@ -95,6 +95,37 @@ func bindCastFormat(args ...value.Value) (value.Value, error) {
 				return fail(err)
 			}
 			return value.BytesValue(b), nil
+		}
+		targets := map[int]castParseTarget{
+			int(googlesql.TypeKindTypeDate):      castParseDate,
+			int(googlesql.TypeKindTypeDatetime):  castParseDatetime,
+			int(googlesql.TypeKindTypeTime):      castParseTime,
+			int(googlesql.TypeKindTypeTimestamp): castParseTimestamp,
+		}
+		if target, ok := targets[toType.Kind]; ok {
+			loc := time.UTC
+			if len(args) == 6 {
+				name, err := args[5].ToString()
+				if err != nil {
+					return nil, err
+				}
+				if loc, err = zoneLocation(name); err != nil {
+					return fail(err)
+				}
+			}
+			t, err := parseStringWithFormat(string(v), rawFormat, target, loc, time.Now().UTC())
+			if err != nil {
+				return fail(err)
+			}
+			switch target {
+			case castParseDate:
+				return value.DateValue(t), nil
+			case castParseDatetime:
+				return value.DatetimeValue(t), nil
+			case castParseTime:
+				return value.TimeValue(t), nil
+			}
+			return value.TimestampValue(t.UTC()), nil
 		}
 	}
 	return CAST(args[0], &fromType, &toType, safe)
