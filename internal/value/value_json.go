@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -95,6 +96,10 @@ func (jv JsonValue) ToRat() (*big.Rat, error) {
 }
 
 func (jv JsonValue) Format(verb rune) string {
+	if verb == 'T' {
+		escaped := strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(string(jv))
+		return "JSON '" + escaped + "'"
+	}
 	return string(jv)
 }
 
