@@ -159,7 +159,7 @@ func valueFromGoogleSQLValue(v googlesql.Value) (value.Value, error) {
 		microSecondsInSecond := int64(time.Second) / int64(time.Microsecond)
 		sec := microsec / microSecondsInSecond
 		remainder := microsec - (sec * microSecondsInSecond)
-		return timestampValueFromLiteral(time.Unix(sec, remainder*int64(time.Microsecond)))
+		return timestampValueFromLiteral(time.Unix(sec, remainder*int64(time.Microsecond)).UTC())
 	case googlesql.TypeKindTypeNumeric, googlesql.TypeKindTypeBignumeric:
 		return numericValueFromLiteral(m1(v.GetSQLLiteral()))
 	case googlesql.TypeKindTypeInterval:
@@ -265,7 +265,9 @@ func bytesValueFromLiteral(lit string) value.BytesValue {
 }
 
 func dateValueFromLiteral(days int64) value.DateValue {
-	t := time.Unix(int64(time.Duration(days)*24*(time.Hour/time.Second)), 0)
+	// A DATE is a civil date; build it in UTC so the host time zone
+	// cannot shift it to the previous or next day.
+	t := time.Unix(days*86400, 0).UTC()
 	return value.DateValue(t)
 }
 

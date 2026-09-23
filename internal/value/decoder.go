@@ -149,7 +149,7 @@ func decodeFromValueLayout(layout *ValueLayout) (Value, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse unixmicro for timestamp value %s: %w", layout.Body, err)
 		}
-		return TimestampValue(time.Unix(sec, remainder*int64(time.Microsecond))), nil
+		return TimestampValue(time.Unix(sec, remainder*int64(time.Microsecond)).UTC()), nil
 	case IntervalValueType:
 		return parseInterval(layout.Body)
 	case JsonValueType:

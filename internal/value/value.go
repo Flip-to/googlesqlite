@@ -110,7 +110,9 @@ func parseTimestamp(timestamp string, loc *time.Location) (time.Time, error) {
 }
 
 func DateFromInt64Value(v int64) (time.Time, error) {
-	return time.Unix(0, 0).Add(time.Duration(v) * 24 * time.Hour), nil
+	// Build from seconds rather than a time.Duration: days * 24h
+	// overflows int64 nanoseconds outside roughly 1677..2262.
+	return time.Unix(v*86400, 0).UTC(), nil
 }
 
 func TimestampFromFloatValue(f float64) (time.Time, error) {
