@@ -369,15 +369,15 @@ func (f *WINDOW_MIN) Done(agg *WindowFuncAggregatedStatus) (value.Value, error) 
 }
 
 type WINDOW_STRING_AGG struct {
-	delim string
+	delim   string
+	isBytes bool
 	once  sync.Once
 }
 
 func (f *WINDOW_STRING_AGG) Step(v value.Value, delim string, opt *WindowFuncStatus, agg *WindowFuncAggregatedStatus) error {
 	f.once.Do(func() {
-		if delim == "" {
-			delim = ","
-		}
+		// The binder supplies "," when the delimiter is omitted; an
+		// explicit empty delimiter is kept.
 		f.delim = delim
 	})
 	return agg.Step(v, opt)
@@ -401,7 +401,10 @@ func (f *WINDOW_STRING_AGG) Done(agg *WindowFuncAggregatedStatus) (value.Value, 
 				}
 				valueMap[key] = struct{}{}
 			}
-			text, err := val.ToString()
+			if _, ok := val.(value.BytesValue); ok {
+				f.isBytes = true
+			}
+			text, err := value.RawText(val)
 			if err != nil {
 				return err
 			}
@@ -413,6 +416,9 @@ func (f *WINDOW_STRING_AGG) Done(agg *WindowFuncAggregatedStatus) (value.Value, 
 	}
 	if len(strValues) == 0 {
 		return nil, nil
+	}
+	if f.isBytes {
+		return value.BytesValue(strings.Join(strValues, f.delim)), nil
 	}
 	return value.StringValue(strings.Join(strValues, f.delim)), nil
 }

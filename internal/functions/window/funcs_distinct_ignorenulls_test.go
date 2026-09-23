@@ -228,9 +228,10 @@ func TestStringAggWindowNativeNullWithoutIgnore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// "a" then empty -> "a,"
-	if s, _ := v.ToString(); s != "a," {
-		t.Errorf("STRING_AGG NULL no-ignore: got %q; want a,", s)
+	// STRING_AGG concatenates only non-NULL values
+	// (aggregate_functions.md STRING_AGG), so the NULL adds nothing.
+	if s, _ := v.ToString(); s != "a" {
+		t.Errorf("STRING_AGG NULL no-ignore: got %q; want a", s)
 	}
 }
 

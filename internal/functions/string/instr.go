@@ -1,10 +1,7 @@
 package string
 
 import (
-	"bytes"
 	"fmt"
-	"math"
-	"strings"
 
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
@@ -12,87 +9,89 @@ import (
 
 func INSTR(source, search value.Value, position, occurrence int64) (value.Value, error) {
 	if position == 0 {
-		return nil, fmt.Errorf("INSTR: invalid position number. position is must be large than zero value")
+		return nil, fmt.Errorf("INSTR: position must not be 0")
 	}
 	if occurrence <= 0 {
-		return nil, fmt.Errorf("INSTR: invalid occurrence number. occurrence is must be large than zero value. but specified %d", occurrence)
+		return nil, fmt.Errorf("INSTR: occurrence must be positive, got %d", occurrence)
 	}
-	pos := int(math.Abs(float64(position)))
-	if _, ok := source.(value.StringValue); ok {
+	switch source.(type) {
+	case value.StringValue:
 		if _, ok := search.(value.StringValue); !ok {
-			return nil, fmt.Errorf("INSTR: source and search are must be same type")
+			return nil, fmt.Errorf("INSTR: value and subvalue must be the same type")
 		}
 		src, err := source.ToString()
 		if err != nil {
 			return nil, err
 		}
-		search, err := search.ToString()
+		sub, err := search.ToString()
 		if err != nil {
 			return nil, err
 		}
-		if pos >= len(src) {
-			return nil, fmt.Errorf("INSTR: invalid position number. position %d is larger than source value length %d", pos, len(src))
-		}
-		length := len(src)
-		if position < 0 {
-			src = src[:len(src)-pos+1]
-		} else {
-			src = src[pos-1:]
-		}
-		var found int64
-		for i := 0; i < len(src); i++ {
-			idx := strings.Index(src[i:], search)
-			if idx >= 0 {
-				found++
-				i += idx
-			}
-			if found == occurrence {
-				if position < 0 {
-					return value.IntValue(length - i - 1), nil
-				}
-				return value.IntValue(pos + i), nil
-			}
-		}
-		return value.IntValue(0), nil
-	}
-	if _, ok := source.(value.BytesValue); ok {
+		// STRING positions count characters.
+		return value.IntValue(instrIndex([]rune(src), []rune(sub), position, occurrence)), nil
+	case value.BytesValue:
 		if _, ok := search.(value.BytesValue); !ok {
-			return nil, fmt.Errorf("INSTR: source and search are must be same type")
+			return nil, fmt.Errorf("INSTR: value and subvalue must be the same type")
 		}
 		src, err := source.ToBytes()
 		if err != nil {
 			return nil, err
 		}
-		search, err := search.ToBytes()
+		sub, err := search.ToBytes()
 		if err != nil {
 			return nil, err
 		}
-		if pos >= len(src) {
-			return nil, fmt.Errorf("INSTR: invalid position number. position %d is larger than source value length %d", pos, len(src))
-		}
-		length := len(src)
-		if position < 0 {
-			src = src[:len(src)-pos+1]
-		} else {
-			src = src[pos-1:]
-		}
-		var found int64
-		for i := 0; i < len(src); i++ {
-			idx := bytes.Index(src[i:], search)
-			if idx >= 0 {
-				found++
-				i += idx
-			}
-			if found == occurrence {
-				if position < 0 {
-					return value.IntValue(length - i - 1), nil
-				}
-				return value.IntValue(pos + i), nil
-			}
-		}
-		return value.IntValue(0), nil
+		return value.IntValue(instrIndex(src, sub, position, occurrence)), nil
 	}
-	return nil, fmt.Errorf("INSTR: source and search type are must be STRING or BYTES type")
+	return nil, fmt.Errorf("INSTR: value must be STRING or BYTES")
+}
+
+// instrIndex returns the 1-based position of the occurrence-th match of
+// sub in src, counting overlapping matches. A positive position starts
+// the search there and scans forward; a negative one starts at that
+// offset from the end (-1 is the last element) and scans backward.
+// It returns 0 when there is no such match or position is out of range.
+func instrIndex[T comparable](src, sub []T, position, occurrence int64) int64 {
+	n, m := int64(len(src)), int64(len(sub))
+	matchAt := func(i int64) bool {
+		for k := int64(0); k < m; k++ {
+			if src[i+k] != sub[k] {
+				return false
+			}
+		}
+		return true
+	}
+	var found int64
+	if position > 0 {
+		if position > n {
+			return 0
+		}
+		for i := position - 1; i+m <= n; i++ {
+			if matchAt(i) {
+				found++
+				if found == occurrence {
+					return i + 1
+				}
+			}
+		}
+		return 0
+	}
+	start := n + position
+	if start < 0 {
+		return 0
+	}
+	if start+m > n {
+		start = n - m
+	}
+	for i := start; i >= 0; i-- {
+		if matchAt(i) {
+			found++
+			if found == occurrence {
+				return i + 1
+			}
+		}
+	}
+	return 0
 }
 
 var BindInstr = helper.ScalarN(func(args ...value.Value) (value.Value, error) {

@@ -1146,6 +1146,16 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if format, _ := n.node.Format(); format != nil {
+		formatSQL, err := newNode(format).FormatSQL(ctx)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf(
+			"googlesqlite_cast_format(%s, %s, '%s', '%s', %t)",
+			expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
+		), nil
+	}
 	return fmt.Sprintf(
 		"googlesqlite_cast(%s, '%s', '%s', %t)",
 		expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),

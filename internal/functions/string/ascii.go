@@ -10,7 +10,8 @@ func ASCII(v string) (value.Value, error) {
 }
 
 var BindAscii = helper.Scalar1(func(a value.Value) (value.Value, error) {
-	ascii, err := a.ToString()
+	// RawText: BYTES must use the first byte, not the first base64 digit.
+	ascii, err := value.RawText(a)
 	if err != nil {
 		return nil, err
 	}
