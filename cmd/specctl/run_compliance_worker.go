@@ -37,6 +37,7 @@ func runWorker(ctx context.Context, path string, start int, timeout time.Duratio
 	if err := fr.open(ctx); err != nil {
 		return fmt.Errorf("open: %w", err)
 	}
+	defer fr.close()
 	for _, c := range cases {
 		if c.Index < start {
 			if c.Prepare {

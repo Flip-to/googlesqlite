@@ -113,9 +113,10 @@ func depthAt(s string, pos int) int {
 	for i := 0; i < pos && i < len(s); i++ {
 		c := s[i]
 		if quote != 0 {
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == quote {
+			case quote:
 				quote = 0
 			}
 			continue
