@@ -1065,6 +1065,10 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 			if !col.isAsc {
 				suffix += " DESC"
 			}
+			// A RANGE frame needs exactly one ORDER BY term in SQLite.
+			if col.isFloat && !n.hasRangeFrame() {
+				ob = append(ob, floatOrderClassKey(col.column, col.isAsc))
+			}
 			ob = append(ob, col.column+suffix)
 		}
 		clauses = append(clauses, "ORDER BY "+strings.Join(ob, ","))
@@ -2274,6 +2278,9 @@ func (n *OrderByScanNode) FormatSQL(ctx context.Context) (string, error) {
 				fmt.Sprintf("(`%s` IS NULL)", colName),
 			)
 		}
+		if isFloatType(m1(m1(item.ColumnRef()).Column()).Type()) {
+			orderByColumns = append(orderByColumns, floatOrderClassKey(fmt.Sprintf("`%s`", colName), !m1(item.IsDescending())))
+		}
 		if m1(item.IsDescending()) {
 			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate DESC", colName))
 		} else {
@@ -2418,6 +2425,7 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 					column:    formattedColName,
 					isAsc:     !m1(item.IsDescending()),
 					nullOrder: nullOrder,
+					isFloat:   isFloatType(m1(m1(item.ColumnRef()).Column()).Type()),
 				}
 				orderColumnNames.values = append(orderColumnNames.values, order)
 				scanOrderBy = append(scanOrderBy, order)
@@ -3243,4 +3251,36 @@ func (n *ArgumentRefNode) FormatSQL(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	return fmt.Sprintf("@%s", m1(n.node.Name())), nil
+}
+
+// isFloatType reports whether t is DOUBLE or FLOAT.
+func isFloatType(t googlesql.Googlesql_TypeNode, _ error) bool {
+	if t == nil {
+		return false
+	}
+	switch m1(t.Kind()) {
+	case googlesql.TypeKindTypeDouble, googlesql.TypeKindTypeFloat:
+		return true
+	}
+	return false
+}
+
+// floatOrderClassKey returns a sort key that places NULL, then NaN,
+// then numbers, in the direction of the column's own key. SQLite sorts
+// the encoded NaN (TEXT) after every number; GoogleSQL orders NaN
+// right after NULL (data-types.md, floating point ordering).
+func floatOrderClassKey(column string, isAsc bool) string {
+	if isAsc {
+		return fmt.Sprintf("googlesqlite_order_class(%s)", column)
+	}
+	return fmt.Sprintf("googlesqlite_order_class(%s) DESC", column)
+}
+
+// hasRangeFrame reports whether the analytic call uses a RANGE frame.
+func (n *AnalyticFunctionCallNode) hasRangeFrame() bool {
+	frame, _ := n.node.WindowFrame()
+	if frame == nil {
+		return false
+	}
+	return m1(frame.FrameUnit()) == googlesql.ResolvedWindowFrameEnums_FrameUnitRange
 }

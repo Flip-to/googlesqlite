@@ -197,6 +197,24 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		return fmt.Errorf("failed to register decode_array function: %w", err)
 	}
 
+	// googlesqlite_order_class ranks NULL (0), NaN (1) and other values
+	// (2) so DOUBLE keys order as GoogleSQL does; see floatOrderClassKey.
+	if err := sqlitex.RegisterFunc(conn, "googlesqlite_order_class", func(v any) (any, error) {
+		decoded, err := DecodeValue(v)
+		if err != nil {
+			return nil, err
+		}
+		if decoded == nil {
+			return int64(0), nil
+		}
+		if f, ok := decoded.(value.FloatValue); ok && math.IsNaN(float64(f)) {
+			return int64(1), nil
+		}
+		return int64(2), nil
+	}, deterministic); err != nil {
+		return fmt.Errorf("failed to register order_class function: %w", err)
+	}
+
 	if err := sqlitex.RegisterFunc(conn, "googlesqlite_group_by", func(v any) (any, error) {
 		decoded, err := DecodeValue(v)
 		if err != nil {

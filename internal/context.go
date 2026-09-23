@@ -170,6 +170,9 @@ type analyticOrderBy struct {
 	column    string
 	isAsc     bool
 	nullOrder nullOrderMode
+	// isFloat marks a DOUBLE / FLOAT key, which needs an extra sort
+	// key so NaN orders right after NULL (see floatOrderClassKey).
+	isFloat bool
 }
 
 type analyticOrderColumnNames struct {

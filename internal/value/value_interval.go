@@ -2,6 +2,7 @@ package value
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"time"
@@ -194,4 +195,93 @@ func DistinctKey(v Value) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%T:%s", v, s), nil
+}
+
+// NotDistinct reports whether a and b are equal under IS NOT DISTINCT
+// FROM / GROUP BY semantics: NULL equals NULL and NaN equals NaN, also
+// inside STRUCT and ARRAY values (operators.md, IS DISTINCT FROM).
+func NotDistinct(a, b Value) (bool, error) {
+	if a == nil || b == nil {
+		return a == nil && b == nil, nil
+	}
+	switch x := a.(type) {
+	case FloatValue:
+		if y, ok := b.(FloatValue); ok && math.IsNaN(float64(x)) {
+			return math.IsNaN(float64(y)), nil
+		}
+		if y, ok := b.(FloatValue); ok && math.IsNaN(float64(y)) {
+			return false, nil
+		}
+	case *StructValue:
+		y, ok := b.(*StructValue)
+		if !ok || len(x.Values) != len(y.Values) {
+			return false, nil
+		}
+		for i := range x.Values {
+			eq, err := NotDistinct(x.Values[i], y.Values[i])
+			if err != nil || !eq {
+				return false, err
+			}
+		}
+		return true, nil
+	case *ArrayValue:
+		y, ok := b.(*ArrayValue)
+		if !ok || len(x.Values) != len(y.Values) {
+			return false, nil
+		}
+		for i := range x.Values {
+			eq, err := NotDistinct(x.Values[i], y.Values[i])
+			if err != nil || !eq {
+				return false, err
+			}
+		}
+		return true, nil
+	}
+	return a.EQ(b)
+}
+
+// SQLEquals is SQL's three-valued "=": NULL when either side is NULL;
+// for STRUCT, false if any field pair is unequal, otherwise NULL if any
+// field comparison is NULL, otherwise true (operators.md, comparison
+// operators). The result is nil for NULL.
+func SQLEquals(a, b Value) (*bool, error) {
+	if a == nil || b == nil {
+		return nil, nil
+	}
+	x, ok := a.(*StructValue)
+	if !ok {
+		eq, err := a.EQ(b)
+		if err != nil {
+			return nil, err
+		}
+		return &eq, nil
+	}
+	y, err := b.ToStruct()
+	if err != nil {
+		return nil, err
+	}
+	if len(x.Values) != len(y.Values) {
+		f := false
+		return &f, nil
+	}
+	sawNull := false
+	for i := range x.Values {
+		eq, err := SQLEquals(x.Values[i], y.Values[i])
+		if err != nil {
+			return nil, err
+		}
+		if eq == nil {
+			sawNull = true
+			continue
+		}
+		if !*eq {
+			f := false
+			return &f, nil
+		}
+	}
+	if sawNull {
+		return nil, nil
+	}
+	t := true
+	return &t, nil
 }

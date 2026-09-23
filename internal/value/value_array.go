@@ -13,6 +13,9 @@ type ArrayValue struct {
 
 func (av *ArrayValue) Has(v Value) (bool, error) {
 	for _, val := range av.Values {
+		if val == nil || v == nil {
+			continue
+		}
 		cond, err := val.EQ(v)
 		if err != nil {
 			return false, err
