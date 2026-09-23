@@ -12,7 +12,10 @@ import (
 // literal carries a type prefix or a specific form, per the "%t and %T
 // behavior" table of the FORMAT reference: NUMERIC "1.5", BIGNUMERIC,
 // JSON '...', INTERVAL "..." YEAR TO SECOND, and the one-field and
-// zero-field STRUCT forms, also nested inside arrays and structs.
+// zero-field STRUCT forms, also nested inside arrays and structs. A JSON
+// or STRING literal takes single quotes only when that avoids escaping a
+// double quote. Every expected value was measured on BigQuery except the
+// two STRING cases and [JSON '1'], which follow the same quoting rule.
 func TestFormatTLiteralTypes(t *testing.T) {
 	t.Parallel()
 	db, err := sql.Open("googlesqlite", ":memory:?_test=format_t_literal_types")
@@ -42,7 +45,15 @@ func TestFormatTLiteralTypes(t *testing.T) {
 		{"numeric in struct", `SELECT FORMAT('%T', STRUCT(NUMERIC '1.5' AS a, 'x' AS b))`, `(NUMERIC "1.5", "x")`},
 		{"one-field struct", `SELECT FORMAT('%T', STRUCT(NUMERIC '1.5' AS a))`, `STRUCT(NUMERIC "1.5")`},
 		{"one-field struct %t unchanged", `SELECT FORMAT('%t', STRUCT(NUMERIC '1.5' AS a))`, `(1.5)`},
-		{"json in array", `SELECT FORMAT('%T', [JSON '1'])`, `[JSON '1']`},
+		{"json string value with both quote kinds", `SELECT FORMAT('%T', JSON '"it\'s"')`, `JSON "\"it's\""`},
+		{"string with a double quote", `SELECT FORMAT('%T', 'a"b')`, `'a"b'`},
+		{"string with both quote kinds", `SELECT FORMAT('%T', 'a"b\'c')`, `"a\"b'c"`},
+		{"datetime", `SELECT FORMAT('%T', DATETIME '2011-02-03 04:05:06')`, `DATETIME "2011-02-03 04:05:06"`},
+		{"datetime with fraction", `SELECT FORMAT('%T', DATETIME '2011-02-03 04:05:06.123')`, `DATETIME "2011-02-03 04:05:06.123"`},
+		{"time", `SELECT FORMAT('%T', TIME '12:34:56')`, `TIME "12:34:56"`},
+		{"numeric integral", `SELECT FORMAT('%T', NUMERIC '2')`, `NUMERIC "2"`},
+		{"zero-field struct", `SELECT FORMAT('%T', STRUCT())`, `STRUCT()`},
+		{"json in array", `SELECT FORMAT('%T', [JSON '1'])`, `[JSON "1"]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got string

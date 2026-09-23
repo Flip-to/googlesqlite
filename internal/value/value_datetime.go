@@ -147,7 +147,7 @@ func (d DatetimeValue) Format(verb rune) string {
 	case 't':
 		return formatted
 	case 'T':
-		return fmt.Sprintf(`DATETIME %q`, formatted)
+		return fmt.Sprintf(`DATETIME %q`, time.Time(d).Format("2006-01-02 15:04:05.999999"))
 	}
 	return formatted
 }
