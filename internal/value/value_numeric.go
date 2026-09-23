@@ -42,7 +42,7 @@ func (nv *NumericValue) Mul(v Value) (Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	nv.Rat = z.Mul(x, y)
+	nv.Rat = roundToScale(z.Mul(x, y), nv.scale())
 	return nv, nil
 }
 
@@ -76,7 +76,7 @@ func (nv *NumericValue) scale() int {
 }
 
 // roundToScale rounds r to scale decimal places, halves away from zero,
-// as BigQuery does for a NUMERIC or BIGNUMERIC quotient.
+// as BigQuery does for a NUMERIC or BIGNUMERIC product or quotient.
 func roundToScale(r *big.Rat, scale int) *big.Rat {
 	// FloatString rounds the last digit to nearest, halves away from zero.
 	rounded, _ := new(big.Rat).SetString(r.FloatString(scale))
