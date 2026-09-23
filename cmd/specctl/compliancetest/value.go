@@ -263,9 +263,29 @@ func unquoteString(s string) (string, error) {
 			b.WriteByte('\'')
 		case '\\':
 			b.WriteByte('\\')
-		case '0':
-			b.WriteByte(0)
-		case 'x':
+		case 'a':
+			b.WriteByte('\a')
+		case 'b':
+			b.WriteByte('\b')
+		case 'f':
+			b.WriteByte('\f')
+		case 'v':
+			b.WriteByte('\v')
+		case '?', '`':
+			b.WriteByte(s[i])
+		case '0', '1', '2', '3', '4', '5', '6', '7':
+			// Octal escape of up to three digits.
+			j := i
+			for j < len(s) && j < i+3 && s[j] >= '0' && s[j] <= '7' {
+				j++
+			}
+			n, err := strconv.ParseUint(s[i:j], 8, 8)
+			if err != nil {
+				return "", err
+			}
+			b.WriteByte(byte(n))
+			i = j - 1
+		case 'x', 'X':
 			if i+2 >= len(s) {
 				return "", errors.New("\\x needs two hex digits")
 			}
@@ -275,6 +295,20 @@ func unquoteString(s string) (string, error) {
 			}
 			b.WriteByte(byte(n))
 			i += 2
+		case 'u', 'U':
+			width := 4
+			if s[i] == 'U' {
+				width = 8
+			}
+			if i+width >= len(s) {
+				return "", errors.New("short unicode escape")
+			}
+			n, err := strconv.ParseUint(s[i+1:i+1+width], 16, 32)
+			if err != nil {
+				return "", err
+			}
+			b.WriteRune(rune(n))
+			i += width
 		default:
 			b.WriteByte('\\')
 			b.WriteByte(s[i])
