@@ -1,5 +1,8 @@
 # GoogleSQLite
 
+> This is the Flip-to fork. See [FLIPTO.md](FLIPTO.md) for what it
+> adds on top of upstream and how to use it.
+
 GoogleSQLite is a Go project that runs GoogleSQL — the SQL dialect
 used by BigQuery and Cloud Spanner — on top of a SQLite backend. It is
 exposed as a `database/sql` driver, so any `database/sql` consumer gets
