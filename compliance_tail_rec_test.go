@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -322,10 +323,6 @@ FROM (SELECT STRUCT(1 AS x, 2 AS y) AS s
 			sql:  "FROM pipe_t1\n|> CALL tvf_union2( arg2=>(SELECT * FROM pipe_t2), arg1=>INPUT TABLE )\n|> ORDER BY 1,2",
 			rows: unionRows, ordered: true,
 		},
-		// call_sql_udf.test
-		{name: "safe_call_sql_udf_division", sql: udfs + "SELECT SAFE.OneOverArg(0)", rows: [][]string{{"NULL"}}},
-		{name: "safe_call_to_element", sql: udfs + "SELECT SAFE.Element(['a', 'b'])", rows: [][]string{{"NULL"}}},
-		{name: "safe_error_subquery_function", sql: udfs + "SELECT SAFE.ErrorSubqueryFunction() IS NULL", rows: [][]string{{"true"}}},
 		// invoke_view.test
 		{name: "invoke_trival_view", sql: views + "SELECT * FROM SelectOne", rows: [][]string{{"1"}}},
 		{name: "invoke_view_with_udf", sql: views + "SELECT * FROM ViewWithUdf", rows: [][]string{{"1"}}},
@@ -359,4 +356,20 @@ FROM (SELECT STRUCT(1 AS x, 2 AS y) AS s
 var unionRows = [][]string{
 	{"arg1", "1", "1"}, {"arg1", "2", "1"}, {"arg1", "3", "2"}, {"arg1", "4", "2"},
 	{"arg2", "5", "3"}, {"arg2", "6", "3"}, {"arg2", "7", "4"}, {"arg2", "8", "5"},
+}
+
+// TestSafeSQLUDFRejected pins BigQuery's behaviour for SAFE. on a SQL UDF:
+// the call is rejected ("SAFE with function OneOverArg is not supported",
+// checked on BigQuery), although upstream call_sql_udf.test
+// (safe_call_sql_udf_division) expects NULL.
+func TestSafeSQLUDFRejected(t *testing.T) {
+	db, err := sql.Open("googlesqlite", ":memory:?_test=safesqludf")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+	_, err = db.Exec("CREATE TEMP FUNCTION OneOverArg(x INT64) AS (1 / x); SELECT SAFE.OneOverArg(0)")
+	if err == nil || !strings.Contains(err.Error(), "SAFE with function OneOverArg is not supported") {
+		t.Fatalf("err = %v, want SAFE with function OneOverArg is not supported", err)
+	}
 }

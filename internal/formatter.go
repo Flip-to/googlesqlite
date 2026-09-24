@@ -461,7 +461,11 @@ func (n *FunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	funcMap := funcMapFromContext(ctx)
 	if spec, exists := funcMap[funcName]; exists {
 		if m1(n.node.ErrorMode()) == googlesql.ResolvedFunctionCallBaseEnums_ErrorModeSafeErrorMode {
-			return spec.SafeCallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
+			// BigQuery rejects SAFE. on a SQL UDF ("SAFE with function
+			// OneOverArg is not supported", checked on BigQuery), although
+			// upstream call_sql_udf.test expects NULL.
+			name := m1(m1(n.node.Function()).Name())
+			return "", fmt.Errorf("SAFE with function %s is not supported", name) //nolint:staticcheck // BigQuery's error text
 		}
 		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
 	}
