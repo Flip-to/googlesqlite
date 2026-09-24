@@ -85,14 +85,8 @@ AS (
 		}
 	}
 
-	// call_sql_udf.test and invoke_view.test declare TEMP functions and
-	// views, which live for one script.
-	const udfs = `CREATE TEMP FUNCTION OneOverArg(a FLOAT64) AS ( 1 / a );
-CREATE TEMP FUNCTION Element(a ANY TYPE) AS ( (SELECT e FROM UNNEST(a) e) );
-CREATE TEMP FUNCTION ErrorSubqueryFunction() AS (
-  ARRAY(SELECT a FROM (SELECT 1 AS a) WHERE ERROR('oops'))
-);
-`
+	// invoke_view.test declares TEMP functions and views, which live for
+	// one script.
 	const views = `CREATE TEMP FUNCTION One() AS ( 1 );
 CREATE TEMP VIEW SelectOne SQL SECURITY INVOKER AS SELECT 1 AS a;
 CREATE TEMP VIEW ViewWithUdf SQL SECURITY INVOKER AS SELECT One() AS a;
