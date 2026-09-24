@@ -13,7 +13,19 @@ func STRING(t time.Time, zone string) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	return value.StringValue(t.In(loc).Format("2006-01-02 15:04:05.999999999+00")), nil
+	t = t.In(loc)
+	// BigQuery prints the zone's offset as +HH, or +HH:MM when it has
+	// minutes (STRING(TIMESTAMP ..., 'Asia/Kolkata') ends in +05:30).
+	_, off := t.Zone()
+	sign := "+"
+	if off < 0 {
+		sign, off = "-", -off
+	}
+	zoneText := fmt.Sprintf("%s%02d", sign, off/3600)
+	if m := off % 3600 / 60; m != 0 {
+		zoneText += fmt.Sprintf(":%02d", m)
+	}
+	return value.StringValue(t.Format("2006-01-02 15:04:05") + value.FractionInGroups(t) + zoneText), nil
 }
 
 func BindString(args ...value.Value) (value.Value, error) {

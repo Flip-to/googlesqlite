@@ -161,7 +161,7 @@ func (r *RangeValue) ToString() (string, error) {
 func rangeBoundDisplay(v Value) (string, error) {
 	switch x := v.(type) {
 	case DatetimeValue:
-		return time.Time(x).Format("2006-01-02 15:04:05.999999"), nil
+		return time.Time(x).Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(x)), nil
 	case TimestampValue:
 		return time.Time(x).UTC().Format("2006-01-02 15:04:05.000000") + "+00", nil
 	}

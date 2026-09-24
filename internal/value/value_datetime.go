@@ -126,12 +126,12 @@ func (d DatetimeValue) ToRat() (*big.Rat, error) {
 // SQLString is the canonical text for CAST(DATETIME AS STRING): a
 // space separator and fractional seconds without trailing zeros.
 func (d DatetimeValue) SQLString() string {
-	return time.Time(d).Format("2006-01-02 15:04:05.999999")
+	return time.Time(d).Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(d))
 }
 
 func (d DatetimeValue) Format(verb rune) string {
 	// FORMAT separates date and time with a space, unlike datetimeFormat.
-	printable := time.Time(d).Format("2006-01-02 15:04:05.999999")
+	printable := time.Time(d).Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(d))
 	switch verb {
 	case 't':
 		return printable
