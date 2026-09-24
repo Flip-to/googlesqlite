@@ -39,6 +39,10 @@ func parseSpec(s string) (spec, error) {
 		return spec{binary: true}, nil
 	}
 	parts := strings.SplitN(s, ":", 2)
+	if parts[0] == "binary" {
+		// orderby_collate_queries.test orderby_collate_binary_cs_is_an_error.
+		return spec{}, fmt.Errorf("COLLATE has invalid collation name '%s':binary cannot be combined with a suffix", s)
+	}
 	sp := spec{tag: language.Make(parts[0])}
 	if len(parts) == 2 {
 		switch parts[1] {

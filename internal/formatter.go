@@ -248,7 +248,33 @@ func (n *LiteralNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
-	return literalFromGoogleSQLValue(*m1(n.node.Value()))
+	v := m1(n.node.Value())
+	if isNegativeZeroLiteral(ctx, n.node, v) {
+		return "-0.0", nil
+	}
+	return literalFromGoogleSQLValue(*v)
+}
+
+// isNegativeZeroLiteral reports a DOUBLE literal written as -0.0. The
+// resolved value arrives as +0, so the sign is read back from the
+// literal's source text (math_functions.test math_abs_zero).
+func isNegativeZeroLiteral(ctx context.Context, lit *googlesql.ResolvedLiteral, v *googlesql.Value) bool {
+	if v == nil || m1(v.IsNull()) || m1(v.TypeKind()) != googlesql.TypeKindTypeDouble || m1(v.ToDouble()) != 0 {
+		return false
+	}
+	query, ok := sourceQueryFromContext(ctx)
+	if !ok {
+		return false
+	}
+	loc, _ := lit.GetParseLocationRangeOrNULL()
+	if loc == nil {
+		return false
+	}
+	image, err := loc.GetTextFrom(query)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(image), "-")
 }
 
 func (n *ParameterNode) FormatSQL(ctx context.Context) (string, error) {
@@ -922,6 +948,11 @@ var customNativeWindowFuncMap = map[string]string{
 	"hll_count_init":          "googlesqlite_window_hll_count_init",
 	"hll_count_merge":         "googlesqlite_window_hll_count_merge",
 	"hll_count_merge_partial": "googlesqlite_window_hll_count_merge_partial",
+	// APPROX_* aggregates, replayed over the active frame.
+	"approx_count_distinct": "googlesqlite_window_approx_count_distinct",
+	"approx_quantiles":      "googlesqlite_window_approx_quantiles",
+	"approx_top_count":      "googlesqlite_window_approx_top_count",
+	"approx_top_sum":        "googlesqlite_window_approx_top_sum",
 }
 
 // nativeWindowFuncForName returns the SQLite native name for a
@@ -2300,6 +2331,17 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 		groupBy = fmt.Sprintf("GROUP BY %s", strings.Join(annotatedGroupByColumns, ","))
 	}
 	formattedColumns := strings.Join(columns, ",")
+	if formattedColumns == "" {
+		// No aggregate and no grouping key (GROUP BY () or a GROUP BY
+		// ALL that selects only constants): every input row falls into
+		// one group, as for the empty grouping set above
+		// (group_by_all.test group_by_all_no_agg_no_grouping_keys_*,
+		// groupby_queries_2.test group_by_empty_columns_*).
+		formattedColumns = "NULL"
+		if groupBy == "" {
+			groupBy = "GROUP BY NULL"
+		}
+	}
 	switch getInputPattern(input) {
 	case InputKeep:
 		return fmt.Sprintf("SELECT %s %s %s", formattedColumns, input, groupBy), nil
@@ -2522,10 +2564,33 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 		opType = "UNKNOWN"
 	}
 	var queries []string
-	for _, item := range m1(n.node.InputItemList()) {
+	// SQLite names a compound SELECT's columns after its first branch.
+	// When that branch outputs one column twice (SELECT a, b, a ...), a
+	// reference by name always finds the first occurrence, so the other
+	// branches' values in the later position are lost
+	// (analytic_percentile_cont.test analytic_percentile_cont_partition).
+	// Such a first branch gets positional aliases instead.
+	var (
+		firstAliases []string
+		firstAliased string
+	)
+	for idx, item := range m1(n.node.InputItemList()) {
 		var outputColumns []string
+		seen := map[string]bool{}
+		dup := false
 		for _, outputColumn := range m1(item.OutputColumnList()) {
-			outputColumns = append(outputColumns, fmt.Sprintf("`%s`", uniqueColumnName(ctx, outputColumn)))
+			name := uniqueColumnName(ctx, outputColumn)
+			dup = dup || seen[name]
+			seen[name] = true
+			outputColumns = append(outputColumns, fmt.Sprintf("`%s`", name))
+		}
+		var aliasedColumns []string
+		if idx == 0 && dup {
+			for i, c := range outputColumns {
+				alias := fmt.Sprintf("googlesqlite_setop_c%d", i)
+				firstAliases = append(firstAliases, alias)
+				aliasedColumns = append(aliasedColumns, c+" AS `"+alias+"`")
+			}
 		}
 		query, err := newNode(item).FormatSQL(ctx)
 		if err != nil {
@@ -2544,25 +2609,35 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 				formattedInput,
 			),
 		)
+		if aliasedColumns != nil {
+			firstAliased = fmt.Sprintf("SELECT %s %s", strings.Join(aliasedColumns, ", "), formattedInput)
+		}
 	}
 	if sql, ok := formatCollatedSetOperation(ctx, n.node, queries); ok {
 		return sql, nil
 	}
+	if bagOp != "" {
+		return formatBagSetOperation(ctx, n.node, queries, bagOp), nil
+	}
+	if firstAliased != "" {
+		queries[0] = firstAliased
+	}
 	columnMaps := []string{}
 	if inputItems := m1(n.node.InputItemList()); len(inputItems) != 0 {
 		for idx, col := range m1(inputItems[0].OutputColumnList()) {
+			name := uniqueColumnName(ctx, col)
+			if firstAliases != nil {
+				name = firstAliases[idx]
+			}
 			columnMaps = append(
 				columnMaps,
 				fmt.Sprintf(
 					"`%s` AS `%s`",
-					uniqueColumnName(ctx, col),
+					name,
 					uniqueColumnName(ctx, m1(n.node.ColumnList())[idx]),
 				),
 			)
 		}
-	}
-	if bagOp != "" {
-		return formatBagSetOperation(ctx, n.node, queries, bagOp), nil
 	}
 	return fmt.Sprintf(
 		"SELECT %s FROM (%s)",
@@ -3733,8 +3808,16 @@ func rewriteStructFieldSet(ctx context.Context, target googlesql.ResolvedExprNod
 	for i := 0; i < len(levels); i++ {
 		idx := levels[i].idx
 		if i == len(levels)-1 {
-			expr = fmt.Sprintf("googlesqlite_struct_with_field_set(%s, %d, %s)",
-				colSQL, idx, expr)
+			// The type name lets a NULL struct fail as GoogleSQL does
+			// (dml_update_struct.test assign_struct_field_in_null_struct).
+			typeLit := "NULL"
+			if name, err := sqlTypeName(m1(colRef.Type())); err == nil {
+				if lit, err := literalFromGoogleSQLValue(*m1(googlesql.NewValueString(name))); err == nil {
+					typeLit = lit
+				}
+			}
+			expr = fmt.Sprintf("googlesqlite_struct_with_field_set(%s, %d, %s, %s)",
+				colSQL, idx, expr, typeLit)
 		} else {
 			// Nested struct field: wrap in get_struct_field for the
 			// outer container, then set within. For now the simple
