@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"fmt"
 	"math"
 	"os"
 	"reflect"
@@ -3219,9 +3220,13 @@ FROM Items`,
 			}},
 		},
 		{
-			name:        "array_agg with nulls",
-			query:       `SELECT ARRAY_AGG(x) AS array_agg FROM UNNEST([NULL, 1, -2, 3, -2, 1, NULL]) AS x`,
-			expectedErr: "ARRAY_AGG: input value must be not null",
+			// ARRAY_AGG keeps NULL inputs (GoogleSQL compliance
+			// array_aggregation.test, array_agg_with_nulls).
+			name:  "array_agg with nulls",
+			query: `SELECT ARRAY_AGG(x) AS array_agg FROM UNNEST([NULL, 1, -2, 3, -2, 1, NULL]) AS x`,
+			expectedRows: [][]any{{
+				[]any{nil, int64(1), int64(-2), int64(3), int64(-2), int64(1), nil},
+			}},
 		},
 		{
 			name:  "array_agg with null in order by",
@@ -3232,8 +3237,10 @@ FROM Items`,
 		},
 		{
 			name:        "array_agg with struct",
-			query:       `SELECT b, ARRAY_AGG(a) FROM UNNEST([STRUCT(1 AS a, 2 AS b), STRUCT(NULL AS a, 2 AS b)]) GROUP BY b`,
-			expectedErr: "ARRAY_AGG: input value must be not null",
+			query: `SELECT b, ARRAY_AGG(a) FROM UNNEST([STRUCT(1 AS a, 2 AS b), STRUCT(NULL AS a, 2 AS b)]) GROUP BY b`,
+			expectedRows: [][]any{{
+				int64(2), []any{int64(1), nil},
+			}},
 		},
 		{
 			name:  "array_agg with ignore nulls",
@@ -7059,7 +7066,8 @@ SELECT date, EXTRACT(ISOYEAR FROM date), EXTRACT(YEAR FROM date), EXTRACT(MONTH 
 			name:  "current_time",
 			query: `SELECT CURRENT_TIME()`,
 			expectedRows: [][]any{
-				{now.Format("15:04:05.999999")},
+				// TIME text prints the fraction in groups of three digits.
+				{now.Format("15:04:05") + fractionInGroupsOf3(now.Truncate(time.Microsecond))},
 			},
 		},
 		{
@@ -8422,4 +8430,19 @@ func createTimestampFormatFromTime(t time.Time) string {
 // test data reads symmetrically with createTimestampFormatFromTime.
 func createTimestampFormatFromString(v string) string {
 	return v
+}
+
+// fractionInGroupsOf3 mirrors how BigQuery prints fractional seconds:
+// omitted when zero, else padded to 3, 6 or 9 digits.
+func fractionInGroupsOf3(t time.Time) string {
+	ns := t.Nanosecond()
+	switch {
+	case ns == 0:
+		return ""
+	case ns%1000000 == 0:
+		return fmt.Sprintf(".%03d", ns/1000000)
+	case ns%1000 == 0:
+		return fmt.Sprintf(".%06d", ns/1000)
+	}
+	return fmt.Sprintf(".%09d", ns)
 }

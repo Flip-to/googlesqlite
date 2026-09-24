@@ -38,7 +38,7 @@ func (a *AGG) Step(val, key value.Value, kind string, _ *helper.Option) error {
 	}
 	keyStr := ""
 	if key != nil {
-		s, err := key.ToString()
+		s, err := value.DistinctKey(key)
 		if err != nil {
 			return err
 		}
@@ -67,7 +67,7 @@ func (a *AGG) Done() (value.Value, error) {
 			if v == nil {
 				continue
 			}
-			s, err := v.ToString()
+			s, err := value.DistinctKey(v)
 			if err != nil {
 				return nil, err
 			}

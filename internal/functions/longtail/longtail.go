@@ -297,7 +297,10 @@ func BindSplitSubstr(args ...value.Value) (value.Value, error) {
 // `create_if_missing` BOOL is consumed but otherwise ignored — we
 // always create the target array if it does not exist yet.
 func BindJsonArrayAppend(args ...value.Value) (value.Value, error) {
-	pairs, _, err := splitJsonModifyArgs("JSON_ARRAY_APPEND", args)
+	// The trailing optional BOOL is append_each_element (default
+	// TRUE): an ARRAY value is appended element by element unless it
+	// is FALSE (json_functions.md, JSON_ARRAY_APPEND).
+	pairs, appendEachElement, err := splitJsonModifyArgs("JSON_ARRAY_APPEND", args, true)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +316,11 @@ func BindJsonArrayAppend(args ...value.Value) (value.Value, error) {
 		return nil, fmt.Errorf("JSON_ARRAY_APPEND: invalid JSON: %w", err)
 	}
 	for _, p := range pairs {
-		doc = jsonModify(doc, p.path, p.value, true)
+		val := p.value
+		if !appendEachElement {
+			val = wrapNonArray(val)
+		}
+		doc = jsonModify(doc, p.path, val, true)
 	}
 	out, err := json.Marshal(doc)
 	if err != nil {
@@ -474,7 +481,7 @@ func jsonModify(doc any, path string, val any, append bool) any {
 		// the document is an array, mirroring the upstream behaviour.
 		if append {
 			if arr, ok := doc.([]any); ok {
-				return append1(arr, val)
+				return appendValues(arr, val)
 			}
 		}
 		return doc
@@ -488,7 +495,7 @@ func jsonModify(doc any, path string, val any, append bool) any {
 			if tail == "" {
 				if arr, ok := m[field].([]any); ok {
 					if append {
-						m[field] = append1(arr, val)
+						m[field] = appendValues(arr, val)
 					} else {
 						m[field] = prepend(arr, val)
 					}
@@ -575,7 +582,14 @@ func jsonModify(doc any, path string, val any, append bool) any {
 	return doc
 }
 
-func append1(arr []any, v any) []any { return append(arr, v) }
+// appendValues appends v, or each element of v when it is an array
+// (wrapNonArray protects arrays that must stay one element).
+func appendValues(arr []any, v any) []any {
+	if sub, ok := v.([]any); ok {
+		return append(arr, sub...)
+	}
+	return append(arr, v)
+}
 func prepend(arr []any, v any) []any { return append([]any{v}, arr...) }
 
 // appendSlice / appendOne are wrappers used inside jsonModify, which

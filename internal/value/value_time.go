@@ -69,7 +69,7 @@ func (t TimeValue) ToInt64() (int64, error) {
 }
 
 func (t TimeValue) ToString() (string, error) {
-	return time.Time(t).Format("15:04:05.999999"), nil
+	return time.Time(t).Format("15:04:05") + fractionInGroups(time.Time(t)), nil
 }
 
 func (t TimeValue) ToBytes() ([]byte, error) {
@@ -109,7 +109,7 @@ func (t TimeValue) ToRat() (*big.Rat, error) {
 }
 
 func (t TimeValue) Format(verb rune) string {
-	formatted := time.Time(t).Format("15:04:05.999999")
+	formatted := time.Time(t).Format("15:04:05") + fractionInGroups(time.Time(t))
 	switch verb {
 	case 't':
 		return formatted
@@ -120,5 +120,24 @@ func (t TimeValue) Format(verb rune) string {
 }
 
 func (t TimeValue) Interface() any {
-	return time.Time(t).Format("15:04:05.999999")
+	return time.Time(t).Format("15:04:05") + fractionInGroups(time.Time(t))
+}
+
+// FractionInGroups is fractionInGroups for other packages.
+func FractionInGroups(t time.Time) string { return fractionInGroups(t) }
+
+// fractionInGroups formats t's fractional seconds the way BigQuery prints
+// DATETIME, TIME and TIMESTAMP text: omitted when zero, otherwise padded
+// to 3, 6 or 9 digits (".5" -> ".500", ".7891" -> ".789100").
+func fractionInGroups(t time.Time) string {
+	ns := t.Nanosecond()
+	switch {
+	case ns == 0:
+		return ""
+	case ns%1000000 == 0:
+		return fmt.Sprintf(".%03d", ns/1000000)
+	case ns%1000 == 0:
+		return fmt.Sprintf(".%06d", ns/1000)
+	}
+	return fmt.Sprintf(".%09d", ns)
 }

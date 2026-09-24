@@ -206,6 +206,14 @@ func scalarEqual(exp, got Val) bool {
 		}
 		return floatEqualULP(exp.F, got.F)
 	}
+	if exp.Kind == "INTERVAL" && exp.S != got.S {
+		// The reference test driver compares INTERVAL values with
+		// IntervalValue equality, which normalises months to 30 days
+		// and days to 24 hours (INTERVAL 1 MONTH = INTERVAL 30 DAY).
+		ek, eok := intervalKey(exp.S)
+		gk, gok := intervalKey(got.S)
+		return eok && gok && ek.Cmp(gk) == 0
+	}
 	return exp.S == got.S
 }
 

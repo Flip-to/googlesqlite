@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"strings"
 	"fmt"
 	"sort"
 
@@ -71,9 +72,19 @@ func (a *Aggregator) process(values []value.Value, opt *Option) error {
 			}
 			a.distinctNil = true
 		} else {
-			key, err := value.DistinctKey(values[0])
-			if err != nil {
-				return err
+			var key string
+			if sv, ok := values[0].(value.StringValue); ok && strings.HasPrefix(string(sv), collationPackPrefix) {
+				// DISTINCT over a collated argument: deduplicate on the
+				// collation key and aggregate the original string.
+				k, orig := splitCollationPacked(string(sv))
+				key = "collation:" + k
+				values = append([]value.Value{value.StringValue(orig)}, values[1:]...)
+			} else {
+				k, err := value.DistinctKey(values[0])
+				if err != nil {
+					return err
+				}
+				key = k
 			}
 			if _, exists := a.distinctMap[key]; exists {
 				return nil
@@ -82,6 +93,18 @@ func (a *Aggregator) process(values []value.Value, opt *Option) error {
 		}
 	}
 	return a.step(values, opt)
+}
+
+// collationPackPrefix mirrors internal/functions/collation's PACK
+// envelope (the helper package cannot import it without a cycle).
+const collationPackPrefix = "\x00\x01gsqlcoll:"
+
+func splitCollationPacked(s string) (key, orig string) {
+	rest := s[len(collationPackPrefix):]
+	if i := strings.IndexByte(rest, 1); i >= 0 {
+		return rest[:i], rest[i+1:]
+	}
+	return rest, rest
 }
 
 func (a *Aggregator) Done() (any, error) {

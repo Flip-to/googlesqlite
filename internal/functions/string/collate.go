@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/goccy/googlesqlite/internal/value"
-	"golang.org/x/text/collate"
 	"golang.org/x/text/language"
 )
 
@@ -29,19 +28,11 @@ func COLLATE(v, spec string) (value.Value, error) {
 			return nil, fmt.Errorf("COLLATE: unsupported collation attribute %s", splitted[1])
 		}
 	}
-	// Project the value to a normalised form whose lexicographic
-	// ordering matches the requested collation, so a subsequent
-	// `<` / `>` / `=` comparison between two COLLATE results
-	// (or routing through the `googlesqlite_collate` SQLite
-	// collation) observes the collation-aware order. For `und:ci`
-	// we fold to lower case via Unicode case mapping; other
-	// language tags reuse the same fold which is acceptable for
-	// the upstream Examples that exercise plain ASCII / Latin.
-	if caseInsensitive {
-		var buf collate.Buffer
-		_ = collate.New(tag, collate.IgnoreCase).KeyFromString(&buf, v)
-		return value.StringValue(strings.ToLower(v)), nil
-	}
+	// COLLATE only attaches a collation annotation; the value itself
+	// is unchanged. Collation-sensitive operations are lowered by the
+	// formatter onto internal/functions/collation.
+	_ = tag
+	_ = caseInsensitive
 	return value.StringValue(v), nil
 }
 

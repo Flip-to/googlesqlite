@@ -432,8 +432,9 @@ func TestCurrentTimeWithTime(t *testing.T) {
 		t.Fatalf("CURRENT_TIME_WITH_TIME: %v", err)
 	}
 	tt, _ := got.ToTime()
-	if !tt.Equal(now) {
-		t.Fatalf("want %v, got %v", now, tt)
+	// Current-time values have microsecond precision, as in BigQuery.
+	if want := now.Truncate(gotime.Microsecond); !tt.Equal(want) {
+		t.Fatalf("want %v, got %v", want, tt)
 	}
 }
 

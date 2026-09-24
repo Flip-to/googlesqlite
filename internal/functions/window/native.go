@@ -82,7 +82,7 @@ func (a *arrayAggWindowNative) Done() (any, error) {
 		if a.distinct {
 			key := "<nil>"
 			if v != nil {
-				k, err := v.ToString()
+				k, err := value.DistinctKey(v)
 				if err != nil {
 					return nil, err
 				}

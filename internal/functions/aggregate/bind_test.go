@@ -409,10 +409,11 @@ func TestBindArrayAgg(t *testing.T) {
 		t.Fatalf("got %d", len(arr.Values))
 	}
 
-	// ARRAY_AGG with NULL input -> error.
+	// ARRAY_AGG keeps NULL inputs (GoogleSQL compliance
+	// array_aggregation.test, array_agg_with_nulls).
 	a = newAgg(t, BindArrayAgg())
-	if err := a.Step(nil); err == nil {
-		t.Fatal("expected error on NULL input")
+	if err := a.Step(nil); err != nil {
+		t.Fatalf("NULL input: %v", err)
 	}
 
 	// ARRAY_AGG over zero input rows is NULL, not an empty array.

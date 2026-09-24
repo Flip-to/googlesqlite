@@ -1,6 +1,7 @@
 package value
 
 import (
+	"time"
 	"fmt"
 	"strconv"
 	"strings"
@@ -24,7 +25,11 @@ func EncodeJSON(v Value) (string, error) {
 			return strconv.Quote(strconv.FormatInt(int64(vv), 10)), nil
 		}
 		return strconv.FormatInt(int64(vv), 10), nil
-	case DateValue, DatetimeValue, TimeValue, TimestampValue:
+	case DatetimeValue:
+		// "2024-01-01T12:34:06.500": fraction in groups of three digits.
+		t := time.Time(vv)
+		return strconv.Quote(t.Format("2006-01-02T15:04:05") + fractionInGroups(t)), nil
+	case DateValue, TimeValue, TimestampValue:
 		s, err := vv.ToString()
 		if err != nil {
 			return "", err

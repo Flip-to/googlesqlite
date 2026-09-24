@@ -147,6 +147,7 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 		args = append(args, arg)
 	}
 	funcName := m1(m1(node.Function()).FullName(false))
+	rawName := funcName
 	funcName = strings.Replace(funcName, ".", "_", -1)
 
 	_, existsCurrentTimeFunc := currentTimeFuncMap[funcName]
@@ -204,6 +205,12 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 		}
 		funcName = fname
 	}
+	args = envelopeJSONBoolArgs(node, rawName, args)
+	if rawName == "json_object" && firstArgIsArray(node) {
+		// JSON_OBJECT(ARRAY<STRING> keys, ARRAY<T> values).
+		funcName += "_arrays"
+	}
+	funcName, args = applyCallCollation(node, rawName, funcName, args)
 	return funcName, args, nil
 }
 
@@ -232,8 +239,15 @@ func (n *ColumnRefNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
-	columnMap := columnRefMap(ctx)
 	col, _ := n.node.Column()
+	if subst := columnIDSubstitution(ctx); subst != nil {
+		if id, err := col.ColumnId(); err == nil {
+			if sql, ok := subst[id]; ok {
+				return sql, nil
+			}
+		}
+	}
+	columnMap := columnRefMap(ctx)
 	colName := uniqueColumnName(ctx, col)
 	if ref, exists := columnMap[colName]; exists {
 		delete(columnMap, colName)
@@ -329,7 +343,7 @@ func (n *FilterFieldNode) FormatSQL(ctx context.Context) (string, error) {
 	), nil
 }
 
-func (n *FunctionCallNode) FormatSQL(ctx context.Context) (string, error) {
+func (n *FunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
@@ -643,7 +657,7 @@ func (n *FunctionCallNode) formatCaseWithValue(_ context.Context, args []string)
 	return stmt, nil
 }
 
-func (n *AggregateFunctionCallNode) FormatSQL(ctx context.Context) (string, error) {
+func (n *AggregateFunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
@@ -711,16 +725,33 @@ func (n *AggregateFunctionCallNode) FormatSQL(ctx context.Context) (string, erro
 	}
 	funcMap := funcMapFromContext(ctx)
 	if spec, exists := funcMap[funcName]; exists {
-		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
+		sql, err := spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
+		if err != nil || !spec.IsAggregate {
+			return sql, err
+		}
+		// A SQL UDA body need not contain an aggregate call (e.g. a
+		// constant), but SQLite only aggregates a SELECT that has one.
+		// The always-true COUNT(*) makes the enclosing SELECT an
+		// aggregation, so it yields one row per group (and one row for
+		// an empty input without GROUP BY) as GoogleSQL requires.
+		return fmt.Sprintf("CASE WHEN COUNT(*) >= 0 THEN %s END", sql), nil
+	}
+	args = collationPackDistinctArg(n.node.ResolvedFunctionCallBase, m1(n.node.Distinct()), args)
+	if funcName == "googlesqlite_array_agg" && inNestedArrayAgg(ctx) {
+		funcName = "googlesqlite_array_agg_nullable"
 	}
 	var opts []string
 	for _, item := range m1(n.node.OrderByItemList()) {
 		columnRef := m1(item.ColumnRef())
 		colName := uniqueColumnName(ctx, m1(columnRef.Column()))
+		orderKey := fmt.Sprintf("`%s`", colName)
+		if spec := collationName(m1(item.Collation())); spec != "" {
+			orderKey = collationKeySQL(orderKey, spec)
+		}
 		if m1(item.IsDescending()) {
-			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(`%s`, false)", colName))
+			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(%s, false)", orderKey))
 		} else {
-			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(`%s`, true)", colName))
+			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(%s, true)", orderKey))
 		}
 	}
 	if m1(n.node.Distinct()) {
@@ -738,8 +769,10 @@ func (n *AggregateFunctionCallNode) FormatSQL(ctx context.Context) (string, erro
 		opts = append(opts, "googlesqlite_ignore_nulls()")
 	case googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierRespectNulls:
 	default:
-		// APPROX_QUANTILES ignores NULLs unless RESPECT NULLS is given.
-		if m1(m1(n.node.Function()).FullName(false)) == "approx_quantiles" {
+		// APPROX_QUANTILES and PERCENTILE_CONT / PERCENTILE_DISC
+		// ignore NULLs unless RESPECT NULLS is given.
+		switch m1(m1(n.node.Function()).FullName(false)) {
+		case "approx_quantiles", "percentile_cont", "percentile_disc":
 			opts = append(opts, "googlesqlite_ignore_nulls()")
 		}
 	}
@@ -825,6 +858,10 @@ var customNativeWindowFuncMap = map[string]string{
 	// ARRAY_CONCAT_AGG flattens per-row ARRAY<T> arguments into a
 	// single ARRAY<T> over the active frame.
 	"array_concat_agg": "googlesqlite_window_array_concat_agg",
+	// HLL_COUNT.* aggregates, replayed over the active frame.
+	"hll_count_init":          "googlesqlite_window_hll_count_init",
+	"hll_count_merge":         "googlesqlite_window_hll_count_merge",
+	"hll_count_merge_partial": "googlesqlite_window_hll_count_merge_partial",
 }
 
 // nativeWindowFuncForName returns the SQLite native name for a
@@ -837,7 +874,7 @@ func nativeWindowFuncForName(name string) string {
 	return ""
 }
 
-func (n *AnalyticFunctionCallNode) FormatSQL(ctx context.Context) (string, error) {
+func (n *AnalyticFunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
@@ -855,6 +892,14 @@ func (n *AnalyticFunctionCallNode) FormatSQL(ctx context.Context) (string, error
 	// `$` (e.g. `$count_star` for COUNT(*)). Strip it for lookup.
 	rawName = strings.TrimPrefix(rawName, "$")
 
+	// RANGE frames SQLite cannot evaluate over the ORDER BY key (see
+	// internal/functions/window/range_frame.go).
+	// The order list starts with the partition columns.
+	if keys := orderColumns[min(len(analyticPartitionColumnNamesFromContext(ctx)), len(orderColumns)):]; n.needsGoRangeFrame(keys) {
+		if inner, ok := n.goRangeInner(rawName); ok {
+			return n.formatGoRange(ctx, inner, keys)
+		}
+	}
 	// SUM(DISTINCT x) / COUNT(DISTINCT x) / AVG(DISTINCT x) — SQLite
 	// rejects DISTINCT in OVER, but our custom natives know how to
 	// dedupe. Take precedence over the SQLite-native fast path.
@@ -877,6 +922,9 @@ func (n *AnalyticFunctionCallNode) FormatSQL(ctx context.Context) (string, error
 		return n.formatNative(ctx, typed, orderColumns, true)
 	}
 	if native := nativeWindowFuncForName(rawName); native != "" && !n.requiresPredecessorEmulation() {
+		if rawName == "sum" && !m1(n.node.Distinct()) && n.int64Argument() && !n.isRowsRunningFrame() {
+			return n.formatInt64Sum(ctx, orderColumns)
+		}
 		return n.formatNative(ctx, native, orderColumns, false)
 	}
 	if custom, ok := customNativeWindowFuncMap[rawName]; ok && !n.requiresPredecessorEmulation() {
@@ -1032,7 +1080,7 @@ func (n *AnalyticFunctionCallNode) requiresPredecessorEmulation() bool {
 // trailing arguments. SQLite built-ins reject those, so we only
 // include them when calling our custom googlesqlite_window_<name>
 // implementations that know how to parse them.
-func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName string, orderColumns []*analyticOrderBy, includeOpts bool) (string, error) {
+func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName string, orderColumns []*analyticOrderBy, includeOpts bool, wrapArg ...func(string) string) (string, error) {
 	// Collect the user-supplied value arguments (without our window
 	// option markers).
 	var valueArgs []string
@@ -1041,7 +1089,13 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 		if err != nil {
 			return "", err
 		}
+		for _, w := range wrapArg {
+			arg = w(arg)
+		}
 		valueArgs = append(valueArgs, arg)
+	}
+	if _, ok := collationSearchFuncs[rawFuncName(n.node.ResolvedFunctionCallBase)]; !ok {
+		_, valueArgs = applyCallCollation(n.node.ResolvedFunctionCallBase, rawFuncName(n.node.ResolvedFunctionCallBase), sqliteName, valueArgs)
 	}
 	if includeOpts {
 		if m1(n.node.Distinct()) {
@@ -1236,10 +1290,24 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 			expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), timeZoneSQL,
 		), nil
 	}
-	return fmt.Sprintf(
+	castSQL := fmt.Sprintf(
 		"googlesqlite_cast(%s, '%s', '%s', %t)",
 		expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
-	), nil
+	)
+	// STRING(L) / BYTES(L) targets (possibly inside ARRAY / STRUCT)
+	// reject values longer than L; SAFE_CAST turns that into NULL.
+	if spec := castTypeParamSpec(n.node); spec != "" {
+		lit, err := literalFromValue(value.StringValue(spec))
+		if err != nil {
+			return "", err
+		}
+		fn := "googlesqlite_check_type_parameters"
+		if m1(n.node.ReturnNullOnError()) {
+			fn = "googlesqlite_safe_check_type_parameters"
+		}
+		castSQL = fmt.Sprintf("%s(%s, %s)", fn, castSQL, lit)
+	}
+	return castSQL, nil
 }
 
 func (n *MakeStructNode) FormatSQL(ctx context.Context) (string, error) {
@@ -1599,7 +1667,7 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 	}
 	columnNames := &arraySubqueryColumnNames{}
 	ctx = withArraySubqueryColumnName(ctx, columnNames)
-	sql, err := newNode(m1(n.node.Subquery())).FormatSQL(ctx)
+	sql, err := newNode(m1(n.node.Subquery())).FormatSQL(withNestedArrayAgg(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -1615,6 +1683,21 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 			return fmt.Sprintf(
 				"(SELECT CASE WHEN (SELECT COUNT(*) FROM (%s)) = 1 THEN (%s) ELSE NULL END)",
 				sql, sql,
+			), nil
+		}
+		// Outside error-handling contexts a scalar subquery that yields
+		// more than one row is a runtime error, not "take the first row"
+		// as in SQLite. COUNT and MIN are evaluated in one pass; with at
+		// most one row MIN returns that row's value unchanged.
+		if subCols := m1(m1(n.node.Subquery()).MutableColumnList()); len(subCols) == 1 {
+			colName := uniqueColumnName(ctx, subCols[0])
+			msg, err := literalFromValue(value.StringValue("More than one element"))
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(
+				"(SELECT CASE WHEN COUNT(*) > 1 THEN googlesqlite_error(%s) ELSE MIN(`%s`) END FROM (%s))",
+				msg, colName, sql,
 			), nil
 		}
 	case googlesql.ResolvedSubqueryExprEnums_SubqueryTypeArray:
@@ -1641,7 +1724,18 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 		// — matching BigQuery semantics. The collation attached to
 		// the LHS is inherited by the entire IN comparison per
 		// SQLite rules.
-		if isStructTypedExpr(m1(n.node.InExpr())) {
+		if spec := collationName(m1(n.node.InCollation())); spec != "" {
+			subCols := m1(m1(n.node.Subquery()).MutableColumnList())
+			if len(subCols) > 0 {
+				colName := uniqueColumnName(ctx, subCols[0])
+				return fmt.Sprintf("%s IN (SELECT %s FROM (%s))",
+					collationKeySQL(expr, spec), collationKeySQL(fmt.Sprintf("`%s`", colName), spec), sql), nil
+			}
+		}
+		// INTERVAL values that are equal can be encoded differently
+		// (INTERVAL 1 MONTH = INTERVAL 30 DAY), so they take the same
+		// decoding comparison.
+		if inExpr := m1(n.node.InExpr()); isStructTypedExpr(inExpr) || isIntervalType(inExpr.Type()) {
 			return fmt.Sprintf("(%s) COLLATE googlesqlite_collate IN (%s)", expr, sql), nil
 		}
 		return fmt.Sprintf("%s IN (%s)", expr, sql), nil
@@ -1833,6 +1927,12 @@ func (n *FilterScanNode) FormatSQL(ctx context.Context) (string, error) {
 	// computed. Appending WHERE to "SELECT f(x) OVER (...) FROM t" would
 	// filter the rows first and change every window result.
 	containsTokens = containsTokens || strings.Contains(currentQuery, " OVER ")
+	// HAVING over an aggregate without GROUP BY must filter the
+	// aggregated row, not the rows fed into the aggregate
+	// (array_aggregation.test, array_agg_with_having).
+	if _, ok := m1(n.node.InputScan()).(*googlesql.ResolvedAggregateScan); ok {
+		containsTokens = true
+	}
 	if !queryWrappedInParens && containsTokens {
 		return fmt.Sprintf("( %s ) WHERE %s", input, filter), nil
 	}
@@ -1898,6 +1998,25 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 		colName := uniqueColumnName(ctx, m1(col.Column()))
 		groupByColumns = append(groupByColumns, fmt.Sprintf("`%s`", colName))
 		groupByColumnMap[colName] = struct{}{}
+	}
+	// GROUP BY a collated column groups on its collation key; the
+	// output column keeps one of the original values.
+	groupByKeys := append([]string(nil), groupByColumns...)
+	collations := m1(n.node.CollationList())
+	for i, c := range collations {
+		if spec := collationName(c); spec != "" && i < len(groupByKeys) {
+			groupByKeys[i] = collationKeySQL(groupByKeys[i], spec)
+		}
+	}
+	if len(collations) == 0 {
+		// Rewriters (UNPIVOT) build the AggregateScan without a
+		// collation_list; the grouping columns' type annotations
+		// still carry the collation.
+		for i, col := range m1(n.node.GroupByList()) {
+			if spec := groupByColumnCollation(col, m1(n.node.InputScan())); spec != "" && i < len(groupByKeys) {
+				groupByKeys[i] = collationKeySQL(groupByKeys[i], spec)
+			}
+		}
 	}
 	columns := []string{}
 	columnMap := columnRefMap(ctx)
@@ -1980,11 +2099,21 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 		}
 		stmts := []string{}
 		for i := 0; i < len(columnPatterns); i++ {
-			var groupBy string
+			// The empty grouping set () collapses all input rows into
+			// one group, and yields no row over an empty input. A
+			// constant GROUP BY key gives exactly that, even when the
+			// select list has no aggregate (grouping_sets_queries.test,
+			// grouping_func_with_single_column_rollup).
+			groupBy := "GROUP BY NULL"
 			if len(groupByColumnPatterns[i]) != 0 {
 				groupBy = fmt.Sprintf("GROUP BY %s", strings.Join(groupByColumnPatterns[i], ","))
 			}
 			formattedColumns := strings.Join(columnPatterns[i], ",")
+			if formattedColumns == "" {
+				// No aggregates and no grouping columns, e.g.
+				// SELECT 1 FROM t GROUP BY GROUPING SETS(()).
+				formattedColumns = "NULL"
+			}
 			switch getInputPattern(input) {
 			case InputKeep:
 				stmts = append(stmts, fmt.Sprintf("SELECT %s %s %s", formattedColumns, input, groupBy))
@@ -2001,16 +2130,34 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 				fmt.Sprintf("%s COLLATE googlesqlite_collate", groupByColumn),
 			)
 		}
+		if len(groupByWithCollates) == 0 {
+			return strings.Join(stmts, " UNION ALL "), nil
+		}
 		return fmt.Sprintf(
 			"%s ORDER BY %s",
 			strings.Join(stmts, " UNION ALL "),
 			strings.Join(groupByWithCollates, ","),
 		), nil
 	}
+	// Under a plain GROUP BY every grouping column is grouped, so each
+	// GROUPING() call is 0 (grouping_sets_queries.test,
+	// grouping_func_with_regular_group_by_query).
+	for _, call := range m1(n.node.GroupingCallList()) {
+		out, err := call.OutputColumn()
+		if err != nil || out == nil {
+			continue
+		}
+		name := uniqueColumnName(ctx, out)
+		for idx, col := range columnNames {
+			if col == name {
+				columns[idx] = fmt.Sprintf("0 AS `%s`", name)
+			}
+		}
+	}
 	var groupBy string
 	if len(groupByColumns) > 0 {
 		annotatedGroupByColumns := make([]string, 0, len(groupByColumns))
-		for _, groupByColumn := range groupByColumns {
+		for _, groupByColumn := range groupByKeys {
 			annotatedGroupByColumns = append(
 				annotatedGroupByColumns,
 				fmt.Sprintf("googlesqlite_group_by(%s)", groupByColumn),
@@ -2218,7 +2365,10 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
-	var opType string
+	var (
+		opType string
+		bagOp  string
+	)
 	switch m1(n.node.OpType()) {
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeUnionAll:
 		opType = "UNION ALL"
@@ -2226,10 +2376,12 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 		opType = "UNION"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeIntersectAll:
 		opType = "INTERSECT ALL"
+		bagOp = "INTERSECT"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeIntersectDistinct:
 		opType = "INTERSECT"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeExceptAll:
 		opType = "EXCEPT ALL"
+		bagOp = "EXCEPT"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeExceptDistinct:
 		opType = "EXCEPT"
 	default:
@@ -2259,6 +2411,9 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 			),
 		)
 	}
+	if sql, ok := formatCollatedSetOperation(ctx, n.node, queries); ok {
+		return sql, nil
+	}
 	columnMaps := []string{}
 	if inputItems := m1(n.node.InputItemList()); len(inputItems) != 0 {
 		for idx, col := range m1(inputItems[0].OutputColumnList()) {
@@ -2272,11 +2427,59 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 			)
 		}
 	}
+	if bagOp != "" {
+		return formatBagSetOperation(ctx, n.node, queries, bagOp), nil
+	}
 	return fmt.Sprintf(
 		"SELECT %s FROM (%s)",
 		strings.Join(columnMaps, ","),
 		strings.Join(queries, fmt.Sprintf(" %s ", opType)),
 	), nil
+}
+
+// formatBagSetOperation emits INTERSECT ALL / EXCEPT ALL, which SQLite
+// does not support natively. Each row is tagged with its occurrence
+// number among identical rows (ROW_NUMBER() OVER (PARTITION BY every
+// column)), which turns bag semantics into set semantics: the k-th copy
+// of a row survives INTERSECT iff both sides have at least k copies, and
+// survives EXCEPT iff the right side has fewer than k copies. SQLite's
+// compound operators treat NULLs as equal, matching GoogleSQL. Inputs
+// are folded left to right and renumbered at every step so that chains
+// such as `A EXCEPT ALL B EXCEPT ALL C` keep left-associative semantics.
+func formatBagSetOperation(ctx context.Context, node *googlesql.ResolvedSetOperationScan, queries []string, op string) string {
+	items := m1(node.InputItemList())
+	outCols := m1(node.ColumnList())
+	pos := make([]string, len(outCols))
+	for i := range outCols {
+		pos[i] = fmt.Sprintf("`googlesqlite_setop_c%d`", i)
+	}
+	posList := strings.Join(pos, ", ")
+	numbered := func(input string) string {
+		return fmt.Sprintf(
+			"SELECT %s, ROW_NUMBER() OVER (PARTITION BY %s) AS `googlesqlite_setop_rn` FROM (%s)",
+			posList, posList, input,
+		)
+	}
+	branch := func(idx int) string {
+		cols := m1(items[idx].OutputColumnList())
+		aliased := make([]string, len(cols))
+		for i, col := range cols {
+			aliased[i] = fmt.Sprintf("`%s` AS %s", uniqueColumnName(ctx, col), pos[i])
+		}
+		return fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(aliased, ", "), queries[idx])
+	}
+	acc := branch(0)
+	for idx := 1; idx < len(queries); idx++ {
+		acc = fmt.Sprintf(
+			"SELECT %s FROM (%s %s %s)",
+			posList, numbered(acc), op, numbered(branch(idx)),
+		)
+	}
+	final := make([]string, len(outCols))
+	for i, col := range outCols {
+		final[i] = fmt.Sprintf("%s AS `%s`", pos[i], uniqueColumnName(ctx, col))
+	}
+	return fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(final, ","), acc)
 }
 
 func (n *OrderByScanNode) FormatSQL(ctx context.Context) (string, error) {
@@ -2319,10 +2522,14 @@ func (n *OrderByScanNode) FormatSQL(ctx context.Context) (string, error) {
 		if isFloatType(m1(m1(item.ColumnRef()).Column()).Type()) {
 			orderByColumns = append(orderByColumns, floatOrderClassKey(fmt.Sprintf("`%s`", colName), !m1(item.IsDescending())))
 		}
+		orderKey := fmt.Sprintf("`%s`", colName)
+		if spec := collationName(m1(item.Collation())); spec != "" {
+			orderKey = collationKeySQL(orderKey, spec)
+		}
 		if m1(item.IsDescending()) {
-			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate DESC", colName))
+			orderByColumns = append(orderByColumns, fmt.Sprintf("%s COLLATE googlesqlite_collate DESC", orderKey))
 		} else {
-			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate", colName))
+			orderByColumns = append(orderByColumns, fmt.Sprintf("%s COLLATE googlesqlite_collate", orderKey))
 		}
 	}
 	formattedInput, err := formatInput(input)
@@ -2433,11 +2640,25 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 
 		if m1(group.PartitionBy()) != nil {
 			var partitionColumns []string
-			for _, columnRef := range m1(m1(group.PartitionBy()).PartitionByList()) {
+			partitionCollations := m1(m1(group.PartitionBy()).CollationList())
+			for i, columnRef := range m1(m1(group.PartitionBy()).PartitionByList()) {
 				colName := fmt.Sprintf("`%s`", uniqueColumnName(ctx, m1(columnRef.Column())))
+				partitionColumn := colName
+				if isIntervalType(m1(columnRef.Column()).Type()) {
+					// Equal intervals can be written differently
+					// (INTERVAL 1 MONTH = INTERVAL 30 DAY), so
+					// partition on the normalised key.
+					partitionColumn = fmt.Sprintf("googlesqlite_group_by(%s)", colName)
+				}
+				if i < len(partitionCollations) {
+					if spec := collationName(partitionCollations[i]); spec != "" {
+						colName = collationKeySQL(colName, spec)
+						partitionColumn = colName
+					}
+				}
 				partitionColumns = append(
 					partitionColumns,
-					colName,
+					partitionColumn,
 				)
 				order := &analyticOrderBy{
 					column: colName,
@@ -2452,6 +2673,9 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 			for _, item := range m1(m1(group.OrderBy()).OrderByItemList()) {
 				colName := uniqueColumnName(ctx, m1(m1(item.ColumnRef()).Column()))
 				formattedColName := fmt.Sprintf("`%s`", colName)
+				if spec := collationName(m1(item.Collation())); spec != "" {
+					formattedColName = collationKeySQL(formattedColName, spec)
+				}
 				nullOrder := nullOrderUnspecified
 				switch m1(item.NullOrder()) {
 				case googlesql.ResolvedOrderByItemEnums_NullOrderModeNullsFirst:
@@ -2868,6 +3092,7 @@ func (n *RecursiveScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	rec = flattenRecursiveColumnProjection(rec)
 	// Substitute RecursiveRefScan column IDs in the recursive branch
 	// with the canonical RecursiveScan ColumnList IDs so SQLite's
 	// single-column-name view of the CTE matches the outer query's
@@ -2894,6 +3119,25 @@ func (n *RecursiveScanNode) FormatSQL(ctx context.Context) (string, error) {
 		op = "UNION"
 	}
 	return fmt.Sprintf("%s %s %s", nonRec, op, rec), nil
+}
+
+// recursiveColumnProjectionRe matches a pure column re-projection of a
+// plain column projection of one table, the shape a BY NAME or
+// CORRESPONDING recursive term takes after its columns are reordered.
+var recursiveColumnProjectionRe = regexp.MustCompile("^\\s*SELECT ((?:`[^`]+`\\s*,\\s*)*`[^`]+`)\\s+FROM \\(\\s*SELECT (?:`[^`]+`\\s*,\\s*)*`[^`]+`\\s+FROM (`[^`]+`)\\s*\\)\\s*$")
+
+// flattenRecursiveColumnProjection rewrites
+// `SELECT a, b FROM (SELECT b, a FROM t)` to `SELECT a, b FROM t`.
+// SQLite rejects a recursive CTE reference inside a subquery of the
+// recursive term, and the inner projection only renames nothing and
+// reorders columns, so reading the outer column list from the table
+// directly is equivalent.
+func flattenRecursiveColumnProjection(sql string) string {
+	m := recursiveColumnProjectionRe.FindStringSubmatch(sql)
+	if m == nil {
+		return sql
+	}
+	return fmt.Sprintf("SELECT %s FROM %s", m[1], m[2])
 }
 
 func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
@@ -3292,6 +3536,10 @@ func (n *ArgumentRefNode) FormatSQL(ctx context.Context) (string, error) {
 }
 
 // isFloatType reports whether t is DOUBLE or FLOAT.
+func isIntervalType(t googlesql.Googlesql_TypeNode, _ error) bool {
+	return t != nil && m1(t.Kind()) == googlesql.TypeKindTypeInterval
+}
+
 func isFloatType(t googlesql.Googlesql_TypeNode, _ error) bool {
 	if t == nil {
 		return false
@@ -3387,4 +3635,177 @@ func floatLiteralImageForNumericCast(ctx context.Context, cast *googlesql.Resolv
 		return "", false
 	}
 	return image, true
+}
+
+// needsGoRangeFrame reports whether a RANGE frame must be evaluated by
+// googlesqlite_window_range instead of SQLite: frames with an offset
+// boundary (SQLite cannot do exact arithmetic on NUMERIC / BIGNUMERIC
+// keys stored as TEXT, and INT64 `key - offset` overflows at the ends of
+// the domain) and any RANGE frame over a DOUBLE key (NaN and +/-inf
+// peers).
+func (n *AnalyticFunctionCallNode) needsGoRangeFrame(orderColumns []*analyticOrderBy) bool {
+	frame, _ := n.node.WindowFrame()
+	if frame == nil || m1(frame.FrameUnit()) != googlesql.ResolvedWindowFrameEnums_FrameUnitRange {
+		return false
+	}
+	if len(orderColumns) != 1 {
+		return false
+	}
+	if orderColumns[0].isFloat {
+		return true
+	}
+	for _, expr := range []*googlesql.ResolvedWindowFrameExpr{m1(frame.StartExpr()), m1(frame.EndExpr())} {
+		switch m1(expr.BoundaryType()) {
+		case googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeOffsetPreceding,
+			googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeOffsetFollowing:
+			return true
+		}
+	}
+	return false
+}
+
+// goRangeInner returns the registered Go window aggregate that
+// googlesqlite_window_range evaluates over each RANGE frame.
+func (n *AnalyticFunctionCallNode) goRangeInner(rawName string) (string, bool) {
+	if m1(n.node.Distinct()) {
+		if custom, ok := distinctAwareNativeWindowFuncs[rawName]; ok {
+			return custom, true
+		}
+		if typed, ok := typedWindowFuncs[rawName]; ok && (rawName == "min" || rawName == "max") {
+			return typed, true
+		}
+		if custom, ok := customNativeWindowFuncMap[rawName]; ok {
+			return custom, true
+		}
+		return "", false
+	}
+	ignoreNulls := m1(n.node.NullHandlingModifier()) == googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierIgnoreNulls
+	switch rawName {
+	case "first_value", "last_value", "nth_value":
+		if ignoreNulls {
+			return "googlesqlite_window_" + rawName + "_ignore_nulls", true
+		}
+		return "googlesqlite_window_typed_" + rawName, true
+	case "count":
+		return "googlesqlite_window_typed_count", true
+	}
+	if typed, ok := typedWindowFuncs[rawName]; ok {
+		return typed, true
+	}
+	if custom, ok := customNativeWindowFuncMap[rawName]; ok {
+		return custom, true
+	}
+	return "", false
+}
+
+// formatGoRange emits a googlesqlite_window_range call; see
+// internal/functions/window/range_frame.go for the calling convention.
+func (n *AnalyticFunctionCallNode) formatGoRange(ctx context.Context, inner string, orderColumns []*analyticOrderBy) (string, error) {
+	frame, _ := n.node.WindowFrame()
+	col := orderColumns[0]
+	nameLit, err := literalFromGoogleSQLValue(*m1(googlesql.NewValueString(inner)))
+	if err != nil {
+		return "", err
+	}
+	flags := 0
+	if !col.isAsc {
+		flags |= window.RangeFrameFlagDesc
+	}
+	nullsLast := !col.isAsc
+	switch col.nullOrder {
+	case nullOrderFirst:
+		nullsLast = false
+	case nullOrderLast:
+		nullsLast = true
+	}
+	if nullsLast {
+		flags |= window.RangeFrameFlagNullsLast
+	}
+	args := []string{nameLit, fmt.Sprint(flags)}
+	for _, expr := range []*googlesql.ResolvedWindowFrameExpr{m1(frame.StartExpr()), m1(frame.EndExpr())} {
+		typ := m1(expr.BoundaryType())
+		offset := "NULL"
+		switch typ {
+		case googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeOffsetPreceding,
+			googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeOffsetFollowing:
+			offset, err = newNode(m1(expr.Expression())).FormatSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+		}
+		args = append(args, fmt.Sprint(int(window.ToWindowBoundaryType(typ))), offset)
+	}
+	args = append(args, col.column)
+	for _, a := range m1(n.node.ResolvedFunctionCallBase.ArgumentList()) {
+		arg, err := newNode(a).FormatSQL(ctx)
+		if err != nil {
+			return "", err
+		}
+		args = append(args, arg)
+	}
+	if m1(n.node.Distinct()) {
+		args = append(args, "googlesqlite_distinct()")
+	}
+	if m1(n.node.NullHandlingModifier()) != googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierRespectNulls {
+		args = append(args, "googlesqlite_ignore_nulls()")
+	}
+	var clauses []string
+	if cols := analyticPartitionColumnNamesFromContext(ctx); len(cols) > 0 {
+		clauses = append(clauses, "PARTITION BY "+strings.Join(cols, ","))
+	}
+	var ob []string
+	switch col.nullOrder {
+	case nullOrderFirst:
+		ob = append(ob, fmt.Sprintf("(%s IS NOT NULL)", col.column))
+	case nullOrderLast:
+		ob = append(ob, fmt.Sprintf("(%s IS NULL)", col.column))
+	}
+	if col.isFloat {
+		ob = append(ob, floatOrderClassKey(col.column, col.isAsc))
+	}
+	suffix := " COLLATE googlesqlite_collate"
+	if !col.isAsc {
+		suffix += " DESC"
+	}
+	ob = append(ob, col.column+suffix)
+	clauses = append(clauses, "ORDER BY "+strings.Join(ob, ","))
+	clauses = append(clauses, "ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING")
+	return fmt.Sprintf("googlesqlite_window_range(%s) OVER (%s)", strings.Join(args, ","), strings.Join(clauses, " ")), nil
+}
+
+// int64Argument reports whether the first argument is INT64.
+func (n *AnalyticFunctionCallNode) int64Argument() bool {
+	args := m1(n.node.ArgumentList())
+	return len(args) > 0 && m1(m1(args[0].Type()).Kind()) == googlesql.TypeKindTypeInt64
+}
+
+// formatInt64Sum emits SUM(x) OVER (...) for INT64 x as two SQLite
+// sums over the 32-bit halves of x, recombined with an overflow check
+// on the final total only. SQLite's sum raises "integer overflow" as
+// soon as a running total leaves the INT64 range, while GoogleSQL only
+// fails when the SUM result itself overflows.
+func (n *AnalyticFunctionCallNode) formatInt64Sum(ctx context.Context, orderColumns []*analyticOrderBy) (string, error) {
+	hi, err := n.formatNative(ctx, "sum", orderColumns, false, func(a string) string { return "((" + a + ") >> 32)" })
+	if err != nil {
+		return "", err
+	}
+	lo, err := n.formatNative(ctx, "sum", orderColumns, false, func(a string) string { return "((" + a + ") & 4294967295)" })
+	if err != nil {
+		return "", err
+	}
+	return "googlesqlite_int64_sum_combine(" + hi + "," + lo + ")", nil
+}
+
+// isRowsRunningFrame reports a ROWS BETWEEN UNBOUNDED PRECEDING AND
+// CURRENT ROW frame. SQLite steps such a frame one row at a time and
+// never inverses, so every intermediate SUM is itself an output value:
+// the built-in sum then overflows exactly when the GoogleSQL result
+// does, and the split in formatInt64Sum is unnecessary.
+func (n *AnalyticFunctionCallNode) isRowsRunningFrame() bool {
+	frame, _ := n.node.WindowFrame()
+	if frame == nil || m1(frame.FrameUnit()) != googlesql.ResolvedWindowFrameEnums_FrameUnitRows {
+		return false
+	}
+	return m1(m1(frame.StartExpr()).BoundaryType()) == googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeUnboundedPreceding &&
+		m1(m1(frame.EndExpr()).BoundaryType()) == googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeCurrentRow
 }

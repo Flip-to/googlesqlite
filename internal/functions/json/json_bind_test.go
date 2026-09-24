@@ -570,18 +570,29 @@ func TestBindJsonStripNulls(t *testing.T) {
 		t.Fatalf("got %q", s)
 	}
 
-	// Top-level null -> SQL NULL.
+	// Nothing left -> JSON null (json_functions.md JSON_STRIP_NULLS:
+	// "If the function generates JSON with nothing in it, the function
+	// returns a JSON null").
 	v, err := BindJsonStripNulls(value.StringValue("null"))
-	if err != nil || v != nil {
-		t.Fatal("expected null")
+	if err != nil || mustString(t, v) != "null" {
+		t.Fatalf("expected JSON null, got %v (%v)", v, err)
 	}
 
-	// Array preserved with nulls.
-	got, err = BindJsonStripNulls(value.StringValue(`[1, null]`))
+	// include_arrays defaults to TRUE: nulls are removed from arrays
+	// (json_functions.md: JSON '[1, null, 2, null]' -> [1,2]).
+	got, err = BindJsonStripNulls(value.StringValue(`[1, null, 2, null]`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(mustString(t, got), "null") {
+	if mustString(t, got) != "[1,2]" {
+		t.Fatalf("got %q", mustString(t, got))
+	}
+	// include_arrays=>FALSE keeps them: [1,null,2,null].
+	got, err = BindJsonStripNulls(value.StringValue(`[1, null, 2, null]`), value.BoolValue(false), value.BoolValue(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mustString(t, got) != "[1,null,2,null]" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -1595,10 +1606,22 @@ func TestBindJsonSetArrayPaths(t *testing.T) {
 		t.Fatal("expected output")
 	}
 
-	// Out-of-range index leaves array unchanged.
+	// An index past the end pads the array with JSON nulls when
+	// create_if_missing is TRUE (json_functions.md JSON_SET) ...
+	got, err = BindJsonSet(value.StringValue(`[1,2]`),
+		value.StringValue("$[4]"), value.IntValue(0),
+		value.BoolValue(true),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mustString(t, got) != "[1,2,null,null,0]" {
+		t.Fatalf("got %q", mustString(t, got))
+	}
+	// ... and is ignored when it is FALSE.
 	got, err = BindJsonSet(value.StringValue(`[1,2]`),
 		value.StringValue("$[99]"), value.IntValue(0),
-		value.BoolValue(true),
+		value.BoolValue(false),
 	)
 	if err != nil {
 		t.Fatal(err)

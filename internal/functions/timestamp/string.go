@@ -2,6 +2,7 @@ package timestamp
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/goccy/googlesqlite/internal/functions/helper"
@@ -13,7 +14,19 @@ func STRING(t time.Time, zone string) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	return value.StringValue(t.In(loc).Format("2006-01-02 15:04:05.999999999+00")), nil
+	t = t.In(loc)
+	// BigQuery prints the zone's offset as +HH, or +HH:MM when it has
+	// minutes (STRING(TIMESTAMP ..., 'Asia/Kolkata') ends in +05:30).
+	_, off := t.Zone()
+	sign := "+"
+	if off < 0 {
+		sign, off = "-", -off
+	}
+	zoneText := fmt.Sprintf("%s%02d", sign, off/3600)
+	if m := off % 3600 / 60; m != 0 {
+		zoneText += fmt.Sprintf(":%02d", m)
+	}
+	return value.StringValue(t.Format("2006-01-02 15:04:05") + value.FractionInGroups(t) + zoneText), nil
 }
 
 func BindString(args ...value.Value) (value.Value, error) {
@@ -25,6 +38,15 @@ func BindString(args ...value.Value) (value.Value, error) {
 	}
 	jsonValue, ok := args[0].(value.JsonValue)
 	if ok {
+		// STRING(json_expr) accepts only a JSON string; JSON null gives
+		// SQL NULL (json_functions.md, STRING).
+		body := strings.TrimSpace(string(jsonValue))
+		if body == "null" {
+			return nil, nil
+		}
+		if body == "" || body[0] != '"' {
+			return nil, fmt.Errorf("The provided JSON input is not a string") //nolint:staticcheck // BigQuery's error text
+		}
 		return value.StringValue(fmt.Sprint(jsonValue.Interface())), nil
 	}
 	t, err := args[0].ToTime()

@@ -528,6 +528,35 @@ func canonInterval(s string) string {
 	return fmt.Sprintf("%s%d-%d %d %s%d:%d:%d%s", m[1], atoi(m[2]), atoi(m[3]), atoi(m[4]), m[5], atoi(m[6]), atoi(m[7]), atoi(m[8]), frac)
 }
 
+// intervalKey returns an interval's length in nanoseconds with 30-day
+// months and 24-hour days, the key INTERVAL equality compares.
+func intervalKey(s string) (*big.Int, bool) {
+	m := intervalRe.FindStringSubmatch(s)
+	if m == nil {
+		return nil, false
+	}
+	atoi := func(x string) *big.Int { n, _ := new(big.Int).SetString(x, 10); return n }
+	months := new(big.Int).Add(new(big.Int).Mul(atoi(m[2]), big.NewInt(12)), atoi(m[3]))
+	if m[1] == "-" {
+		months.Neg(months)
+	}
+	k := new(big.Int).Mul(months, big.NewInt(30))
+	k.Add(k, atoi(m[4]))
+	k.Mul(k, big.NewInt(86400))
+	secs := new(big.Int).Mul(atoi(m[6]), big.NewInt(3600))
+	secs.Add(secs, new(big.Int).Mul(atoi(m[7]), big.NewInt(60)))
+	secs.Add(secs, atoi(m[8]))
+	secs.Mul(secs, big.NewInt(1e9))
+	if m[9] != "" {
+		secs.Add(secs, atoi((m[9][1:] + "000000000")[:9]))
+	}
+	if m[5] == "-" {
+		secs.Neg(secs)
+	}
+	k.Mul(k, big.NewInt(1e9))
+	return k.Add(k, secs), true
+}
+
 // canonJSON re-encodes a JSON document with sorted keys and numbers in
 // canonical rational form, so formatting differences do not count.
 func canonJSON(s string) (string, error) {

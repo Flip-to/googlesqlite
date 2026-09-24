@@ -146,7 +146,7 @@ func (t TimestampValue) ToRat() (*big.Rat, error) {
 // and FORMAT %t in the default (UTC) time zone: a space separator,
 // fractional seconds without trailing zeros, and a +00 offset.
 func (t TimestampValue) SQLString() string {
-	return time.Time(t).UTC().Format("2006-01-02 15:04:05.999999") + "+00"
+	return time.Time(t).UTC().Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(t)) + "+00"
 }
 
 func (t TimestampValue) Format(verb rune) string {

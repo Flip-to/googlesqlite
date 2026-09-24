@@ -61,7 +61,7 @@ func (f *WINDOW_ARRAY_AGG) Done(agg *WindowFuncAggregatedStatus) (value.Value, e
 				}
 			}
 			if agg.Distinct() {
-				key, err := v.ToString()
+				key, err := value.DistinctKey(v)
 				if err != nil {
 					return err
 				}
@@ -102,7 +102,7 @@ func (f *WINDOW_AVG) Done(agg *WindowFuncAggregatedStatus) (value.Value, error) 
 				continue
 			}
 			if agg.Distinct() {
-				key, err := val.ToString()
+				key, err := value.DistinctKey(val)
 				if err != nil {
 					return err
 				}
@@ -156,7 +156,7 @@ func (f *WINDOW_COUNT) Done(agg *WindowFuncAggregatedStatus) (value.Value, error
 				continue
 			}
 			if agg.Distinct() {
-				key, err := v.ToString()
+				key, err := value.DistinctKey(v)
 				if err != nil {
 					return err
 				}
@@ -392,7 +392,7 @@ func (f *WINDOW_STRING_AGG) Done(agg *WindowFuncAggregatedStatus) (value.Value, 
 				continue
 			}
 			if agg.Distinct() {
-				key, err := val.ToString()
+				key, err := value.DistinctKey(val)
 				if err != nil {
 					return err
 				}
@@ -439,7 +439,7 @@ func (f *WINDOW_SUM) Done(agg *WindowFuncAggregatedStatus) (value.Value, error) 
 				continue
 			}
 			if agg.Distinct() {
-				key, err := val.ToString()
+				key, err := value.DistinctKey(val)
 				if err != nil {
 					return err
 				}

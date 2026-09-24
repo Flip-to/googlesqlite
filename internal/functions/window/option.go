@@ -132,6 +132,11 @@ func toWindowBoundaryType(boundaryType googlesql.ResolvedWindowFrameExprEnums_Bo
 	return WindowBoundaryTypeUnknown
 }
 
+// ToWindowBoundaryType converts a resolved-tree boundary type.
+func ToWindowBoundaryType(boundaryType googlesql.ResolvedWindowFrameExprEnums_BoundaryType) WindowBoundaryType {
+	return toWindowBoundaryType(boundaryType)
+}
+
 func GetWindowBoundaryStartOptionFuncSQL(boundaryType googlesql.ResolvedWindowFrameExprEnums_BoundaryType, offset string) string {
 	typ := toWindowBoundaryType(boundaryType)
 	if offset == "" {

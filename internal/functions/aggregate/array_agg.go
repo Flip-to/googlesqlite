@@ -1,7 +1,6 @@
 package aggregate
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/goccy/googlesqlite/internal/functions/helper"
@@ -15,9 +14,8 @@ type ARRAY_AGG struct {
 }
 
 func (f *ARRAY_AGG) Step(v value.Value, opt *helper.Option) error {
-	if v == nil {
-		return fmt.Errorf("ARRAY_AGG: input value must be not null")
-	}
+	// NULL inputs are kept unless IGNORE NULLS drops them upstream
+	// (array_aggregation.test, array_agg_with_nulls).
 	f.once.Do(func() { f.opt = opt })
 	f.values = append(f.values, &helper.OrderedValue{
 		OrderBy: opt.OrderBy,

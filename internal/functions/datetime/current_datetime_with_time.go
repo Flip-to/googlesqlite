@@ -7,5 +7,7 @@ import (
 )
 
 func CURRENT_DATETIME_WITH_TIME(v time.Time) (value.Value, error) {
-	return value.DatetimeValue(v), nil
+	// CURRENT_* values carry microsecond precision, like CURRENT_TIMESTAMP,
+	// so CURRENT_TIME = TIME(CURRENT_TIMESTAMP) holds on clocks finer than 1us.
+	return value.DatetimeValue(v.Truncate(time.Microsecond)), nil
 }
