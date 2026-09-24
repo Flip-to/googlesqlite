@@ -112,6 +112,13 @@ func (k rangeKey) shift(off rangeKey, sign int) rangeKey {
 			o = -o
 		}
 		x := k.f + o
+		if math.IsInf(x, 0) && !math.IsInf(o, 0) {
+			// A finite key and offset whose sum overflows bound the
+			// frame at the largest finite DOUBLE, so +/-inf keys stay
+			// outside it (compliance analytic_avg.test
+			// analytic_avg_range_current_and_following_double_*).
+			x = math.Copysign(math.MaxFloat64, x)
+		}
 		return rangeKey{isFloat: true, f: x, nan: math.IsNaN(x)}
 	}
 	if off.isFloat {

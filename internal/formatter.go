@@ -176,9 +176,18 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 	if m1(node.ErrorMode()) == googlesql.ResolvedFunctionCallBaseEnums_ErrorModeSafeErrorMode {
 		safeAggregate := (!isWindowFunc && existsAggregateFunc) || (isWindowFunc && existsWindowFunc)
 		if !existsNormalFuncForSafe && !safeAggregate {
-			return "", nil, fmt.Errorf("SAFE is not supported for function %s", funcName)
+			// SAFE.<SQL UDF>(...) is lowered by FunctionCallNode
+			// (call_sql_udf.test, safe_call_sql_udf_division).
+			fname, err := getFuncName(ctx, node)
+			if err != nil {
+				return "", nil, err
+			}
+			if spec, ok := funcMapFromContext(ctx)[fname]; !ok || spec.IsAggregate || isWindowFunc {
+				return "", nil, fmt.Errorf("SAFE is not supported for function %s", funcName)
+			}
+		} else {
+			funcPrefix = "googlesqlite_safe"
 		}
-		funcPrefix = "googlesqlite_safe"
 	} else if inSafeEvalMode(ctx) && functionCallDeferrable(node) {
 		// IFERROR / ISERROR / NULLIFERROR sub-context: an error becomes
 		// a deferred-error marker the enclosing handler detects, so a
@@ -242,7 +251,33 @@ func (n *LiteralNode) FormatSQL(ctx context.Context) (string, error) {
 	if sql, handled, err := utcLiteralSQL(ctx, n.node); handled {
 		return sql, err
 	}
-	return literalFromGoogleSQLValue(*m1(n.node.Value()))
+	v := m1(n.node.Value())
+	if isNegativeZeroLiteral(ctx, n.node, v) {
+		return "-0.0", nil
+	}
+	return literalFromGoogleSQLValue(*v)
+}
+
+// isNegativeZeroLiteral reports a DOUBLE literal written as -0.0. The
+// resolved value arrives as +0, so the sign is read back from the
+// literal's source text (math_functions.test math_abs_zero).
+func isNegativeZeroLiteral(ctx context.Context, lit *googlesql.ResolvedLiteral, v *googlesql.Value) bool {
+	if v == nil || m1(v.IsNull()) || m1(v.TypeKind()) != googlesql.TypeKindTypeDouble || m1(v.ToDouble()) != 0 {
+		return false
+	}
+	query, ok := sourceQueryFromContext(ctx)
+	if !ok {
+		return false
+	}
+	loc, _ := lit.GetParseLocationRangeOrNULL()
+	if loc == nil {
+		return false
+	}
+	image, err := loc.GetTextFrom(query)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(image), "-")
 }
 
 func (n *ParameterNode) FormatSQL(ctx context.Context) (string, error) {
@@ -428,6 +463,13 @@ func (n *FunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	}
 	funcMap := funcMapFromContext(ctx)
 	if spec, exists := funcMap[funcName]; exists {
+		if m1(n.node.ErrorMode()) == googlesql.ResolvedFunctionCallBaseEnums_ErrorModeSafeErrorMode {
+			// BigQuery rejects SAFE. on a SQL UDF ("SAFE with function
+			// OneOverArg is not supported", checked on BigQuery), although
+			// upstream call_sql_udf.test expects NULL.
+			name := m1(m1(n.node.Function()).Name())
+			return "", fmt.Errorf("SAFE with function %s is not supported", name) //nolint:staticcheck // BigQuery's error text
+		}
 		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
 	}
 	return fmt.Sprintf(
@@ -676,11 +718,26 @@ func (n *FunctionCallNode) formatCaseWithValue(_ context.Context, args []string)
 	}
 	val := args[0]
 	args = args[1:]
+	// SQLite's native `CASE x WHEN y` compares the encoded values, so a
+	// STRUCT with a NULL field would match an identical literal. GoogleSQL
+	// equality on such structs is NULL, which never matches
+	// (struct_queries.test, struct_equality_null_field).
+	structCompare := false
+	if argNodes := m1(n.node.ArgumentList()); len(argNodes) > 0 && isStructTypedExpr(argNodes[0]) && !isVolatileSQL(val) {
+		structCompare = true
+	}
 	var whenStmts []string
 	for i := 0; i < len(args)-1; i += 2 {
+		if structCompare {
+			whenStmts = append(whenStmts, fmt.Sprintf("WHEN googlesqlite_equal(%s,%s) THEN %s", val, args[i], args[i+1]))
+			continue
+		}
 		whenStmts = append(whenStmts, fmt.Sprintf("WHEN %s THEN %s", args[i], args[i+1]))
 	}
 	stmt := fmt.Sprintf("CASE %s %s", val, strings.Join(whenStmts, " "))
+	if structCompare {
+		stmt = fmt.Sprintf("CASE %s", strings.Join(whenStmts, " "))
+	}
 	// if args length is odd number, else statement exists.
 	if len(args) > (len(args)/2)*2 {
 		stmt += fmt.Sprintf(" ELSE %s", args[len(args)-1])
@@ -898,6 +955,11 @@ var customNativeWindowFuncMap = map[string]string{
 	"hll_count_init":          "googlesqlite_window_hll_count_init",
 	"hll_count_merge":         "googlesqlite_window_hll_count_merge",
 	"hll_count_merge_partial": "googlesqlite_window_hll_count_merge_partial",
+	// APPROX_* aggregates, replayed over the active frame.
+	"approx_count_distinct": "googlesqlite_window_approx_count_distinct",
+	"approx_quantiles":      "googlesqlite_window_approx_quantiles",
+	"approx_top_count":      "googlesqlite_window_approx_top_count",
+	"approx_top_sum":        "googlesqlite_window_approx_top_sum",
 }
 
 // nativeWindowFuncForName returns the SQLite native name for a
@@ -1716,6 +1778,30 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
+	if !inSafeEvalMode(ctx) {
+		return n.formatSQL(withSafeFilterProbes(ctx, nil))
+	}
+	// In IFERROR / ISERROR / NULLIFERROR (and SAFE.<SQL UDF>) a filter
+	// condition that fails only yields a deferred-error marker, which
+	// WHERE silently treats as false. Probe the subquery's filters and
+	// turn the whole subquery into the marker instead
+	// (call_sql_udf.test, safe_error_subquery_function).
+	var probes []string
+	sql, err := n.formatSQL(withSafeFilterProbes(ctx, &probes))
+	if err != nil || len(probes) == 0 {
+		return sql, err
+	}
+	exists := make([]string, 0, len(probes))
+	for _, p := range probes {
+		exists = append(exists, fmt.Sprintf("EXISTS(%s)", p))
+	}
+	return fmt.Sprintf(
+		"(CASE WHEN %s THEN googlesqlite_make_deferred_error('subquery filter failed') ELSE %s END)",
+		strings.Join(exists, " OR "), sql,
+	), nil
+}
+
+func (n *SubqueryExprNode) formatSQL(ctx context.Context) (string, error) {
 	columnNames := &arraySubqueryColumnNames{}
 	ctx = withArraySubqueryColumnName(ctx, columnNames)
 	sql, err := newNode(m1(n.node.Subquery())).FormatSQL(withNestedArrayAgg(ctx))
@@ -1861,6 +1947,11 @@ func (n *JoinScanNode) FormatSQL(ctx context.Context) (string, error) {
 		left = fmt.Sprintf("(%s)", left)
 	}
 	if getInputPattern(right) == InputNeedsWrap {
+		right = fmt.Sprintf("(%s)", right)
+	} else if _, nested := m1(n.node.RightScan()).(*googlesql.ResolvedJoinScan); nested {
+		// `R JOIN (S JOIN d ON ...) ON ...`: without parentheses the
+		// inner ON would bind to the outer join (join_queries.test,
+		// join_8).
 		right = fmt.Sprintf("(%s)", right)
 	}
 	if m1(n.node.JoinExpr()) == nil {
@@ -2010,6 +2101,9 @@ func (n *FilterScanNode) FormatSQL(ctx context.Context) (string, error) {
 	// (array_aggregation.test, array_agg_with_having).
 	if _, ok := m1(n.node.InputScan()).(*googlesql.ResolvedAggregateScan); ok {
 		containsTokens = true
+	}
+	if probes := safeFilterProbes(ctx); probes != nil && getInputPattern(input) == InputNeedsWrap {
+		*probes = append(*probes, fmt.Sprintf("SELECT 1 FROM (%s) WHERE googlesqlite_is_deferred_error(%s)", input, filter))
 	}
 	if !queryWrappedInParens && containsTokens {
 		return fmt.Sprintf("( %s ) WHERE %s", input, filter), nil
@@ -2244,6 +2338,17 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 		groupBy = fmt.Sprintf("GROUP BY %s", strings.Join(annotatedGroupByColumns, ","))
 	}
 	formattedColumns := strings.Join(columns, ",")
+	if formattedColumns == "" {
+		// No aggregate and no grouping key (GROUP BY () or a GROUP BY
+		// ALL that selects only constants): every input row falls into
+		// one group, as for the empty grouping set above
+		// (group_by_all.test group_by_all_no_agg_no_grouping_keys_*,
+		// groupby_queries_2.test group_by_empty_columns_*).
+		formattedColumns = "NULL"
+		if groupBy == "" {
+			groupBy = "GROUP BY NULL"
+		}
+	}
 	switch getInputPattern(input) {
 	case InputKeep:
 		return fmt.Sprintf("SELECT %s %s %s", formattedColumns, input, groupBy), nil
@@ -2466,10 +2571,33 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 		opType = "UNKNOWN"
 	}
 	var queries []string
-	for _, item := range m1(n.node.InputItemList()) {
+	// SQLite names a compound SELECT's columns after its first branch.
+	// When that branch outputs one column twice (SELECT a, b, a ...), a
+	// reference by name always finds the first occurrence, so the other
+	// branches' values in the later position are lost
+	// (analytic_percentile_cont.test analytic_percentile_cont_partition).
+	// Such a first branch gets positional aliases instead.
+	var (
+		firstAliases []string
+		firstAliased string
+	)
+	for idx, item := range m1(n.node.InputItemList()) {
 		var outputColumns []string
+		seen := map[string]bool{}
+		dup := false
 		for _, outputColumn := range m1(item.OutputColumnList()) {
-			outputColumns = append(outputColumns, fmt.Sprintf("`%s`", uniqueColumnName(ctx, outputColumn)))
+			name := uniqueColumnName(ctx, outputColumn)
+			dup = dup || seen[name]
+			seen[name] = true
+			outputColumns = append(outputColumns, fmt.Sprintf("`%s`", name))
+		}
+		var aliasedColumns []string
+		if idx == 0 && dup {
+			for i, c := range outputColumns {
+				alias := fmt.Sprintf("googlesqlite_setop_c%d", i)
+				firstAliases = append(firstAliases, alias)
+				aliasedColumns = append(aliasedColumns, c+" AS `"+alias+"`")
+			}
 		}
 		query, err := newNode(item).FormatSQL(ctx)
 		if err != nil {
@@ -2488,25 +2616,35 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 				formattedInput,
 			),
 		)
+		if aliasedColumns != nil {
+			firstAliased = fmt.Sprintf("SELECT %s %s", strings.Join(aliasedColumns, ", "), formattedInput)
+		}
 	}
 	if sql, ok := formatCollatedSetOperation(ctx, n.node, queries); ok {
 		return sql, nil
 	}
+	if bagOp != "" {
+		return formatBagSetOperation(ctx, n.node, queries, bagOp), nil
+	}
+	if firstAliased != "" {
+		queries[0] = firstAliased
+	}
 	columnMaps := []string{}
 	if inputItems := m1(n.node.InputItemList()); len(inputItems) != 0 {
 		for idx, col := range m1(inputItems[0].OutputColumnList()) {
+			name := uniqueColumnName(ctx, col)
+			if firstAliases != nil {
+				name = firstAliases[idx]
+			}
 			columnMaps = append(
 				columnMaps,
 				fmt.Sprintf(
 					"`%s` AS `%s`",
-					uniqueColumnName(ctx, col),
+					name,
 					uniqueColumnName(ctx, m1(n.node.ColumnList())[idx]),
 				),
 			)
 		}
-	}
-	if bagOp != "" {
-		return formatBagSetOperation(ctx, n.node, queries, bagOp), nil
 	}
 	return fmt.Sprintf(
 		"SELECT %s FROM (%s)",
@@ -3150,32 +3288,6 @@ func (n *RecursiveRefScanNode) FormatSQL(ctx context.Context) (string, error) {
 	return fmt.Sprintf("`%s`", name), nil
 }
 
-// findRecursiveRefScanCols walks a scan tree looking for the column
-// list exposed by the (one and only) ResolvedRecursiveRefScan in a
-// recursive UNION term. SQLite-side `WITH RECURSIVE t(...)` must use
-// these IDs as the explicit column list so the recursive term's
-// `FROM t` references resolve to the right columns.
-//
-// Returns nil when no RecursiveRefScan is reachable.
-func findRecursiveRefScanCols(node googlesql.ResolvedNode) []*googlesql.ResolvedColumn {
-	if node == nil {
-		return nil
-	}
-	if kind, _ := node.NodeKind(); kind == googlesql.ResolvedNodeKindResolvedRecursiveRefScan {
-		if scan, ok := node.(googlesql.ResolvedScanNode); ok {
-			cols, _ := scan.MutableColumnList()
-			return cols
-		}
-	}
-	children, _ := node.GetChildNodes()
-	for _, c := range children {
-		if got := findRecursiveRefScanCols(c); len(got) > 0 {
-			return got
-		}
-	}
-	return nil
-}
-
 // RecursiveScanNode renders as `<non_recursive_branch> UNION [ALL]
 // <recursive_branch>`. The recursive-cte reference must stay at the
 // top-level FROM of the recursive branch (SQLite restriction). The
@@ -3216,6 +3328,16 @@ func (n *RecursiveScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	op := "UNION ALL"
+	distinct := m1(n.node.OpType()) == googlesql.ResolvedRecursiveScanEnums_RecursiveSetOperationTypeUnionDistinct
+	if distinct {
+		op = "UNION"
+	}
+	if flat, ok, err := n.formatFlatRecursiveTerm(ctx, canonical, distinct, formatBranch); err != nil {
+		return "", err
+	} else if ok {
+		return fmt.Sprintf("%s %s %s", nonRec, op, flat), nil
+	}
 	rec, err := formatBranch(m1(n.node.RecursiveTerm()))
 	if err != nil {
 		return "", err
@@ -3227,7 +3349,12 @@ func (n *RecursiveScanNode) FormatSQL(ctx context.Context) (string, error) {
 	// references. Same number of columns — pair by position.
 	if rt := m1(n.node.RecursiveTerm()); rt != nil {
 		if scan, _ := rt.Scan(); scan != nil {
-			refCols := findRecursiveRefScanCols(scan)
+			var refs []*googlesql.ResolvedRecursiveRefScan
+			collectRecursiveRefScans(scan, &refs)
+			var refCols []*googlesql.ResolvedColumn
+			if len(refs) > 0 {
+				refCols, _ = refs[0].ColumnList()
+			}
 			if len(refCols) == len(canonical) {
 				for i, ref := range refCols {
 					if ref == nil {
@@ -3241,10 +3368,6 @@ func (n *RecursiveScanNode) FormatSQL(ctx context.Context) (string, error) {
 				}
 			}
 		}
-	}
-	op := "UNION ALL"
-	if m1(n.node.OpType()) == googlesql.ResolvedRecursiveScanEnums_RecursiveSetOperationTypeUnionDistinct {
-		op = "UNION"
 	}
 	return fmt.Sprintf("%s %s %s", nonRec, op, rec), nil
 }
@@ -3278,7 +3401,7 @@ func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
 		if sub == nil {
 			continue
 		}
-		if kind, _ := sub.NodeKind(); kind == googlesql.ResolvedNodeKindResolvedRecursiveScan {
+		if recursiveScanOf(sub) != nil {
 			keyword = "WITH RECURSIVE"
 			break
 		}
@@ -3302,12 +3425,26 @@ func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
 		}
 	}
 	subCtx := withCteRefCounts(ctx, refCounts)
+	// Inside a recursive CTE body the entries move up next to the
+	// recursive entry: SQLite rejects a WITH clause that starts a
+	// compound-select term (with_recursive.test).
+	parent := hoistedCTEs(ctx)
 	queries := []string{}
 	for _, entry := range m1(n.node.WithEntryList()) {
-		sql, err := newNode(entry).FormatSQL(subCtx)
+		if parent != nil {
+			sql, err := newNode(entry).FormatSQL(subCtx)
+			if err != nil {
+				return "", err
+			}
+			*parent = append(*parent, sql)
+			continue
+		}
+		var hoisted []string
+		sql, err := newNode(entry).FormatSQL(withHoistedCTEs(subCtx, &hoisted))
 		if err != nil {
 			return "", err
 		}
+		queries = append(queries, hoisted...)
 		queries = append(queries, sql)
 	}
 	query, err := newNode(m1(n.node.Query())).FormatSQL(subCtx)
@@ -3317,6 +3454,9 @@ func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
 	query, err = completeScanQuery(m1(n.node.Query()), query, false)
 	if err != nil {
 		return "", err
+	}
+	if parent != nil {
+		return query, nil
 	}
 	return fmt.Sprintf(
 		"%s %s %s",
@@ -3354,10 +3494,15 @@ func (n *WithEntryNode) FormatSQL(ctx context.Context) (string, error) {
 	sub := m1(n.node.WithSubquery())
 	subCtx := ctx
 	subKind, _ := sub.NodeKind()
-	if subKind == googlesql.ResolvedNodeKindResolvedRecursiveScan {
+	isRecursive := recursiveScanOf(sub) != nil
+	if isRecursive {
 		// Make the queryName visible to any nested
 		// RecursiveRefScanNode so it can render as the CTE name.
 		subCtx = withRecursiveCteName(ctx, queryName)
+		subKind = googlesql.ResolvedNodeKindResolvedRecursiveScan
+	} else {
+		// A non-recursive body may keep its own WITH clause.
+		subCtx = withHoistedCTEs(ctx, nil)
 	}
 	subquery, err := newNode(sub).FormatSQL(subCtx)
 	if err != nil {
@@ -3670,8 +3815,16 @@ func rewriteStructFieldSet(ctx context.Context, target googlesql.ResolvedExprNod
 	for i := 0; i < len(levels); i++ {
 		idx := levels[i].idx
 		if i == len(levels)-1 {
-			expr = fmt.Sprintf("googlesqlite_struct_with_field_set(%s, %d, %s)",
-				colSQL, idx, expr)
+			// The type name lets a NULL struct fail as GoogleSQL does
+			// (dml_update_struct.test assign_struct_field_in_null_struct).
+			typeLit := "NULL"
+			if name, err := sqlTypeName(m1(colRef.Type())); err == nil {
+				if lit, err := literalFromGoogleSQLValue(*m1(googlesql.NewValueString(name))); err == nil {
+					typeLit = lit
+				}
+			}
+			expr = fmt.Sprintf("googlesqlite_struct_with_field_set(%s, %d, %s, %s)",
+				colSQL, idx, expr, typeLit)
 		} else {
 			// Nested struct field: wrap in get_struct_field for the
 			// outer container, then set within. For now the simple

@@ -11,8 +11,9 @@ import (
 )
 
 type HLL_COUNT_INIT struct {
-	once sync.Once
-	hll  *hll.Hll
+	once      sync.Once
+	hll       *hll.Hll
+	valueType byte
 }
 
 func (f *HLL_COUNT_INIT) Step(input value.Value, precision int64, opt *helper.Option) (e error) {
@@ -33,6 +34,9 @@ func (f *HLL_COUNT_INIT) Step(input value.Value, precision int64, opt *helper.Op
 		f.hll = &h
 	})
 	var v uint64
+	if f.valueType == 0 {
+		f.valueType = sketchValueType(input)
+	}
 	switch input.(type) {
 	case value.IntValue:
 		s, err := input.ToString()
@@ -67,5 +71,5 @@ func (f *HLL_COUNT_INIT) Done() (value.Value, error) {
 	if f.hll == nil {
 		return nil, nil
 	}
-	return value.BytesValue(f.hll.ToBytes()), nil
+	return value.BytesValue(tagSketch(f.valueType, f.hll.ToBytes())), nil
 }

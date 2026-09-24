@@ -7,6 +7,8 @@ import (
 	"slices"
 
 	"github.com/DataDog/go-hll"
+
+	"github.com/goccy/googlesqlite/internal/value"
 )
 
 // Sketches produced by GoogleSQL / BigQuery HLL_COUNT.INIT are
@@ -279,9 +281,60 @@ func (s *zetaSketch) cardinality() int64 {
 // sketchAccumulator merges a stream of serialized sketches of either
 // format.
 type sketchAccumulator struct {
-	fn   string
-	dd   *hll.Hll
-	zeta *zetaSketch
+	fn     string
+	dd     *hll.Hll
+	ddType byte
+	zeta   *zetaSketch
+}
+
+// Driver sketches (go-hll) carry the input type ahead of the go-hll
+// bytes, so sketches of different input types are rejected on merge
+// as GoogleSQL requires (hll_count.test
+// hll_count_merge_incompatible_types / _partial_incompatible_types):
+//
+//	0xff 'G' <type> <go-hll bytes>
+//
+// A go-hll serialization never starts with 0xff (its first byte is the
+// schema version), so untagged sketches are still accepted.
+const (
+	sketchTypeInt64 byte = iota + 1
+	sketchTypeNumeric
+	sketchTypeBigNumeric
+	sketchTypeString
+	sketchTypeBytes
+)
+
+func sketchValueType(v value.Value) byte {
+	switch vv := v.(type) {
+	case value.IntValue:
+		return sketchTypeInt64
+	case *value.NumericValue:
+		if vv.IsBigNumeric {
+			return sketchTypeBigNumeric
+		}
+		return sketchTypeNumeric
+	case value.StringValue:
+		return sketchTypeString
+	case value.BytesValue:
+		return sketchTypeBytes
+	}
+	return 0
+}
+
+func tagSketch(typ byte, b []byte) []byte {
+	if typ == 0 {
+		return b
+	}
+	return append([]byte{0xff, 'G', typ}, b...)
+}
+
+// untagSketch splits a driver sketch into its input type (0 when
+// untagged) and go-hll bytes.
+func untagSketch(b []byte) (byte, []byte) {
+	if len(b) >= 3 && b[0] == 0xff && b[1] == 'G' {
+		return b[2], b[3:]
+	}
+	return 0, b
 }
 
 func (a *sketchAccumulator) add(b []byte) error {
@@ -305,13 +358,21 @@ func (a *sketchAccumulator) add(b []byte) error {
 	if a.zeta != nil {
 		return a.incompatible()
 	}
+	typ, b := untagSketch(b)
 	h, err := hll.FromBytes(b)
 	if err != nil {
 		return err
 	}
 	if a.dd == nil {
 		a.dd = &h
+		a.ddType = typ
 	} else {
+		if typ != 0 && a.ddType != 0 && typ != a.ddType {
+			return a.incompatible()
+		}
+		if a.ddType == 0 {
+			a.ddType = typ
+		}
 		a.dd.Union(h)
 	}
 	return nil
@@ -327,7 +388,7 @@ func (a *sketchAccumulator) bytes() []byte {
 	if a.zeta != nil {
 		return a.zeta.bytes()
 	}
-	return a.dd.ToBytes()
+	return tagSketch(a.ddType, a.dd.ToBytes())
 }
 
 func (a *sketchAccumulator) cardinality() int64 {

@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-json"
 	sqlite3 "github.com/ncruces/go-sqlite3"
 
+	approx "github.com/goccy/googlesqlite/internal/functions/approx_aggregate"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/functions/hll"
 	"github.com/goccy/googlesqlite/internal/functions/window"
@@ -183,6 +184,20 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		}
 		windowFuncMap["hll_count_merge_partial"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_hll_count_merge_partial", Func: hll.BindHllCountMergePartial()},
+		}
+		// APPROX_* aggregates in OVER context, replayed over the active
+		// frame like HLL_COUNT.* (analytic_approx_*.test *_basic).
+		windowFuncMap["approx_count_distinct"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_approx_count_distinct", Func: approx.BindApproxCountDistinct()},
+		}
+		windowFuncMap["approx_quantiles"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_approx_quantiles", Func: approx.BindApproxQuantiles()},
+		}
+		windowFuncMap["approx_top_count"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_approx_top_count", Func: approx.BindApproxTopCount()},
+		}
+		windowFuncMap["approx_top_sum"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_approx_top_sum", Func: approx.BindApproxTopSum()},
 		}
 		// Inner aggregates for RANGE frames over typed ORDER BY keys
 		// (see internal/functions/window/range_frame.go) whose plain
@@ -390,6 +405,11 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 	}
 
 	if err := sqlitex.RegisterCollation(conn, "googlesqlite_collate", func(a, b string) int {
+		if a == b {
+			// Encodings are canonical: byte-equal values are peers. This
+			// also makes NaN a peer of NaN, as GoogleSQL ordering requires.
+			return 0
+		}
 		va, _ := DecodeValue(a)
 		vb, _ := DecodeValue(b)
 		eq, _ := va.EQ(vb)

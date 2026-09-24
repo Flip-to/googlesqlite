@@ -3692,10 +3692,12 @@ FROM
       ('BR', 'customer_id_3', 'invoice_id_31'),
       ('UA', 'customer_id_2', 'invoice_id_24')])
 GROUP BY country`,
+			// Driver sketches are go-hll bytes behind a 0xff 'G' <type>
+			// tag ("/0cE" = STRING); see internal/functions/hll/zetasketch.go.
 			expectedRows: [][]any{
-				{"BR", "Eu9/P61VrRgkBrk="},
-				{"CZ", "Eu9/TliDjbmhVEA="},
-				{"UA", "Eu9/Ol8Q5++jVjNOWIONuaFUQA=="},
+				{"BR", "/0cEEu9/P61VrRgkBrk="},
+				{"CZ", "/0cEEu9/TliDjbmhVEA="},
+				{"UA", "/0cEEu9/Ol8Q5++jVjNOWIONuaFUQA=="},
 			},
 		},
 		{
@@ -3740,7 +3742,7 @@ FROM
           ('UA', 'customer_id_2', 'invoice_id_24')])
     GROUP BY country
   )`,
-			expectedRows: [][]any{{"Eu9/Ol8Q5++jVjM/rVWtGCQGuU5Yg425oVRA"}},
+			expectedRows: [][]any{{"/0cEEu9/Ol8Q5++jVjM/rVWtGCQGuU5Yg425oVRA"}},
 		},
 		{
 			name: "hll_count.extract",
