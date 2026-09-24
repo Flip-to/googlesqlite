@@ -19,6 +19,7 @@ import (
 
 	"github.com/goccy/googlesqlite/internal/exportdata"
 	"github.com/goccy/googlesqlite/internal/value"
+	"github.com/goccy/googlesqlite/internal/zoneinfo"
 )
 
 type Analyzer struct {
@@ -381,6 +382,9 @@ func newAnalyzerOptions() (*googlesql.AnalyzerOptions, error) {
 	}
 	opt, optErr := googlesql.NewAnalyzerOptions2()
 	if opt == nil {
+		if hint := zoneinfo.Hint(); hint != "" {
+			return nil, fmt.Errorf("failed to initialize analyzer options: %w (%s)", optErr, hint)
+		}
 		return nil, fmt.Errorf("failed to initialize analyzer options: %w", optErr)
 	}
 	opt.SetAllowUndeclaredParameters(true)
