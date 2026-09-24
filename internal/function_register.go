@@ -65,6 +65,10 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		windowFuncMap["string_agg"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_string_agg", Func: window.NewStringAggWindowNative()},
 		}
+		// MATCH_RECOGNIZE row pattern matcher; see match_recognize.go.
+		windowFuncMap["match_recognize"] = []*nameAndFunc{
+			{Name: "googlesqlite_match_recognize", Func: newMatchRecognizeWindow},
+		}
 		windowFuncMap["countif"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_countif", Func: window.NewCountifWindowNative()},
 		}

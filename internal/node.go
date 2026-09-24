@@ -89,6 +89,8 @@ func newNode(node googlesql.ResolvedNode) Formatter {
 		return newWithRefScanNode(node.(*googlesql.ResolvedWithRefScan))
 	case googlesql.ResolvedNodeKindResolvedAnalyticScan:
 		return newAnalyticScanNode(node.(*googlesql.ResolvedAnalyticScan))
+	case googlesql.ResolvedNodeKindResolvedMatchRecognizeScan:
+		return newMatchRecognizeScanNode(node.(*googlesql.ResolvedMatchRecognizeScan))
 	case googlesql.ResolvedNodeKindResolvedSampleScan:
 		return newSampleScanNode(node.(*googlesql.ResolvedSampleScan))
 	case googlesql.ResolvedNodeKindResolvedComputedColumn:

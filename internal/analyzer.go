@@ -284,6 +284,10 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// STRUCT positional accessors `s[OFFSET(i)]` / `s[ORDINAL(n)]`
 	// for the compliance fixtures under types/struct.
 	googlesql.LanguageFeatureFeatureV14StructPositionalAccessor,
+	// MATCH_RECOGNIZE row pattern recognition (standard and pipe
+	// syntax). The ResolvedMatchRecognizeScan is lowered by
+	// internal/match_recognize.go.
+	googlesql.LanguageFeatureFeatureMatchRecognize,
 }
 
 // supportedStatementKinds lists the ResolvedStatement kinds the
@@ -355,6 +359,9 @@ func newAnalyzerOptions() (*googlesql.AnalyzerOptions, error) {
 	// Enable QUALIFY without WHERE
 	// https://github.com/google/googlesql/issues/124
 	if err := langOpt.EnableReservableKeyword("QUALIFY", true); err != nil {
+		return nil, err
+	}
+	if err := langOpt.EnableReservableKeyword("MATCH_RECOGNIZE", true); err != nil {
 		return nil, err
 	}
 	opt, optErr := googlesql.NewAnalyzerOptions2()

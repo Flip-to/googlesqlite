@@ -647,6 +647,8 @@ var normalFuncs = []*funcInfo{
 	{Name: "distinct", BindFunc: bindDistinct},
 	{Name: "ignore_nulls", BindFunc: bindIgnoreNulls},
 	{Name: "having", BindFunc: bindHaving},
+	{Name: "order_by", BindFunc: bindOrderBy},
+	{Name: "limit", BindFunc: bindLimit},
 
 	// window option funcs
 	{Name: "window_rowid", BindFunc: bindWindowRowID},

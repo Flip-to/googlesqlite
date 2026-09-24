@@ -2623,7 +2623,15 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
-	input, err := newNode(m1(n.node.InputScan())).FormatSQL(ctx)
+	return formatAnalyticScan(ctx, m1(n.node.InputScan()), m1(n.node.FunctionGroupList()), m1(n.node.ColumnList()))
+}
+
+// formatAnalyticScan formats an analytic scan over inputScan that
+// computes every function in groups and projects columnList. It backs
+// both ResolvedAnalyticScan and the analytic stage of
+// ResolvedMatchRecognizeScan (PREV / NEXT in DEFINE).
+func formatAnalyticScan(ctx context.Context, inputScan googlesql.ResolvedScanNode, groups []*googlesql.ResolvedAnalyticFunctionGroup, columnList []*googlesql.ResolvedColumn) (string, error) {
+	input, err := newNode(inputScan).FormatSQL(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -2635,7 +2643,7 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 	ctx, emulationUsed := withAnalyticEmulationFlag(ctx)
 	orderColumnNames := analyticOrderColumnNamesFromContext(ctx)
 	var scanOrderBy []*analyticOrderBy
-	for _, group := range m1(n.node.FunctionGroupList()) {
+	for _, group := range groups {
 		scanOrderBy = []*analyticOrderBy{}
 
 		if m1(group.PartitionBy()) != nil {
@@ -2703,7 +2711,7 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 	}
 	columns := []string{}
 	columnMap := columnRefMap(ctx)
-	for _, col := range m1(n.node.ColumnList()) {
+	for _, col := range columnList {
 		colName := uniqueColumnName(ctx, col)
 		if ref, exists := columnMap[colName]; exists {
 			columns = append(columns, ref)

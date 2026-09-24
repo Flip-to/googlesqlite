@@ -168,7 +168,15 @@ func SubstituteParams(sql string, params []Param) string {
 				j++
 			}
 			if expr, ok := byName[strings.ToLower(sql[i+1:j])]; ok {
-				b.WriteString("(" + expr + ")")
+				if plainLiteralRe.MatchString(expr) {
+					// Some grammar positions accept only a literal or a
+					// parameter (quantifier bounds `{@lo, @hi}`,
+					// `COLLATE @param`), so a plain literal is inlined
+					// without the parentheses.
+					b.WriteString(expr)
+				} else {
+					b.WriteString("(" + expr + ")")
+				}
 				i = j - 1
 				continue
 			}
@@ -177,6 +185,10 @@ func SubstituteParams(sql string, params []Param) string {
 	}
 	return b.String()
 }
+
+// plainLiteralRe matches an unsigned integer, a quoted string without
+// escapes, or TRUE / FALSE.
+var plainLiteralRe = regexp.MustCompile(`^(?i:[0-9]+|"[^"\\]*"|'[^'\\]*'|true|false)$`)
 
 func isIdent(c byte) bool {
 	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
