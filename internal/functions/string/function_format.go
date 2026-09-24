@@ -182,6 +182,19 @@ func parseInteger(param *FormatParam, args []value.Value) ([]rune, error) {
 	if width > 0 {
 		format += fmt.Sprint(width)
 	}
+	// An integer precision is the minimum number of digits, as in C
+	// printf ('%0.*d' with 4, 12 is "0012"; strings.test,
+	// format_with_non_const_arg).
+	if param.precision != nil {
+		var prec int
+		prec, args, err = param.precision.format(args)
+		if err != nil {
+			return nil, err
+		}
+		if prec >= 0 {
+			format += "." + fmt.Sprint(prec)
+		}
+	}
 	v, err := args[0].ToInt64()
 	if err != nil {
 		return nil, err
@@ -475,6 +488,13 @@ func parseFormat(format string, args ...value.Value) (string, error) {
 		args := formatArgs[:num]
 		// NULL argument handling (string_functions.md FORMAT): %t and %T
 		// print NULL; any other specifier makes the whole result NULL.
+		// A NULL `*` width or precision makes the result NULL as well
+		// (strings.test, format_with_non_const_arg).
+		for _, a := range args[:max(num-1, 0)] {
+			if a == nil {
+				return "", errFormatNull
+			}
+		}
 		if num > 0 && args[num-1] == nil {
 			if specifier != 't' && specifier != 'T' {
 				return "", errFormatNull
@@ -575,6 +595,7 @@ func parseFormatPrecision(ctx *FormatContext) (*FormatPrecision, error) {
 			ctx.progress(1)
 			continue
 		case '*':
+			ctx.progress(1)
 			return &FormatPrecision{fromArg: true}, nil
 		}
 		end = ctx.idx

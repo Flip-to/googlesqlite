@@ -1,10 +1,10 @@
 package value
 
 import (
-	"time"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // EncodeJSON renders v with BigQuery's JSON encodings, for TO_JSON and
@@ -35,6 +35,8 @@ func EncodeJSON(v Value) (string, error) {
 			return "", err
 		}
 		return strconv.Quote(s), nil
+	case StringValue:
+		return jsonQuote(string(vv)), nil
 	case *ArrayValue:
 		elems := make([]string, 0, len(vv.Values))
 		for _, e := range vv.Values {
@@ -52,9 +54,46 @@ func EncodeJSON(v Value) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			fields = append(fields, fmt.Sprintf("%s:%s", strconv.Quote(key), s))
+			fields = append(fields, fmt.Sprintf("%s:%s", jsonQuote(key), s))
 		}
 		return fmt.Sprintf("{%s}", strings.Join(fields, ",")), nil
 	}
 	return v.ToJSON()
+}
+
+// jsonQuote renders s as a JSON string literal: `"` and `\` are
+// backslash-escaped, \b \f \n \r \t use their short forms and other
+// control characters use \u00XX (strings.test,
+// to_json_string_with_escaped_field_names). strconv.Quote emits
+// \x00-style escapes, which are not valid JSON.
+func jsonQuote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\b':
+			b.WriteString(`\b`)
+		case '\f':
+			b.WriteString(`\f`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if r < 0x20 {
+				fmt.Fprintf(&b, `\u%04x`, r)
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }

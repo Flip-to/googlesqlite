@@ -54,9 +54,13 @@ var BindJsonExtractArray = helper.Scalar2(func(a, b value.Value) (value.Value, e
 	if err != nil || out == nil {
 		return out, err
 	}
-	if _, isJSON := a.(value.JsonValue); isJSON {
-		// For JSON input a JSON null element stays JSON 'null'.
-		keepJSONNullElements(out)
+	// A JSON null element stays 'null' (JSON 'null' for JSON input, the
+	// string "null" for STRING input), never SQL NULL (strings.test,
+	// json_query_array; verified against BigQuery).
+	keepJSONNullElements(out)
+	if _, isJSON := a.(value.JsonValue); !isJSON {
+		// STRING input yields ARRAY<STRING>.
+		jsonElementsToStrings(out)
 	}
 	return out, nil
 })

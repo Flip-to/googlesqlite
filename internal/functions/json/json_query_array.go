@@ -39,6 +39,12 @@ func JSON_QUERY_ARRAY(v, path string) (value.Value, error) {
 		if jsonValue == "null" {
 			ret.Values = append(ret.Values, nil)
 		} else {
+			// Elements come back compacted: '{"c": 2}' is '{"c":2}'
+			// (strings.test, json_query_array).
+			var buf bytes.Buffer
+			if err := json.Compact(&buf, val); err == nil {
+				jsonValue = buf.String()
+			}
 			ret.Values = append(ret.Values, value.JsonValue(jsonValue))
 		}
 	}
@@ -58,9 +64,13 @@ var BindJsonQueryArray = helper.Scalar2(func(a, b value.Value) (value.Value, err
 	if err != nil || out == nil {
 		return out, err
 	}
-	if _, isJSON := a.(value.JsonValue); isJSON {
-		// For JSON input a JSON null element stays JSON 'null'.
-		keepJSONNullElements(out)
+	// A JSON null element stays 'null' (JSON 'null' for JSON input, the
+	// string "null" for STRING input), never SQL NULL (strings.test,
+	// json_query_array; verified against BigQuery).
+	keepJSONNullElements(out)
+	if _, isJSON := a.(value.JsonValue); !isJSON {
+		// STRING input yields ARRAY<STRING>.
+		jsonElementsToStrings(out)
 	}
 	return out, nil
 })

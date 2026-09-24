@@ -96,8 +96,10 @@ func BindCollate(args ...value.Value) (value.Value, error) {
 	return args[0], nil
 }
 
-// BindRegexpMatch is an alias of REGEXP_CONTAINS — both return
-// whether the pattern matches anywhere in the input.
+// BindRegexpMatch implements the deprecated REGEXP_MATCH: TRUE when
+// `value` is a full match for `regexp`
+// (docs/third_party/googlesql-docs/string_functions.md; strings.test,
+// strings_function_regexp_match; bytes.test, function_regexp_match).
 func BindRegexpMatch(args ...value.Value) (value.Value, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("REGEXP_MATCH: invalid number of arguments: got %d, want 2", len(args))
@@ -113,7 +115,7 @@ func BindRegexpMatch(args ...value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	re, err := regexp.Compile(pat)
+	re, err := regexp.Compile(`\A(?:` + pat + `)\z`)
 	if err != nil {
 		return nil, fmt.Errorf("REGEXP_MATCH: %w", err)
 	}
@@ -234,13 +236,17 @@ func parseInt64Flexible(s string) (int64, error) {
 	return strconv.ParseInt(s, 10, 64)
 }
 
-// BindSplitSubstr returns the Nth substring of `s` produced by
-// splitting on `delim`. Negative `position` counts from the right.
+// BindSplitSubstr implements SPLIT_SUBSTR(value, delimiter, start_split
+// [, count]) per docs/third_party/googlesql-docs/string_functions.md:
+// start_split 0 or below -(number of splits) means 1, negative values
+// count from the end, a start past the end yields "", an omitted count
+// means "to the end", count 0 yields "" and a negative count errors.
+// Any NULL argument yields NULL.
 func BindSplitSubstr(args ...value.Value) (value.Value, error) {
 	if len(args) < 3 || len(args) > 4 {
 		return nil, fmt.Errorf("SPLIT_SUBSTR: invalid number of arguments: got %d, want between 3 and 4", len(args))
 	}
-	if helper.ExistsNull(args[:3]) {
+	if helper.ExistsNull(args) {
 		return nil, nil
 	}
 	s, err := args[0].ToString()
@@ -255,39 +261,37 @@ func BindSplitSubstr(args ...value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	parts := strings.Split(s, delim)
-	idx, err := helper.SafeInt(pos)
-	if err != nil {
-		return nil, err
-	}
-	if idx > 0 {
-		idx--
-	} else if idx < 0 {
-		idx = len(parts) + idx
+	var parts []string
+	if delim == "" {
+		parts = []string{s}
 	} else {
-		return value.StringValue(""), nil
+		parts = strings.Split(s, delim)
 	}
-	if idx < 0 || idx >= len(parts) {
+	n := int64(len(parts))
+	switch {
+	case pos > n:
 		return value.StringValue(""), nil
+	case pos > 0:
+		pos--
+	case pos < 0 && -pos <= n:
+		pos = n + pos
+	default:
+		pos = 0
 	}
-	count := 1
-	if len(args) == 4 && args[3] != nil {
+	count := n - pos
+	if len(args) == 4 {
 		c, err := args[3].ToInt64()
 		if err != nil {
 			return nil, err
 		}
-		count, err = helper.SafeInt(c)
-		if err != nil {
-			return nil, err
+		if c < 0 {
+			return nil, fmt.Errorf("SPLIT_SUBSTR: count must be non-negative, got %d", c)
+		}
+		if c < count {
+			count = c
 		}
 	}
-	if count < 1 {
-		count = 1
-	}
-	if idx+count > len(parts) {
-		count = len(parts) - idx
-	}
-	return value.StringValue(strings.Join(parts[idx:idx+count], delim)), nil
+	return value.StringValue(strings.Join(parts[pos:pos+count], delim)), nil
 }
 
 // ----- json -----

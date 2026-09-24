@@ -112,13 +112,18 @@ func TestBindCollatePassthrough(t *testing.T) {
 }
 
 func TestBindRegexpMatch(t *testing.T) {
-	got, err := BindRegexpMatch(value.StringValue("hello world"), value.StringValue("w.r"))
+	// REGEXP_MATCH is a full match (string_functions.md, REGEXP_MATCH).
+	got, err := BindRegexpMatch(value.StringValue("hello world"), value.StringValue("h.*w.rld"))
 	if err != nil {
 		t.Fatalf("BindRegexpMatch: %v", err)
 	}
 	b, _ := got.ToBool()
 	if !b {
-		t.Fatalf("expected match for 'w.r' in 'hello world'")
+		t.Fatalf("expected full match for 'h.*w.rld' on 'hello world'")
+	}
+	got, _ = BindRegexpMatch(value.StringValue("hello world"), value.StringValue("w.r"))
+	if b, _ = got.ToBool(); b {
+		t.Fatalf("partial match must be false")
 	}
 
 	got, _ = BindRegexpMatch(value.StringValue("abc"), value.StringValue("xyz"))
@@ -275,8 +280,12 @@ func TestBindRegexpExtractGroupsErrors(t *testing.T) {
 	}
 }
 
+// SPLIT_SUBSTR semantics follow string_functions.md: without a count
+// the substring runs to the end of the input, and start_split 0 is
+// treated as 1 (compliance strings.test, split_substr and
+// split_substr_with_zero_position).
 func TestBindSplitSubstr(t *testing.T) {
-	// Positive position (1-based).
+	// Positive position (1-based), no count: to the end.
 	got, err := BindSplitSubstr(
 		value.StringValue("a,b,c,d"),
 		value.StringValue(","),
@@ -286,8 +295,8 @@ func TestBindSplitSubstr(t *testing.T) {
 		t.Fatalf("BindSplitSubstr: %v", err)
 	}
 	s, _ := got.ToString()
-	if s != "b" {
-		t.Fatalf("position 2 = %q, want 'b'", s)
+	if s != "b,c,d" {
+		t.Fatalf("position 2 = %q, want 'b,c,d'", s)
 	}
 
 	// Negative position counts from the end.
@@ -301,15 +310,15 @@ func TestBindSplitSubstr(t *testing.T) {
 		t.Fatalf("position -1 = %q, want 'd'", s)
 	}
 
-	// Position 0 returns empty.
+	// Position 0 is treated as 1.
 	got, _ = BindSplitSubstr(
 		value.StringValue("a,b,c"),
 		value.StringValue(","),
 		value.IntValue(0),
 	)
 	s, _ = got.ToString()
-	if s != "" {
-		t.Fatalf("position 0 = %q, want empty", s)
+	if s != "a,b,c" {
+		t.Fatalf("position 0 = %q, want 'a,b,c'", s)
 	}
 
 	// Count argument joins multiple parts.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
@@ -20,7 +21,13 @@ func STRPOS(val, search value.Value) (value.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return value.IntValue(strings.Index(v, s) + 1), nil
+		// STRING positions count characters, not bytes
+		// (strings.test, diff_strings_and_bytes_9).
+		idx := strings.Index(v, s)
+		if idx < 0 {
+			return value.IntValue(0), nil
+		}
+		return value.IntValue(utf8.RuneCountInString(v[:idx]) + 1), nil
 	case value.BytesValue:
 		v, err := val.ToBytes()
 		if err != nil {

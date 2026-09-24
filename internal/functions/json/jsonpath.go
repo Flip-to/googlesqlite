@@ -358,3 +358,18 @@ func keepJSONNullElements(v value.Value) {
 		}
 	}
 }
+
+// jsonElementsToStrings turns the JSON elements of an extracted array
+// into their STRING text, for the STRING-input forms of
+// JSON_QUERY_ARRAY / JSON_EXTRACT_ARRAY.
+func jsonElementsToStrings(v value.Value) {
+	arr, ok := v.(*value.ArrayValue)
+	if !ok {
+		return
+	}
+	for i, e := range arr.Values {
+		if jv, ok := e.(value.JsonValue); ok {
+			arr.Values[i] = value.StringValue(string(jv))
+		}
+	}
+}

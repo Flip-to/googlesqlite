@@ -46,7 +46,19 @@ type windowFuncInfo struct {
 // NULL argument and return it unchanged, so they use Scalar1KeepNull
 // (arity check only, no NULL short-circuit).
 var bindBool = helper.Scalar1KeepNull(func(v value.Value) (value.Value, error) {
-	return v, nil
+	jv, ok := v.(value.JsonValue)
+	if !ok {
+		return v, nil
+	}
+	// BOOL(json_expr): only a JSON boolean converts; anything else,
+	// including JSON null, is an error (json_functions.md, BOOL).
+	switch strings.TrimSpace(string(jv)) {
+	case "true":
+		return value.BoolValue(true), nil
+	case "false":
+		return value.BoolValue(false), nil
+	}
+	return nil, fmt.Errorf("The provided JSON input is not a boolean")
 })
 
 var bindInt64 = helper.Scalar1KeepNull(func(v value.Value) (value.Value, error) {

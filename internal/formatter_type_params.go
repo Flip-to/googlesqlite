@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/goccy/go-googlesql"
 
@@ -11,6 +12,13 @@ import (
 )
 
 var maxLengthParamRe = regexp.MustCompile(`max_length\s*[:=]\s*(\d+)`)
+
+// precisionParamRe / scaleParamRe read NUMERIC / BIGNUMERIC type
+// parameters out of TypeParameters.DebugString.
+var (
+	precisionParamRe = regexp.MustCompile(`(?i)precision\s*[:=]\s*(\d+|MAX)`)
+	scaleParamRe     = regexp.MustCompile(`(?i)scale\s*[:=]\s*(\d+)`)
+)
 
 // castTypeParamSpec returns the length limits declared by a cast
 // target's type parameters (STRING(L) / BYTES(L), also nested in ARRAY
@@ -57,6 +65,25 @@ func typeParamSpec(p *googlesql.TypeParameters) *longtail.TypeParamSpec {
 			return nil
 		}
 		return &longtail.TypeParamSpec{MaxLength: n}
+	}
+	if isNum, _ := p.IsNumericTypeParameters(); isNum {
+		dbg, _ := p.DebugString()
+		spec := &longtail.TypeParamSpec{Numeric: true}
+		if m := precisionParamRe.FindStringSubmatch(dbg); m != nil {
+			if strings.EqualFold(m[1], "MAX") {
+				spec.MaxPrecision = true
+			} else if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+				spec.Precision = n
+			}
+		} else {
+			return nil
+		}
+		if m := scaleParamRe.FindStringSubmatch(dbg); m != nil {
+			if n, err := strconv.ParseInt(m[1], 10, 64); err == nil {
+				spec.Scale = n
+			}
+		}
+		return spec
 	}
 	children, _ := p.ChildList()
 	if len(children) == 0 {
