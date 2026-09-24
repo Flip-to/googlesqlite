@@ -127,6 +127,31 @@ SELECT one_digit, two_digit FROM NumbersTable INTERSECT DISTINCT STRICT CORRESPO
 			sql:  "SELECT NULL EXCEPT ALL SELECT 2",
 			rows: [][]string{{"NULL"}},
 		},
+		// Three-input INTERSECT ALL / EXCEPT ALL chains. Expected rows
+		// follow query-syntax.md: a row appearing m and n times appears
+		// MIN(m, n) times after INTERSECT ALL and MAX(m - n, 0) times after
+		// EXCEPT ALL, applied left to right. (BigQuery itself rejects ALL.)
+		{
+			name: "intersect_all_three_inputs",
+			sql: "SELECT x FROM UNNEST([1, 1, 1, 2, 2, 3, NULL, NULL]) AS x INTERSECT ALL " +
+				"SELECT x FROM UNNEST([1, 1, 2, NULL, NULL, NULL]) AS x INTERSECT ALL " +
+				"SELECT x FROM UNNEST([1, 2, 2, NULL]) AS x",
+			rows: [][]string{{"1"}, {"2"}, {"NULL"}},
+		},
+		{
+			name: "except_all_three_inputs",
+			sql: "SELECT x FROM UNNEST([1, 1, 1, 2, 2, 3, NULL, NULL]) AS x EXCEPT ALL " +
+				"SELECT x FROM UNNEST([1, 2, NULL]) AS x EXCEPT ALL " +
+				"SELECT x FROM UNNEST([1, 3]) AS x",
+			rows: [][]string{{"1"}, {"2"}, {"NULL"}},
+		},
+		{
+			name: "intersect_all_keeps_duplicates",
+			sql: "SELECT x FROM UNNEST([4, 4, 4, 5]) AS x INTERSECT ALL " +
+				"SELECT x FROM UNNEST([4, 4, 5, 5]) AS x INTERSECT ALL " +
+				"SELECT x FROM UNNEST([4, 4, 4, 5]) AS x",
+			rows: [][]string{{"4"}, {"4"}, {"5"}},
+		},
 		// set_operation_full_corresponding_by.test.
 		{
 			name: "full_corresponding_by_both_scans_have_padded_NULLs_union_all_basic",
