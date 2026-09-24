@@ -25,6 +25,9 @@ func (iv IntValue) Sub(v Value) (Value, error) {
 }
 
 func (iv IntValue) Mul(v Value) (Value, error) {
+	if x, ok := v.(*IntervalValue); ok {
+		return x.Mul(iv)
+	}
 	v2, err := v.ToInt64()
 	if err != nil {
 		return nil, err

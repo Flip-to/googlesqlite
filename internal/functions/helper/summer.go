@@ -43,6 +43,10 @@ type Summer struct {
 	nan         int64
 	posInf      int64
 	negInf      int64
+	// INTERVAL sums keep each part exact and unbounded, so only the
+	// final result is range-checked.
+	isInterval                bool
+	ivMonths, ivDays, ivNanos big.Int
 }
 
 func (s *Summer) Count() int64 { return s.n }
@@ -63,6 +67,18 @@ func (s *Summer) update(v value.Value, sign int64) error {
 			d.Neg(d)
 		}
 		s.i.Add(&s.i, d)
+	case *value.IntervalValue:
+		s.isInterval = true
+		m, d, n := value.IntervalParts(x)
+		mb, db := big.NewInt(m), big.NewInt(d)
+		if sign < 0 {
+			mb.Neg(mb)
+			db.Neg(db)
+			n.Neg(n)
+		}
+		s.ivMonths.Add(&s.ivMonths, mb)
+		s.ivDays.Add(&s.ivDays, db)
+		s.ivNanos.Add(&s.ivNanos, n)
 	case *value.NumericValue:
 		s.isNumeric = true
 		s.isBigNumeric = s.isBigNumeric || x.IsBigNumeric
@@ -115,6 +131,8 @@ func (s *Summer) Sum(name string) (value.Value, error) {
 		return nil, nil
 	}
 	switch {
+	case s.isInterval:
+		return value.NewIntervalFromParts(new(big.Int).Set(&s.ivMonths), new(big.Int).Set(&s.ivDays), new(big.Int).Set(&s.ivNanos))
 	case s.isFloat:
 		if special, ok := s.floatSpecial(); ok {
 			return value.FloatValue(special), nil
@@ -145,6 +163,8 @@ func (s *Summer) Avg() (value.Value, error) {
 	}
 	n := big.NewInt(s.n)
 	switch {
+	case s.isInterval:
+		return value.DivideIntervalParts(&s.ivMonths, &s.ivDays, &s.ivNanos, s.n)
 	case s.isFloat:
 		if special, ok := s.floatSpecial(); ok {
 			return value.FloatValue(special), nil
