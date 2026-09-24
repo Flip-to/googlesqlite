@@ -182,7 +182,7 @@ func isIdent(c byte) bool {
 	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
-var createTableRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?(?:TABLE\s+FUNCTION|AGGREGATE\s+FUNCTION|TABLE|VIEW|FUNCTION|PROPERTY\s+GRAPH)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][\w.]*|` + "`[^`]+`" + `)`)
+var createTableRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?(?:TABLE\s+FUNCTION|AGGREGATE\s+FUNCTION|TABLE|VIEW|FUNCTION|PROPERTY\s+GRAPH|CONSTANT)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][\w.]*|` + "`[^`]+`" + `)`)
 
 // CreatedObject returns the object name a setup statement creates.
 func CreatedObject(sql string) string {

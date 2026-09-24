@@ -1425,6 +1425,29 @@ var sqlRewritePipelinePreScriptVars = []sqlRewriteStep{
 	{"typeNameAliases", applyTypeNameAliases},
 	{"naiveTimestampUTC", applyNaiveTimestampUTC},
 	{"ingestionPartitionRewrite", applyIngestionPartitionRewrite},
+	{"signedNaNCast", applySignedNaNCast},
+}
+
+var signedNaNCastRe = regexp.MustCompile(`(?i)\bCAST\s*\(\s*(["'])([+-])nan(["'])\s+AS\s+(DOUBLE|FLOAT64|FLOAT)\s*\)`)
+
+// applySignedNaNCast rewrites CAST("-NAN" AS FLOAT64) (and "+NAN") to
+// CAST("NAN" AS FLOAT64). The analyzer folds the literal cast and
+// rejects a signed NaN, while BigQuery accepts it and yields NaN; the
+// sign of a NaN is not observable in GoogleSQL, so dropping it is
+// exact (compliance groupby_queries.test).
+func applySignedNaNCast(query string) string {
+	i := strings.IndexByte(query, 'N')
+	j := strings.IndexByte(query, 'n')
+	if i < 0 && j < 0 {
+		return query
+	}
+	return signedNaNCastRe.ReplaceAllStringFunc(query, func(m string) string {
+		sub := signedNaNCastRe.FindStringSubmatch(m)
+		if sub[1] != sub[3] {
+			return m
+		}
+		return "CAST(" + sub[1] + "NAN" + sub[1] + " AS " + sub[4] + ")"
+	})
 }
 
 // sqlRewritePipelinePostScriptVars holds the uniform-signature rewrites
