@@ -137,6 +137,12 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureWithRecursive,
 	googlesql.LanguageFeatureFeatureTableValuedFunctions,
 	googlesql.LanguageFeatureFeatureCreateTableFunction,
+	// CREATE [TEMP] AGGREGATE FUNCTION (SQL user-defined aggregates).
+	googlesql.LanguageFeatureFeatureCreateAggregateFunction,
+	// Set operations matching columns BY NAME / CORRESPONDING.
+	googlesql.LanguageFeatureFeatureByName,
+	googlesql.LanguageFeatureFeatureCorresponding,
+	googlesql.LanguageFeatureFeatureCorrespondingFull,
 	googlesql.LanguageFeatureFeatureOmitInsertColumnList,
 	googlesql.LanguageFeatureFeatureTokenizedSearch,
 	// Permits ResolvedArgumentRef inside JSON_VALUE / JSON_QUERY
@@ -2135,13 +2141,26 @@ func (a *Analyzer) buildScalarTypeFuncFromTemplatedFunc(node *googlesql.Resolved
 		if !m1(arg.IsTemplated()) {
 			typ = newType(m1(arg.Type())).FormatType()
 		}
+		if argumentIsNotAggregate(arg) {
+			typ += " NOT AGGREGATE"
+		}
 		args = append(args, fmt.Sprintf("%s %s", m1(arg.ArgumentName()), typ))
 	}
 	return fmt.Sprintf(
-		"CREATE TEMP FUNCTION __googlesqlite_func__(%s) as (%s)",
+		"CREATE TEMP %sFUNCTION __googlesqlite_func__(%s) as (%s)",
+		aggregateKeyword(m1(node.IsAggregate())),
 		strings.Join(args, ","),
 		m1(node.Code()),
 	)
+}
+
+// aggregateKeyword returns the AGGREGATE keyword of a CREATE
+// AGGREGATE FUNCTION statement, or "" for a scalar function.
+func aggregateKeyword(isAggregate bool) string {
+	if isAggregate {
+		return "AGGREGATE "
+	}
+	return ""
 }
 
 func (a *Analyzer) buildArrayTypeFuncFromTemplatedFunc(node *googlesql.ResolvedCreateFunctionStmt, realType string) string {
@@ -2152,10 +2171,14 @@ func (a *Analyzer) buildArrayTypeFuncFromTemplatedFunc(node *googlesql.ResolvedC
 		if !m1(arg.IsTemplated()) {
 			typ = newType(m1(arg.Type())).FormatType()
 		}
+		if argumentIsNotAggregate(arg) {
+			typ += " NOT AGGREGATE"
+		}
 		args = append(args, fmt.Sprintf("%s %s", m1(arg.ArgumentName()), typ))
 	}
 	return fmt.Sprintf(
-		"CREATE TEMP FUNCTION __googlesqlite_func__(%s) as (%s)",
+		"CREATE TEMP %sFUNCTION __googlesqlite_func__(%s) as (%s)",
+		aggregateKeyword(m1(node.IsAggregate())),
 		strings.Join(args, ","),
 		m1(node.Code()),
 	)

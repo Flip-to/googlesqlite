@@ -170,6 +170,14 @@ func parseCase(lines []string) (Case, bool) {
 		}
 	}
 	if sepIdx < 0 {
+		// Setup statements such as CREATE TEMP FUNCTION carry no
+		// expected result, so the block ends at the case delimiter.
+		if _, ok := c.Attrs["prepare_database"]; !ok {
+			return Case{}, false
+		}
+		sepIdx = len(lines)
+	}
+	if sepIdx < idx {
 		return Case{}, false
 	}
 	sqlLines := make([]string, 0, sepIdx-idx)
@@ -181,7 +189,9 @@ func parseCase(lines []string) (Case, bool) {
 		sqlLines = append(sqlLines, sl)
 	}
 	c.SQL = strings.TrimSpace(strings.Join(sqlLines, "\n"))
-	c.Expected = strings.TrimSpace(strings.Join(lines[sepIdx+1:], "\n"))
+	if sepIdx < len(lines) {
+		c.Expected = strings.TrimSpace(strings.Join(lines[sepIdx+1:], "\n"))
+	}
 	if c.SQL == "" {
 		return Case{}, false
 	}

@@ -232,8 +232,15 @@ func (n *ColumnRefNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
-	columnMap := columnRefMap(ctx)
 	col, _ := n.node.Column()
+	if subst := columnIDSubstitution(ctx); subst != nil {
+		if id, err := col.ColumnId(); err == nil {
+			if sql, ok := subst[id]; ok {
+				return sql, nil
+			}
+		}
+	}
+	columnMap := columnRefMap(ctx)
 	colName := uniqueColumnName(ctx, col)
 	if ref, exists := columnMap[colName]; exists {
 		delete(columnMap, colName)
@@ -711,7 +718,16 @@ func (n *AggregateFunctionCallNode) FormatSQL(ctx context.Context) (string, erro
 	}
 	funcMap := funcMapFromContext(ctx)
 	if spec, exists := funcMap[funcName]; exists {
-		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
+		sql, err := spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
+		if err != nil || !spec.IsAggregate {
+			return sql, err
+		}
+		// A SQL UDA body need not contain an aggregate call (e.g. a
+		// constant), but SQLite only aggregates a SELECT that has one.
+		// The always-true COUNT(*) makes the enclosing SELECT an
+		// aggregation, so it yields one row per group (and one row for
+		// an empty input without GROUP BY) as GoogleSQL requires.
+		return fmt.Sprintf("CASE WHEN COUNT(*) >= 0 THEN %s END", sql), nil
 	}
 	var opts []string
 	for _, item := range m1(n.node.OrderByItemList()) {
@@ -2921,6 +2937,7 @@ func (n *RecursiveScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	rec = flattenRecursiveColumnProjection(rec)
 	// Substitute RecursiveRefScan column IDs in the recursive branch
 	// with the canonical RecursiveScan ColumnList IDs so SQLite's
 	// single-column-name view of the CTE matches the outer query's
@@ -2947,6 +2964,25 @@ func (n *RecursiveScanNode) FormatSQL(ctx context.Context) (string, error) {
 		op = "UNION"
 	}
 	return fmt.Sprintf("%s %s %s", nonRec, op, rec), nil
+}
+
+// recursiveColumnProjectionRe matches a pure column re-projection of a
+// plain column projection of one table, the shape a BY NAME or
+// CORRESPONDING recursive term takes after its columns are reordered.
+var recursiveColumnProjectionRe = regexp.MustCompile("^\\s*SELECT ((?:`[^`]+`\\s*,\\s*)*`[^`]+`)\\s+FROM \\(\\s*SELECT (?:`[^`]+`\\s*,\\s*)*`[^`]+`\\s+FROM (`[^`]+`)\\s*\\)\\s*$")
+
+// flattenRecursiveColumnProjection rewrites
+// `SELECT a, b FROM (SELECT b, a FROM t)` to `SELECT a, b FROM t`.
+// SQLite rejects a recursive CTE reference inside a subquery of the
+// recursive term, and the inner projection only renames nothing and
+// reorders columns, so reading the outer column list from the table
+// directly is equivalent.
+func flattenRecursiveColumnProjection(sql string) string {
+	m := recursiveColumnProjectionRe.FindStringSubmatch(sql)
+	if m == nil {
+		return sql
+	}
+	return fmt.Sprintf("SELECT %s FROM %s", m[1], m[2])
 }
 
 func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
