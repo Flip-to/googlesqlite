@@ -22,6 +22,11 @@ func ROUND(x value.Value, precision int) (value.Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !value.CheckNumericRange(r, n.IsBigNumeric) {
+			// Rounding can carry past the type's range (flipto-dbt
+			// probe round-0868.27).
+			return nil, fmt.Errorf("numeric overflow: ROUND(%s, %d)", n.Rat.FloatString(9), precision)
+		}
 		return numericResult(r, n.IsBigNumeric), nil
 	}
 	xv, err := x.ToFloat64()
@@ -114,6 +119,11 @@ var BindRound = helper.ScalarN(func(args ...value.Value) (value.Value, error) {
 		r, err := ratRound(n.Rat, precision, mode)
 		if err != nil {
 			return nil, err
+		}
+		if !value.CheckNumericRange(r, n.IsBigNumeric) {
+			// Rounding can carry past the type's range (flipto-dbt
+			// probe round-0868.27).
+			return nil, fmt.Errorf("numeric overflow: ROUND(%s, %d)", n.Rat.FloatString(9), precision)
 		}
 		return numericResult(r, n.IsBigNumeric), nil
 	}

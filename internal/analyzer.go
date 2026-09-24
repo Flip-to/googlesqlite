@@ -1586,7 +1586,7 @@ func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode 
 	// literal cast such as CAST(1.123456789 AS NUMERIC) reaches the
 	// formatter as a DOUBLE; CastNode.FormatSQL recovers the literal's
 	// source image so the NUMERIC/BIGNUMERIC value stays exact.
-	unfold := timestampCastRe.MatchString(query)
+	unfold := timestampCastRe.MatchString(query) || negativeZeroRe.MatchString(query)
 	if unfold {
 		if ferr := a.opt.SetFoldLiteralCast(false); ferr == nil {
 			defer func() { _ = a.opt.SetFoldLiteralCast(true) }()
@@ -3410,5 +3410,12 @@ func getArgsFromParams(values []driver.NamedValue, params []*googlesql.ResolvedP
 }
 
 // timestampCastRe matches statements where unfolded literal casts are
-// needed to keep TIMESTAMP conversions in UTC.
-var timestampCastRe = regexp.MustCompile(`(?i)\bTIMESTAMP\b`)
+// needed to keep TIMESTAMP conversions in UTC. DATETIME is included
+// because the analyzer folds CAST(DATE ... AS DATETIME) to
+// 1970-01-01T00:00:00 (flipto-dbt probe cast_as_datetime-2057.6).
+var timestampCastRe = regexp.MustCompile(`(?i)\b(?:TIMESTAMP|DATETIME)\b`)
+
+// negativeZeroRe matches a -0.0 literal. The analyzer folds it to +0,
+// so CAST(-0.0 AS STRING) would fold to "0"; left to the runtime it is
+// "-0" (flipto-dbt probe cast_as_string-6504.15).
+var negativeZeroRe = regexp.MustCompile(`-\s*(?:0+\.0*|\.0+)(?:[eE][+-]?\d+)?(?:[^0-9eE]|$)`)

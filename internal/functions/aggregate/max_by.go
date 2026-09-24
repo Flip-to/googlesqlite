@@ -1,6 +1,8 @@
 package aggregate
 
 import (
+	"math"
+
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
@@ -10,12 +12,17 @@ import (
 // take the first-encountered row.
 type MAX_BY struct {
 	initialized bool
+	sawNaN      bool
 	bestVal     value.Value
 	bestKey     value.Value
 }
 
 func (f *MAX_BY) Step(v, k value.Value, opt *helper.Option) error {
 	if k == nil {
+		return nil
+	}
+	if isNaNKey(k) {
+		f.sawNaN = true
 		return nil
 	}
 	if !f.initialized {
@@ -36,18 +43,26 @@ func (f *MAX_BY) Step(v, k value.Value, opt *helper.Option) error {
 }
 
 func (f *MAX_BY) Done() (value.Value, error) {
+	if f.sawNaN {
+		return nil, nil
+	}
 	return f.bestVal, nil
 }
 
 // MIN_BY mirrors MAX_BY with the opposite ordering.
 type MIN_BY struct {
 	initialized bool
+	sawNaN      bool
 	bestVal     value.Value
 	bestKey     value.Value
 }
 
 func (f *MIN_BY) Step(v, k value.Value, opt *helper.Option) error {
 	if k == nil {
+		return nil
+	}
+	if isNaNKey(k) {
+		f.sawNaN = true
 		return nil
 	}
 	if !f.initialized {
@@ -68,5 +83,16 @@ func (f *MIN_BY) Step(v, k value.Value, opt *helper.Option) error {
 }
 
 func (f *MIN_BY) Done() (value.Value, error) {
+	if f.sawNaN {
+		return nil, nil
+	}
 	return f.bestVal, nil
+}
+
+// isNaNKey reports a NaN FLOAT64 key. BigQuery returns NULL from
+// MAX_BY / MIN_BY when a key is NaN (flipto-dbt probes max_by-8303.6
+// and min_by-6477.6).
+func isNaNKey(k value.Value) bool {
+	f, ok := k.(value.FloatValue)
+	return ok && math.IsNaN(float64(f))
 }

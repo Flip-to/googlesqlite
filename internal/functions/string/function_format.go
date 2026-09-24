@@ -3,6 +3,7 @@ package string
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -201,7 +202,8 @@ func parseInteger(param *FormatParam, args []value.Value) ([]rune, error) {
 	}
 	switch param.flag {
 	case FormatFlagPlus:
-		if v > 0 {
+		// FORMAT('%+d', 0) is "+0" (flipto-dbt probe format_width_flags-8665.0).
+		if v >= 0 {
 			format = "+" + format
 		}
 	case FormatFlagSpace:
@@ -259,7 +261,7 @@ func parseFloat(param *FormatParam, args []value.Value) ([]rune, error) {
 	if floatFmt == 'F' {
 		floatFmt = 'f'
 	}
-	format := strconv.FormatFloat(v, byte(floatFmt), precision, 64)
+	format := formatFloatC(v, byte(floatFmt), precision)
 	remain := width - len(format)
 	if remain > 0 && param.flag == FormatFlagMinus {
 		format += strings.Repeat(" ", remain)
@@ -283,6 +285,37 @@ func parseFloat(param *FormatParam, args []value.Value) ([]rune, error) {
 		return nil, fmt.Errorf("currently doesn't support ' flag for float value")
 	}
 	return []rune(format), nil
+}
+
+// formatFloatC renders v the way BigQuery's FORMAT does: non-finite
+// values print as nan / inf / -inf, and %f of a value whose integer
+// part has more than 17 significant digits keeps 17 significant digits
+// and pads with zeros (flipto-dbt probes format_t_f_e_g-3249.5 to .7).
+func formatFloatC(v float64, verb byte, precision int) string {
+	switch {
+	case math.IsNaN(v):
+		return "nan"
+	case math.IsInf(v, 1):
+		return "inf"
+	case math.IsInf(v, -1):
+		return "-inf"
+	}
+	if verb == 'f' && math.Abs(v) >= 1e17 {
+		e := strconv.FormatFloat(v, 'e', 16, 64) // [-]d.dddddddddddddddde+XX
+		mant, expText, _ := strings.Cut(e, "e")
+		exp, _ := strconv.Atoi(expText)
+		sign := ""
+		if strings.HasPrefix(mant, "-") {
+			sign, mant = "-", mant[1:]
+		}
+		digits := strings.Replace(mant, ".", "", 1)
+		intPart := digits + strings.Repeat("0", exp+1-len(digits))
+		if precision > 0 {
+			return sign + intPart + "." + strings.Repeat("0", precision)
+		}
+		return sign + intPart
+	}
+	return strconv.FormatFloat(v, verb, precision, 64)
 }
 
 func parseOneLineJSON(param *FormatParam, args []value.Value) ([]rune, error) {
@@ -309,12 +342,49 @@ func parseMultiLineJSON(param *FormatParam, args []value.Value) ([]rune, error) 
 	return []rune(buf.String()), nil
 }
 
+// parseString applies the precision (maximum characters) and the width
+// (right-justified, or left with the - flag) to %s, as C printf does
+// (flipto-dbt probes format_width_flags-8665.*).
 func parseString(param *FormatParam, args []value.Value) ([]rune, error) {
+	width, args, err := param.width.format(args)
+	if err != nil {
+		return nil, err
+	}
+	if param.precision != nil {
+		var prec int
+		prec, args, err = param.precision.format(args)
+		if err != nil {
+			return nil, err
+		}
+		s, err := args[0].ToString()
+		if err != nil {
+			return nil, err
+		}
+		r := []rune(s)
+		if prec < 0 {
+			prec = 0
+		}
+		if prec < len(r) {
+			r = r[:prec]
+		}
+		return padRunes(r, width, param.flag == FormatFlagMinus), nil
+	}
 	s, err := args[0].ToString()
 	if err != nil {
 		return nil, err
 	}
-	return []rune(s), nil
+	return padRunes([]rune(s), width, param.flag == FormatFlagMinus), nil
+}
+
+func padRunes(r []rune, width int, left bool) []rune {
+	if len(r) >= width {
+		return r
+	}
+	pad := []rune(strings.Repeat(" ", width-len(r)))
+	if left {
+		return append(r, pad...)
+	}
+	return append(pad, r...)
 }
 
 func parsePrintableString(param *FormatParam, args []value.Value) ([]rune, error) {
