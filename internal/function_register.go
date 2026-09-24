@@ -10,8 +10,8 @@ import (
 	"github.com/goccy/go-json"
 	sqlite3 "github.com/ncruces/go-sqlite3"
 
-	"github.com/goccy/googlesqlite/internal/functions/helper"
 	approx "github.com/goccy/googlesqlite/internal/functions/approx_aggregate"
+	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/functions/hll"
 	"github.com/goccy/googlesqlite/internal/functions/window"
 	"github.com/goccy/googlesqlite/internal/sqlitex"
