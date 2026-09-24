@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1507,12 +1509,21 @@ func (a *Analyzer) sliceArgsPerStatement(parsed *parsedScript, args []driver.Nam
 // they do — wildcard-table pre-registration, StmtAction construction
 // — can itself re-enter Analyze; keeping that outside this critical
 // section is what prevents a self-deadlock.
-func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string) (googlesql.ResolvedStatementNode, error) {
+// pivotCollationUnsupported is the analyzer's error for a collated
+// column inside PIVOT. The resolver has no support for it yet.
+const pivotCollationUnsupported = "Collation is not supported in a PIVOT clause yet"
+
+// analyzeStatementLocked analyzes stmt. When the resolver rejects a
+// collated column in a PIVOT clause, the statement is re-analyzed with
+// its case-insensitive COLLATE(x, '...:ci') calls folded to LOWER(x)
+// (see analyzeWithFoldedCollate); foldedQuery is then the rewritten
+// text the resolved AST's parse locations refer to, "" otherwise.
+func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string) (_ googlesql.ResolvedStatementNode, foldedQuery string, _ error) {
 	wasmAnalyzeMu.Lock()
 	defer wasmAnalyzeMu.Unlock()
 	a.opt.SetParameterMode(mode)
 	if err := a.declareParameterTypes(mode, args); err != nil {
-		return nil, fmt.Errorf("failed to declare parameter types: %w", err)
+		return nil, "", fmt.Errorf("failed to declare parameter types: %w", err)
 	}
 	// The analyzer folds literal casts in its built-in default time zone
 	// (America/Los_Angeles), and go-googlesql v0.4.0 exposes no way to
@@ -1539,11 +1550,109 @@ func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode 
 			out, err = googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
 		}
 	}
+	if err != nil && strings.Contains(err.Error(), pivotCollationUnsupported) {
+		if retry, rquery, rerr := a.analyzeWithFoldedCollate(stmt, query); rerr == nil {
+			out, err, foldedQuery = retry, nil, rquery
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to analyze: %w", err)
+		return nil, "", fmt.Errorf("failed to analyze: %w", err)
 	}
 	stmtNode, _ := out.ResolvedStatement()
-	return stmtNode, nil
+	return stmtNode, foldedQuery, nil
+}
+
+// analyzeWithFoldedCollate re-analyzes stmt after rewriting each
+// COLLATE(x, '<tag>:ci') call in its text to LOWER(x). The resolver
+// does not support collation inside PIVOT yet; folding the values to
+// lower case gives the pivot the same case-insensitive comparisons and
+// grouping. It returns the analyzer output and the rewritten query.
+func (a *Analyzer) analyzeWithFoldedCollate(stmt googlesql.ASTStatementNode, query string) (*googlesql.AnalyzerOutput, string, error) {
+	type span struct {
+		start, end int
+		repl       string
+	}
+	offset := func(p *googlesql.ParseLocationPoint, err error) int {
+		if err != nil || p == nil {
+			return -1
+		}
+		off, err := p.GetByteOffset()
+		if err != nil {
+			return -1
+		}
+		return int(off)
+	}
+	var spans []span
+	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
+		call, ok := node.(*googlesql.ASTFunctionCall)
+		if !ok {
+			return nil
+		}
+		if n, _ := call.NumChildren(); n != 3 {
+			return nil
+		}
+		path, _ := call.Function()
+		if path == nil {
+			return nil
+		}
+		ids, _ := path.ToIdentifierVector()
+		if len(ids) != 1 || !strings.EqualFold(ids[0], "collate") {
+			return nil
+		}
+		arg, _ := call.Arguments(0)
+		specNode, _ := call.Arguments(1)
+		lit, ok := specNode.(*googlesql.ASTStringLiteral)
+		if arg == nil || !ok {
+			return nil
+		}
+		spec, _ := lit.StringValue()
+		if !strings.HasSuffix(strings.ToLower(spec), ":ci") {
+			return nil
+		}
+		start, end := offset(call.StartLocation()), offset(call.EndLocation())
+		argStart, argEnd := offset(arg.StartLocation()), offset(arg.EndLocation())
+		if start < 0 || end > len(query) || argStart < start || argEnd > end || argStart > argEnd {
+			return nil
+		}
+		spans = append(spans, span{start, end, "LOWER(" + query[argStart:argEnd] + ")"})
+		return nil
+	})
+	if len(spans) == 0 {
+		return nil, "", fmt.Errorf("no case-insensitive COLLATE call to fold")
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	var b strings.Builder
+	prev := 0
+	for _, sp := range spans {
+		if sp.start < prev {
+			continue // nested inside an already folded call
+		}
+		b.WriteString(query[prev:sp.start])
+		b.WriteString(sp.repl)
+		prev = sp.end
+	}
+	b.WriteString(query[prev:])
+	folded := b.String()
+
+	// Re-parse the rewritten text; the statement keeps its start
+	// offset because every rewrite lies at or after it.
+	stmtStart := offset(stmt.StartLocation())
+	parsed, err := a.parseScript(folded)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, s := range parsed.stmts {
+		if offset(s.StartLocation()) != stmtStart {
+			continue
+		}
+		out, err := googlesql.AnalyzeStatementFromParserAST(s, a.opt, folded, a.catalog.catalog, tf())
+		runtime.KeepAlive(parsed)
+		if err != nil {
+			return nil, "", err
+		}
+		return out, folded, nil
+	}
+	return nil, "", fmt.Errorf("folded statement not found")
 }
 
 func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args []driver.NamedValue) ([]stmtActionFunc, error) {
@@ -1606,14 +1715,18 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
 				return nil, err
 			}
 			a.preRegisterWildcardTables(stmt)
-			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query)
+			stmtNode, foldedQuery, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query)
 			if err != nil {
 				return nil, err
+			}
+			sourceQuery := query
+			if foldedQuery != "" {
+				sourceQuery = foldedQuery
 			}
 			ctx = a.context(ctx, funcMap, tvfMap)
 			ctx = withSystemVars(ctx, conn.systemVars)
 			ctx = withConn(ctx, conn)
-			ctx = withSourceQuery(ctx, query)
+			ctx = withSourceQuery(ctx, sourceQuery)
 			action, err := a.newStmtAction(ctx, query, stmtArgs, stmtNode)
 			if err != nil {
 				return nil, err

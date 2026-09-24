@@ -182,3 +182,141 @@ SELECT 17, "h܏ello", "a"`,
 		})
 	}
 }
+
+// Regression cases for collation inside PIVOT / UNPIVOT and for type
+// parameters on collated cast targets. Expected values come from the
+// GoogleSQL compliance fixtures (compliance/testdata/pivot.test,
+// unpivot.test, cast_function.test); the case name is cited per entry.
+func TestCollationPivotUnpivotCast(t *testing.T) {
+	db, err := sql.Open("googlesqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  [][]any
+		err   string
+	}{
+		{
+			// pivot.test pivot_with_collation_on_implicit_group_by_columns.
+			name: "pivot_with_collation_on_implicit_group_by_columns",
+			query: `WITH t AS (
+  SELECT collate('a', 'und:ci') AS A, 1 AS b, 1 AS c UNION ALL
+  SELECT collate('A', 'und:ci') AS A, 1 AS b, 1 AS c
+)
+SELECT UPPER(A), one
+FROM (SELECT * FROM t PIVOT(sum(b) FOR c IN (1 AS one)))`,
+			want: [][]any{{"A", int64(2)}},
+		},
+		{
+			// pivot.test pivot_with_collation_on_aggregate_argument.
+			name: "pivot_with_collation_on_aggregate_argument",
+			query: `WITH t AS (
+  SELECT COLLATE('a', 'und:ci') AS val, 1 AS b UNION ALL
+  SELECT COLLATE('A', 'und:ci') AS val, 1 AS b
+)
+SELECT * FROM t PIVOT(count(distinct val) FOR b IN (1))`,
+			want: [][]any{{int64(1)}},
+		},
+		{
+			// pivot.test pivot_with_collation_on_for_expression.
+			name: "pivot_with_collation_on_for_expression",
+			query: `WITH t AS (
+  SELECT 1 AS val, COLLATE('a', 'und:ci') AS target UNION ALL
+  SELECT 1 AS val, COLLATE('A', 'und:ci') AS target
+)
+SELECT * FROM t PIVOT(sum(val) FOR target IN ('a'))`,
+			want: [][]any{{int64(2)}},
+		},
+		{
+			// unpivot.test unpivot_with_collation_on_preserved_columns.
+			name: "unpivot_with_collation_on_preserved_columns",
+			query: `WITH t AS (
+  SELECT collate('a', 'und:ci') AS A, 1 AS b, 1 AS c UNION ALL
+  SELECT collate('A', 'und:ci') AS A, 1 AS b, 1 AS c
+)
+SELECT UPPER(A), sum(val)
+FROM t UNPIVOT(val FOR k IN (b, c))
+GROUP BY A`,
+			want: [][]any{{"A", int64(4)}},
+		},
+		{
+			// unpivot.test unpivot_with_collation_on_preserved_columns_implicit_distinct.
+			name: "unpivot_with_collation_on_preserved_columns_implicit_distinct",
+			query: `WITH t AS (
+  SELECT collate('a', 'und:ci') AS A, 1 AS b, 2 AS c UNION ALL
+  SELECT collate('A', 'und:ci') AS A, 1 AS b, 2 AS c
+)
+SELECT UPPER(A) AS a, val, k
+FROM (SELECT DISTINCT * FROM t UNPIVOT(val FOR k IN (b, c)))
+ORDER BY a, val, k`,
+			want: [][]any{{"A", int64(1), "b"}, {"A", int64(2), "c"}},
+		},
+		{
+			// cast_function.test cast_string_type_parameters_and_collation_invalid_input.
+			name:  "cast_string_type_parameters_and_collation_invalid_input",
+			query: `select cast('abcdef' as STRING(5) COLLATE 'und:ci')`,
+			err:   "STRING(5) has maximum length 5 but got a value with length 6",
+		},
+		{
+			// cast_function.test cast_array_type_parameters_and_collation_invalid_input.
+			name:  "cast_array_type_parameters_and_collation_invalid_input",
+			query: `select cast(['hello', 'hi'] as ARRAY<STRING(2) COLLATE 'und:ci'>)`,
+			err:   "STRING(2) has maximum length 2 but got a value with length 5",
+		},
+		{
+			// cast_function.test cast_struct_type_parameters_and_collation_invalid_input.
+			name:  "cast_struct_type_parameters_and_collation_invalid_input",
+			query: `select cast((b'hey', 'abc') as STRUCT<BYTES(2), STRING COLLATE 'und:ci'>)`,
+			err:   "BYTES(2) has maximum length 2 but got a value with length 3",
+		},
+		{
+			// cast_function.test cast_string_type_parameters_and_collation_valid_input.
+			name:  "cast_string_type_parameters_and_collation_valid_input",
+			query: `select cast('abcde' as STRING(5) COLLATE 'und:ci') = 'ABCDE', cast('abcde' as STRING(5) COLLATE 'binary') = 'ABCDE'`,
+			want:  [][]any{{true, false}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := func() ([][]any, error) {
+				rows, err := db.Query(tc.query)
+				if err != nil {
+					return nil, err
+				}
+				defer rows.Close()
+				cols, err := rows.Columns()
+				if err != nil {
+					return nil, err
+				}
+				var out [][]any
+				for rows.Next() {
+					vals := make([]any, len(cols))
+					ptrs := make([]any, len(cols))
+					for i := range vals {
+						ptrs[i] = &vals[i]
+					}
+					if err := rows.Scan(ptrs...); err != nil {
+						return nil, err
+					}
+					out = append(out, vals)
+				}
+				return out, rows.Err()
+			}()
+			if tc.err != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.err) {
+					t.Fatalf("expected error containing %q, got %v (rows %v)", tc.err, err, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Fatalf("(-want +got):\n%s", diff)
+			}
+		})
+	}
+}

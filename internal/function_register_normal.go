@@ -309,6 +309,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "code_points_to_bytes", BindFunc: str.BindCodePointsToBytes},
 	{Name: "code_points_to_string", BindFunc: str.BindCodePointsToString},
 	{Name: "collate", BindFunc: str.BindCollate},
+	{Name: "check_type_parameters", BindFunc: longtail.BindCheckTypeParameters},
 	// Collation-aware lowerings emitted by the formatter for calls
 	// whose resolved collation_list is non-binary.
 	{Name: "bool_envelope", BindFunc: func(args ...value.Value) (value.Value, error) {

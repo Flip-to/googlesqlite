@@ -246,7 +246,16 @@ func columnCollation(col *googlesql.ResolvedColumn) string {
 		return ""
 	}
 	am, err := col.TypeAnnotationMap()
-	if err != nil || am == nil {
+	if err != nil {
+		return ""
+	}
+	return annotationMapCollation(am)
+}
+
+// annotationMapCollation returns the non-binary top-level collation in
+// a type annotation map, or "".
+func annotationMapCollation(am *googlesql.AnnotationMap) string {
+	if am == nil {
 		return ""
 	}
 	ca, err := googlesql.NewCollationAnnotation()
@@ -394,4 +403,39 @@ func firstArgIsArray(node *ResolvedBaseFunctionCallNode) bool {
 	}
 	isArray, _ := t.IsArray()
 	return isArray
+}
+
+// groupByColumnCollation returns the collation of a GROUP BY computed
+// column, read from its own annotations, from the expression, or -- when
+// the expression references a column the input ProjectScan computes --
+// from that computing expression. The UNPIVOT rewriter produces such
+// columns: the annotation sits on the expression, not on the column.
+func groupByColumnCollation(col googlesql.ResolvedComputedColumnBaseNode, input googlesql.ResolvedScanNode) string {
+	if spec := columnCollation(m1(col.Column())); spec != "" {
+		return spec
+	}
+	expr := m1(col.Expr())
+	if spec := annotationMapCollation(m1(expr.TypeAnnotationMap())); spec != "" {
+		return spec
+	}
+	ref, ok := expr.(*googlesql.ResolvedColumnRef)
+	if !ok {
+		return ""
+	}
+	refCol := m1(ref.Column())
+	if spec := columnCollation(refCol); spec != "" {
+		return spec
+	}
+	project, ok := input.(*googlesql.ResolvedProjectScan)
+	if !ok {
+		return ""
+	}
+	id := m1(refCol.ColumnId())
+	for _, c := range m1(project.ExprList()) {
+		if m1(m1(c.Column()).ColumnId()) != id {
+			continue
+		}
+		return annotationMapCollation(m1(m1(c.Expr()).TypeAnnotationMap()))
+	}
+	return ""
 }

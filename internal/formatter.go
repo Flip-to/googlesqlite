@@ -1290,10 +1290,24 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 			expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), timeZoneSQL,
 		), nil
 	}
-	return fmt.Sprintf(
+	castSQL := fmt.Sprintf(
 		"googlesqlite_cast(%s, '%s', '%s', %t)",
 		expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
-	), nil
+	)
+	// STRING(L) / BYTES(L) targets (possibly inside ARRAY / STRUCT)
+	// reject values longer than L; SAFE_CAST turns that into NULL.
+	if spec := castTypeParamSpec(n.node); spec != "" {
+		lit, err := literalFromValue(value.StringValue(spec))
+		if err != nil {
+			return "", err
+		}
+		fn := "googlesqlite_check_type_parameters"
+		if m1(n.node.ReturnNullOnError()) {
+			fn = "googlesqlite_safe_check_type_parameters"
+		}
+		castSQL = fmt.Sprintf("%s(%s, %s)", fn, castSQL, lit)
+	}
+	return castSQL, nil
 }
 
 func (n *MakeStructNode) FormatSQL(ctx context.Context) (string, error) {
@@ -1671,6 +1685,21 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 				sql, sql,
 			), nil
 		}
+		// Outside error-handling contexts a scalar subquery that yields
+		// more than one row is a runtime error, not "take the first row"
+		// as in SQLite. COUNT and MIN are evaluated in one pass; with at
+		// most one row MIN returns that row's value unchanged.
+		if subCols := m1(m1(n.node.Subquery()).MutableColumnList()); len(subCols) == 1 {
+			colName := uniqueColumnName(ctx, subCols[0])
+			msg, err := literalFromValue(value.StringValue("More than one element"))
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(
+				"(SELECT CASE WHEN COUNT(*) > 1 THEN googlesqlite_error(%s) ELSE MIN(`%s`) END FROM (%s))",
+				msg, colName, sql,
+			), nil
+		}
 	case googlesql.ResolvedSubqueryExprEnums_SubqueryTypeArray:
 		subCols := m1(m1(n.node.Subquery()).MutableColumnList())
 		if len(subCols) == 0 {
@@ -1973,9 +2002,20 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 	// GROUP BY a collated column groups on its collation key; the
 	// output column keeps one of the original values.
 	groupByKeys := append([]string(nil), groupByColumns...)
-	for i, c := range m1(n.node.CollationList()) {
+	collations := m1(n.node.CollationList())
+	for i, c := range collations {
 		if spec := collationName(c); spec != "" && i < len(groupByKeys) {
 			groupByKeys[i] = collationKeySQL(groupByKeys[i], spec)
+		}
+	}
+	if len(collations) == 0 {
+		// Rewriters (UNPIVOT) build the AggregateScan without a
+		// collation_list; the grouping columns' type annotations
+		// still carry the collation.
+		for i, col := range m1(n.node.GroupByList()) {
+			if spec := groupByColumnCollation(col, m1(n.node.InputScan())); spec != "" && i < len(groupByKeys) {
+				groupByKeys[i] = collationKeySQL(groupByKeys[i], spec)
+			}
 		}
 	}
 	columns := []string{}
