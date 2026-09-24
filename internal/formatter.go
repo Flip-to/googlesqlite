@@ -2218,7 +2218,10 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
-	var opType string
+	var (
+		opType string
+		bagOp  string
+	)
 	switch m1(n.node.OpType()) {
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeUnionAll:
 		opType = "UNION ALL"
@@ -2226,10 +2229,12 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 		opType = "UNION"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeIntersectAll:
 		opType = "INTERSECT ALL"
+		bagOp = "INTERSECT"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeIntersectDistinct:
 		opType = "INTERSECT"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeExceptAll:
 		opType = "EXCEPT ALL"
+		bagOp = "EXCEPT"
 	case googlesql.ResolvedSetOperationScanEnums_SetOperationTypeExceptDistinct:
 		opType = "EXCEPT"
 	default:
@@ -2272,11 +2277,59 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 			)
 		}
 	}
+	if bagOp != "" {
+		return formatBagSetOperation(ctx, n.node, queries, bagOp), nil
+	}
 	return fmt.Sprintf(
 		"SELECT %s FROM (%s)",
 		strings.Join(columnMaps, ","),
 		strings.Join(queries, fmt.Sprintf(" %s ", opType)),
 	), nil
+}
+
+// formatBagSetOperation emits INTERSECT ALL / EXCEPT ALL, which SQLite
+// does not support natively. Each row is tagged with its occurrence
+// number among identical rows (ROW_NUMBER() OVER (PARTITION BY every
+// column)), which turns bag semantics into set semantics: the k-th copy
+// of a row survives INTERSECT iff both sides have at least k copies, and
+// survives EXCEPT iff the right side has fewer than k copies. SQLite's
+// compound operators treat NULLs as equal, matching GoogleSQL. Inputs
+// are folded left to right and renumbered at every step so that chains
+// such as `A EXCEPT ALL B EXCEPT ALL C` keep left-associative semantics.
+func formatBagSetOperation(ctx context.Context, node *googlesql.ResolvedSetOperationScan, queries []string, op string) string {
+	items := m1(node.InputItemList())
+	outCols := m1(node.ColumnList())
+	pos := make([]string, len(outCols))
+	for i := range outCols {
+		pos[i] = fmt.Sprintf("`googlesqlite_setop_c%d`", i)
+	}
+	posList := strings.Join(pos, ", ")
+	numbered := func(input string) string {
+		return fmt.Sprintf(
+			"SELECT %s, ROW_NUMBER() OVER (PARTITION BY %s) AS `googlesqlite_setop_rn` FROM (%s)",
+			posList, posList, input,
+		)
+	}
+	branch := func(idx int) string {
+		cols := m1(items[idx].OutputColumnList())
+		aliased := make([]string, len(cols))
+		for i, col := range cols {
+			aliased[i] = fmt.Sprintf("`%s` AS %s", uniqueColumnName(ctx, col), pos[i])
+		}
+		return fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(aliased, ", "), queries[idx])
+	}
+	acc := branch(0)
+	for idx := 1; idx < len(queries); idx++ {
+		acc = fmt.Sprintf(
+			"SELECT %s FROM (%s %s %s)",
+			posList, numbered(acc), op, numbered(branch(idx)),
+		)
+	}
+	final := make([]string, len(outCols))
+	for i, col := range outCols {
+		final[i] = fmt.Sprintf("%s AS `%s`", pos[i], uniqueColumnName(ctx, col))
+	}
+	return fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(final, ","), acc)
 }
 
 func (n *OrderByScanNode) FormatSQL(ctx context.Context) (string, error) {
