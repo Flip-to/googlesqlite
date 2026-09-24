@@ -1038,7 +1038,7 @@ func applyNaiveTimestampUTC(query string) string {
 						if !timestampHasTZ(content) {
 							b.WriteByte(quote)
 							b.WriteString(content)
-							b.WriteString("+00:00")
+							b.WriteString(naiveUTCSuffix(content))
 							b.WriteByte(quote)
 						} else {
 							b.WriteString(query[k:end])
@@ -1102,7 +1102,7 @@ func naiveRangeBoundsUTC(body string) string {
 			parts[i] = p
 			continue
 		}
-		parts[i] = p + "+00:00"
+		parts[i] = p + naiveUTCSuffix(p)
 	}
 	return "[" + parts[0] + ", " + parts[1] + ")"
 }
@@ -1112,6 +1112,9 @@ func naiveRangeBoundsUTC(body string) string {
 // timezone name).
 func timestampHasTZ(s string) bool {
 	if len(s) == 0 {
+		return false
+	}
+	if dateOnlyRe.MatchString(s) {
 		return false
 	}
 	if strings.HasSuffix(s, "Z") || strings.HasSuffix(s, "z") {
@@ -1130,6 +1133,9 @@ func timestampHasTZ(s string) bool {
 }
 
 var (
+	// A bare date such as `2020-01-01` ends in `-01`, which is not an
+	// offset: an offset only follows a time of day.
+	dateOnlyRe = regexp.MustCompile(`^\s*\d{4}-\d{1,2}-\d{1,2}\s*$`)
 	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*(?:>\s*)?['"]`)
 	// Match `[+-]HH`, `[+-]HHMM`, or `[+-]HH:MM` at the tail.
 	tzOffsetTail = regexp.MustCompile(`[+-]\d{2}(?::?\d{2})?\s*$`)
@@ -3487,4 +3493,14 @@ func getArgsFromParams(values []driver.NamedValue, params []*googlesql.ResolvedP
 
 func isSpaceByte(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// naiveUTCSuffix is the text appended to a zone-less TIMESTAMP value to
+// make it UTC. A bare date gets a midnight time first, since an offset
+// may only follow a time of day.
+func naiveUTCSuffix(s string) string {
+	if dateOnlyRe.MatchString(s) {
+		return " 00:00:00+00:00"
+	}
+	return "+00:00"
 }

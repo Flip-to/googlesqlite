@@ -81,6 +81,22 @@ func TestTimestampLiteralUTC(t *testing.T) {
 		{"date_of_ts", `DATE($1)`, []string{`TIMESTAMP '2024-01-01 03:00:00'`}, "2024-01-01"},
 		{"string_of_ts", `STRING($1)`, []string{`TIMESTAMP '2024-01-01 03:00:00'`}, "2024-01-01 03:00:00+00"},
 		{"string_of_ts_zone", `STRING($1, 'America/Los_Angeles')`, []string{`TIMESTAMP '2024-01-01 03:00:00'`}, "2023-12-31 19:00:00-08"},
+		// Bare dates: `-01` at the end is not an offset.
+		{"ts_literal_date_only", `$1`, []string{`TIMESTAMP '2020-01-01'`}, "2020-01-01 00:00:00+00"},
+		{"cast_date_only_string_to_ts", `CAST($1 AS TIMESTAMP)`, []string{`'2020-01-01'`}, "2020-01-01 00:00:00+00"},
+		// RANGE<TIMESTAMP> bounds: zone-less read as UTC, explicit
+		// offsets kept, also inside STRUCT and ARRAY literals.
+		{"range_date_only_start", `RANGE_START($1)`, []string{`RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)'`}, "2020-01-01 00:00:00+00"},
+		{"range_date_only_end", `RANGE_END($1)`, []string{`RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)'`}, "2020-01-02 00:00:00+00"},
+		{"range_offset_bound_kept", `RANGE_START($1)`, []string{`RANGE<TIMESTAMP> '[2020-01-01 12:00:00.000005+01, 2020-01-02)'`}, "2020-01-01 11:00:00.000005+00"},
+		{"range_unbounded_end", `RANGE_END($1) IS NULL`, []string{`RANGE<TIMESTAMP> '[2020-01-01, UNBOUNDED)'`}, "true"},
+		{"range_in_struct", `RANGE_START($1.r1)`, []string{`STRUCT(RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)' AS r1, RANGE<TIMESTAMP> '[2020-01-01 12:00:00.000005+01, 2020-01-02)' AS r2)`}, "2020-01-01 00:00:00+00"},
+		{"range_in_struct_offset", `RANGE_START($1.r2)`, []string{`STRUCT(RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)' AS r1, RANGE<TIMESTAMP> '[2020-01-01 12:00:00.000005+01, 2020-01-02)' AS r2)`}, "2020-01-01 11:00:00.000005+00"},
+		{"range_in_array", `RANGE_START($1[OFFSET(0)])`, []string{`[RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)']`}, "2020-01-01 00:00:00+00"},
+		{"range_not_distinct_utc", `$1 IS DISTINCT FROM $2`, []string{`RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)'`, `RANGE<TIMESTAMP> '[2020-01-01 00:00:00.000000+00, 2020-01-02)'`}, "false"},
+		{"range_equal_utc", `$1 = $2`, []string{`RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)'`, `RANGE<TIMESTAMP> '[2020-01-01 00:00:00.000000+00, 2020-01-02)'`}, "true"},
+		{"range_distinct_offset", `$1 IS DISTINCT FROM $2`, []string{`RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)'`, `RANGE<TIMESTAMP> '[2020-01-01 00:00:00.000000+02, 2020-01-02)'`}, "true"},
+		{"range_offset_self_equal", `$1 = $2`, []string{`RANGE<TIMESTAMP> '[2020-01-01 12:00:00.000005+01, 2020-01-02)'`, `RANGE<TIMESTAMP> '[2020-01-01 12:00:00.000005+01, 2020-01-02)'`}, "true"},
 		// Composite literals.
 		{"range_ts_literal", `RANGE_START($1)`, []string{`RANGE<TIMESTAMP> '[2024-01-01 10:00:00, 2024-01-02 10:00:00)'`}, "2024-01-01 10:00:00+00"},
 		{"array_ts_coerced", `$1[OFFSET(0)]`, []string{`ARRAY<TIMESTAMP>['2024-01-01 10:00:00']`}, "2024-01-01 10:00:00+00"},

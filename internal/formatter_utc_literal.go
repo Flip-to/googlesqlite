@@ -210,7 +210,8 @@ func startsWithCast(src string) bool {
 }
 
 // hasUntypedString reports whether src contains a string literal that
-// is not introduced by a TIMESTAMP / DATE / DATETIME / TIME keyword.
+// is not introduced by a TIMESTAMP / DATE / DATETIME / TIME keyword or
+// by a RANGE<...> type.
 func hasUntypedString(src string) bool {
 	prev := ""
 	for i := 0; i < len(src); {
@@ -218,7 +219,7 @@ func hasUntypedString(src string) bool {
 		switch {
 		case c == '\'' || c == '"':
 			switch strings.ToUpper(prev) {
-			case "TIMESTAMP", "DATE", "DATETIME", "TIME":
+			case "TIMESTAMP", "DATE", "DATETIME", "TIME", ">":
 			default:
 				return true
 			}
@@ -234,7 +235,7 @@ func hasUntypedString(src string) bool {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			i++
 		default:
-			prev = ""
+			prev = string(c) // ">" closes RANGE<...>, a typed literal
 			i++
 		}
 	}

@@ -75,7 +75,10 @@ value that the analyzer folded in America/Los_Angeles come out as
 BigQuery computes it in UTC:
 
 - `TIMESTAMP '...'` and `RANGE<TIMESTAMP> '...'` literals without a zone
-  are rewritten to carry `+00:00` before analysis
+  (anywhere in the text, including inside ARRAY / STRUCT literals) are
+  rewritten to carry `+00:00` before analysis; a bare date gets
+  ` 00:00:00+00:00`, and a value that already has an offset or zone name
+  is left alone
   (`applyNaiveTimestampUTC` in `internal/analyzer.go`).
 - In the formatter (`utcLiteralSQL` in
   `internal/formatter_utc_literal.go`), a `ResolvedLiteral` whose value
@@ -121,7 +124,11 @@ suite is unchanged within noise.
   unsupported shape keeps the analyzer's Los Angeles value.
 - The GoogleSQL compliance suite assumes an America/Los_Angeles default
   zone; its TIMESTAMP-to-string and naive-TIMESTAMP cases disagree with
-  BigQuery and are expected to fail here.
+  BigQuery and are expected to fail here. That includes the RANGE cases
+  `is_distinct_range_timestamp`, `is_distinct_range_timestamp_vs_null`
+  (comparison_functions.test) and `array_reverse_range_timestamp`
+  (range_functions.test), whose expected bounds are Los Angeles
+  midnight (`08:00:00+00`) for zone-less dates.
 
 ## When to revisit
 
