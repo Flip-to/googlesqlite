@@ -3,10 +3,15 @@ package internal
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/goccy/go-googlesql"
 )
+
+// conditionalKeywordRe matches the conditional forms that can leave an
+// aggregate's value unused (conditional_evaluation.test, iferror.test).
+var conditionalKeywordRe = regexp.MustCompile(`(?i)\b(IF|IFNULL|NULLIF|IFERROR|ISERROR|NULLIFERROR|CASE|COALESCE)\b`)
 
 // Deferred aggregate errors (see value.DeferredError for the model).
 //
@@ -86,6 +91,13 @@ func collectDeferredAggColumns(ctx context.Context, scan googlesql.ResolvedScanN
 // error can come from).
 func aggregateCallDeferrable(ctx context.Context, call *AggregateFunctionCallNode) bool {
 	if call == nil || call.node == nil || inSafeEvalMode(ctx) {
+		return false
+	}
+	if q, ok := sourceQueryFromContext(ctx); ok && !conditionalKeywordRe.MatchString(q) {
+		// Deferral only changes the outcome when a conditional form
+		// can leave the aggregate unused; without one, raising the
+		// error immediately is equivalent and skips the per-group
+		// wrapper calls (bench mixed/priced_orders_report).
 		return false
 	}
 	base := call.node.ResolvedFunctionCallBase
