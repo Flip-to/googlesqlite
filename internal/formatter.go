@@ -239,6 +239,9 @@ func (n *LiteralNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
+	if sql, handled, err := utcLiteralSQL(ctx, n.node); handled {
+		return sql, err
+	}
 	return literalFromGoogleSQLValue(*m1(n.node.Value()))
 }
 
