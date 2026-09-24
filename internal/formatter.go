@@ -1118,10 +1118,19 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 	// option markers).
 	var valueArgs []string
 	envelopeBools := boolContainerConstructors[rawFuncName(n.node.ResolvedFunctionCallBase)]
-	for _, a := range m1(n.node.ResolvedFunctionCallBase.ArgumentList()) {
+	navName := rawFuncName(n.node.ResolvedFunctionCallBase)
+	for i, a := range m1(n.node.ResolvedFunctionCallBase.ArgumentList()) {
 		arg, err := newNode(a).FormatSQL(ctx)
 		if err != nil {
 			return "", err
+		}
+		if i == 1 && (navName == "lag" || navName == "lead") {
+			// SQLite's lag/lead accept a negative offset; GoogleSQL
+			// requires a constant non-negative one
+			// (match_recognize_navigation_functions_in_define.test).
+			if off, err := strconv.ParseInt(strings.Trim(arg, "() "), 10, 64); err == nil && off < 0 {
+				return "", fmt.Errorf("The offset to the function %s must not be negative", strings.ToUpper(navName)) //nolint:staticcheck // BigQuery's error text
+			}
 		}
 		for _, w := range wrapArg {
 			arg = w(arg)
