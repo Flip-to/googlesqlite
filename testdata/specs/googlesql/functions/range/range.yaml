@@ -33,9 +33,13 @@ cases:
                    TIMESTAMP '2022-10-01 16:00:00 America/Los_Angeles') AS results;
       
       -- Results depend upon where this query was executed.
+    # The upstream doc prints the bounds as `21:53:27.000000+00`; real
+    # BigQuery omits a zero fraction (CAST(... AS STRING) returned
+    # `[2022-10-01 21:53:27+00, 2022-10-01 23:00:00+00)`), as it does for
+    # TIMESTAMP text. We follow BigQuery.
     expected:
       rows:
-        - ['[2022-10-01 21:53:27.000000+00, 2022-10-01 23:00:00.000000+00)']
+        - ['[2022-10-01 21:53:27+00, 2022-10-01 23:00:00+00)']
   - desc: upstream example 4
     sql: |-
       SELECT RANGE(NULL, DATE '2022-12-31') AS results
