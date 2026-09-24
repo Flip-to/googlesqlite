@@ -1,6 +1,8 @@
 package hll
 
 import (
+	"fmt"
+
 	"github.com/DataDog/go-hll"
 
 	"github.com/goccy/googlesqlite/internal/value"
@@ -19,6 +21,13 @@ func init() {
 // aggregate) — it accepts a serialized sketch and returns its
 // cardinality.
 func HLL_COUNT_EXTRACT(sketch []byte) (value.Value, error) {
+	if isZetaSketch(sketch) {
+		s, err := parseZetaSketch(sketch)
+		if err != nil {
+			return nil, fmt.Errorf("%w in HLL_COUNT.EXTRACT", err)
+		}
+		return value.IntValue(s.cardinality()), nil
+	}
 	h, err := hll.FromBytes(sketch)
 	if err != nil {
 		return nil, err

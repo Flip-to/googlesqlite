@@ -3,6 +3,7 @@ package window
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
 
 	"github.com/goccy/googlesqlite/internal/functions/helper"
@@ -18,6 +19,7 @@ type percentileWindow struct {
 	values     []value.Value
 	null       []bool
 	pct        float64
+	pctValue   value.Value
 	pctSet     bool
 	ignoreNull bool
 	once       bool
@@ -46,6 +48,7 @@ func (p *percentileWindow) absorbStep(stepArgs ...any) error {
 			return fmt.Errorf("percentile: value must be in [0, 1]; got %v", f)
 		}
 		p.pct = f
+		p.pctValue = values[1]
 		p.pctSet = true
 	}
 	if values[0] == nil {
@@ -81,7 +84,12 @@ func (p *percentileWindow) activeSorted() ([]value.Value, error) {
 		}
 		nonNulls = append(nonNulls, v)
 	}
+	// NaN orders before every other non-NULL value.
 	sort.SliceStable(nonNulls, func(i, j int) bool {
+		iNaN, jNaN := isNaNValue(nonNulls[i]), isNaNValue(nonNulls[j])
+		if iNaN || jNaN {
+			return iNaN && !jNaN
+		}
 		c, err := nonNulls[i].LT(nonNulls[j])
 		if err != nil {
 			return false
@@ -110,23 +118,7 @@ func (a *percentileContWindow) Done() (any, error) {
 	if !a.pctSet {
 		return nil, nil
 	}
-	// Position within [0, n-1].
-	pos := a.pct * float64(len(xs)-1)
-	lo := int(math.Floor(pos))
-	hi := int(math.Ceil(pos))
-	loVal, err := xs[lo].ToFloat64()
-	if err != nil {
-		return nil, err
-	}
-	if lo == hi {
-		return loVal, nil
-	}
-	hiVal, err := xs[hi].ToFloat64()
-	if err != nil {
-		return nil, err
-	}
-	frac := pos - float64(lo)
-	return loVal + frac*(hiVal-loVal), nil
+	return percentileContValue(xs, a.pctValue)
 }
 
 // PERCENTILE_DISC: discrete percentile.
@@ -161,4 +153,89 @@ func (a *percentileDiscWindow) Done() (any, error) {
 	// unchanged; only PERCENTILE_CONT requires a numeric coercion
 	// for interpolation.
 	return value.EncodeValue(xs[idx])
+}
+
+func isNaNValue(v value.Value) bool {
+	f, ok := v.(value.FloatValue)
+	return ok && math.IsNaN(float64(f))
+}
+
+// percentileContValue interpolates PERCENTILE_CONT over the sorted
+// values xs (NULL entries first under RESPECT NULLS). The position
+// pct * (n - 1) and its fraction are computed exactly, as the
+// GoogleSQL reference implementation does, so a percentile such as
+// 0.8750000000000001 is not rounded onto a neighbouring row.
+//
+//   - DOUBLE: lo * (1 - f) + hi * f, which keeps -inf / +inf at the
+//     ends instead of producing NaN from inf - inf
+//     (aggregate_percentile_cont.test,
+//     aggregate_percentile_cont_interpolation).
+//   - NUMERIC / BIGNUMERIC: exact lo + (hi - lo) * f, rounded half
+//     away from zero to the type's scale
+//     (aggregate_percentile_cont_numeric / _bignumeric).
+//
+// A NULL at either interpolation end yields the other end; NULL at
+// both yields NULL.
+func percentileContValue(xs []value.Value, pct value.Value) (any, error) {
+	n := len(xs)
+	if n == 0 || pct == nil {
+		return nil, nil
+	}
+	pr, err := pct.ToRat()
+	if err != nil {
+		return nil, err
+	}
+	pos := new(big.Rat).Mul(pr, new(big.Rat).SetInt64(int64(n-1)))
+	lo := new(big.Int).Quo(pos.Num(), pos.Denom()) // pos >= 0, so Quo floors
+	frac := new(big.Rat).Sub(pos, new(big.Rat).SetInt(lo))
+	loIdx := int(lo.Int64())
+	hiIdx := loIdx
+	if frac.Sign() > 0 {
+		hiIdx = loIdx + 1
+	}
+	if hiIdx >= n {
+		hiIdx = n - 1
+	}
+	loVal, hiVal := xs[loIdx], xs[hiIdx]
+	if frac.Sign() == 0 || loIdx == hiIdx {
+		hiVal = loVal
+	}
+	switch {
+	case loVal == nil && hiVal == nil:
+		return nil, nil
+	case loVal == nil:
+		loVal = hiVal
+	case hiVal == nil:
+		hiVal = loVal
+	}
+	if nv, ok := loVal.(*value.NumericValue); ok {
+		a := nv.Rat
+		b, err := hiVal.ToRat()
+		if err != nil {
+			return nil, err
+		}
+		r := new(big.Rat).Sub(b, a)
+		r.Mul(r, frac)
+		r.Add(r, a)
+		scale := 9
+		if nv.IsBigNumeric {
+			scale = 38
+		}
+		rounded, _ := new(big.Rat).SetString(r.FloatString(scale))
+		return value.EncodeValue(&value.NumericValue{Rat: rounded, IsBigNumeric: nv.IsBigNumeric})
+	}
+	a, err := loVal.ToFloat64()
+	if err != nil {
+		return nil, err
+	}
+	if frac.Sign() == 0 {
+		return value.EncodeValue(value.FloatValue(a))
+	}
+	b, err := hiVal.ToFloat64()
+	if err != nil {
+		return nil, err
+	}
+	f, _ := frac.Float64()
+	g, _ := new(big.Rat).Sub(big.NewRat(1, 1), frac).Float64()
+	return value.EncodeValue(value.FloatValue(a*g + b*f))
 }

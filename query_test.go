@@ -3219,9 +3219,13 @@ FROM Items`,
 			}},
 		},
 		{
-			name:        "array_agg with nulls",
-			query:       `SELECT ARRAY_AGG(x) AS array_agg FROM UNNEST([NULL, 1, -2, 3, -2, 1, NULL]) AS x`,
-			expectedErr: "ARRAY_AGG: input value must be not null",
+			// ARRAY_AGG keeps NULL inputs (GoogleSQL compliance
+			// array_aggregation.test, array_agg_with_nulls).
+			name:  "array_agg with nulls",
+			query: `SELECT ARRAY_AGG(x) AS array_agg FROM UNNEST([NULL, 1, -2, 3, -2, 1, NULL]) AS x`,
+			expectedRows: [][]any{{
+				[]any{nil, int64(1), int64(-2), int64(3), int64(-2), int64(1), nil},
+			}},
 		},
 		{
 			name:  "array_agg with null in order by",
@@ -3232,8 +3236,10 @@ FROM Items`,
 		},
 		{
 			name:        "array_agg with struct",
-			query:       `SELECT b, ARRAY_AGG(a) FROM UNNEST([STRUCT(1 AS a, 2 AS b), STRUCT(NULL AS a, 2 AS b)]) GROUP BY b`,
-			expectedErr: "ARRAY_AGG: input value must be not null",
+			query: `SELECT b, ARRAY_AGG(a) FROM UNNEST([STRUCT(1 AS a, 2 AS b), STRUCT(NULL AS a, 2 AS b)]) GROUP BY b`,
+			expectedRows: [][]any{{
+				int64(2), []any{int64(1), nil},
+			}},
 		},
 		{
 			name:  "array_agg with ignore nulls",
