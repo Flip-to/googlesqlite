@@ -306,6 +306,8 @@ func queryAll(ctx context.Context, conn *sql.Conn, q string) ([][]any, error) {
 
 var tempFuncRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TEMP(?:ORARY)?\s+(?:AGGREGATE\s+)?FUNCTION[[:space:](]`)
 
+var createConstantRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+|PUBLIC\s+|PRIVATE\s+)?CONSTANT\s`)
+
 var tableNotFoundRe = regexp.MustCompile(`(?:Table|Function) not found: ([\w.` + "`" + `]+)`)
 
 func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (res caseResult) {
@@ -339,6 +341,15 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 	}
 	if tz, ok := c.Attrs["default_time_zone"]; ok && !strings.EqualFold(tz, "UTC") {
 		return skip("non-UTC default_time_zone " + tz + " (BigQuery sessions default to UTC)")
+	}
+	if mode := c.Attrs["primary_key_mode"]; mode != "" && mode != "no_primary_key" {
+		return skip("primary_key_mode " + mode + " (BigQuery primary keys are NOT ENFORCED)")
+	}
+	if strings.HasPrefix(res.Expected, "ERROR: generic::unimplemented") {
+		return skip("reference implementation limitation (expected generic::unimplemented)")
+	}
+	if createConstantRe.MatchString(query) {
+		return skip("CREATE CONSTANT is not BigQuery DDL")
 	}
 	if strings.HasPrefix(res.Expected, "ScriptResult") || c.Attrs["script_mode"] != "" {
 		return skip("runner: script-mode cases not supported")
