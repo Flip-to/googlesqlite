@@ -146,6 +146,18 @@ func (a *percentileDiscWindow) Done() (any, error) {
 	// `index = ceil(pct * n) - 1` which matches.
 	n := len(xs)
 	idx := max(int(math.Ceil(a.pct*float64(n)))-1, 0)
+	// ceil(pct * n) is computed exactly: a BIGNUMERIC percentile such as
+	// 0.40000000000000000000000000000000000001 must not round onto 0.4
+	// (analytic_percentile_disc.test
+	// analytic_percentile_disc_bignumeric_percentile).
+	if pr, err := a.pctValue.ToRat(); err == nil {
+		pos := new(big.Rat).Mul(pr, new(big.Rat).SetInt64(int64(n)))
+		c := new(big.Int).Quo(pos.Num(), pos.Denom())
+		if !pos.IsInt() {
+			c.Add(c, big.NewInt(1))
+		}
+		idx = max(int(c.Int64())-1, 0)
+	}
 	if idx >= n {
 		idx = n - 1
 	}

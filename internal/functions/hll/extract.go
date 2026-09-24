@@ -28,7 +28,8 @@ func HLL_COUNT_EXTRACT(sketch []byte) (value.Value, error) {
 		}
 		return value.IntValue(s.cardinality()), nil
 	}
-	h, err := hll.FromBytes(sketch)
+	_, raw := untagSketch(sketch)
+	h, err := hll.FromBytes(raw)
 	if err != nil {
 		return nil, err
 	}

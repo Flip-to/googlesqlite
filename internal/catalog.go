@@ -2785,6 +2785,9 @@ func (c *Catalog) tvfHandleForSpec(spec *TVFSpec) (*googlesql.TableValuedFunctio
 		}
 		argTypes = append(argTypes, argType)
 	}
+	if named := spec.namedArgumentTypes(); named != nil {
+		argTypes = named
+	}
 	if spec.IsTemplated {
 		return c.templatedTVFHandle(storageName, spec, argTypes)
 	}
@@ -2860,6 +2863,7 @@ func (c *Catalog) copyTVFSpec(spec *TVFSpec, newNamePath []string) *TVFSpec {
 		Body:          spec.Body,
 		IsTemplated:   spec.IsTemplated,
 		Code:          spec.Code,
+		argSignature:  spec.argSignature,
 	}
 }
 
