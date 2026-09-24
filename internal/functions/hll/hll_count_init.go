@@ -10,6 +10,9 @@ import (
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
+// zeroHashSubstitute stands in for a zero murmur3 hash.
+const zeroHashSubstitute uint64 = 0x9e3779b97f4a7c15
+
 type HLL_COUNT_INIT struct {
 	once      sync.Once
 	hll       *hll.Hll
@@ -62,6 +65,12 @@ func (f *HLL_COUNT_INIT) Step(input value.Value, precision int64, opt *helper.Op
 			return err
 		}
 		v = murmur3.Sum64(b)
+	}
+	// go-hll ignores a zero hash, and murmur3 of '' (or b'') is zero;
+	// BigQuery counts '' as a distinct value (flipto-dbt probe
+	// hll_count_init-1736.4).
+	if v == 0 {
+		v = zeroHashSubstitute
 	}
 	f.hll.AddRaw(v)
 	return nil

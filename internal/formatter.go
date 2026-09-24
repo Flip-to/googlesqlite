@@ -248,11 +248,41 @@ func (n *LiteralNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
+	if sql, handled, err := utcLiteralSQL(ctx, n.node); handled {
+		return sql, err
+	}
 	v := m1(n.node.Value())
 	if isNegativeZeroLiteral(ctx, n.node, v) {
 		return "-0.0", nil
 	}
+	if kind := m1(v.TypeKind()); (kind == googlesql.TypeKindTypeArray || kind == googlesql.TypeKindTypeStruct) && !m1(v.IsNull()) {
+		if image, ok := literalSourceImage(ctx, n.node); ok && strings.Contains(image, "-") {
+			val, err := valueFromGoogleSQLValue(*v)
+			if err != nil {
+				return "", err
+			}
+			return literalFromValue(restoreNegativeZeros(val, image))
+		}
+	}
 	return literalFromGoogleSQLValue(*v)
+}
+
+// literalSourceImage returns the source text a literal was resolved
+// from, when the parse location is known.
+func literalSourceImage(ctx context.Context, lit *googlesql.ResolvedLiteral) (string, bool) {
+	query, ok := sourceQueryFromContext(ctx)
+	if !ok {
+		return "", false
+	}
+	loc, _ := lit.GetParseLocationRangeOrNULL()
+	if loc == nil {
+		return "", false
+	}
+	image, err := loc.GetTextFrom(query)
+	if err != nil {
+		return "", false
+	}
+	return image, true
 }
 
 // isNegativeZeroLiteral reports a DOUBLE literal written as -0.0. The

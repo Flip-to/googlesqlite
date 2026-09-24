@@ -96,7 +96,9 @@ func literalFromValue(v value.Value) (string, error) {
 			return "9e999", nil
 		case math.IsInf(f64, -1):
 			return "-9e999", nil
-		case !math.IsNaN(f64):
+		case !math.IsNaN(f64) && (f64 != 0 || !math.Signbit(f64)):
+			// -0.0 goes through the envelope below: SQLite does not
+			// keep the sign of a zero (flipto-dbt probe format_t-5416.15).
 			value := strconv.FormatFloat(f64, 'g', -1, 64)
 			if !strings.Contains(value, ".") && !strings.Contains(value, "e") {
 				// append x.0 suffix to keep float value context

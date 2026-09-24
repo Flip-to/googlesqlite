@@ -970,7 +970,8 @@ func isAliasInTypePosition(query string, start, end int) bool {
 // where <value> contains neither a timezone offset (`[+-]\d{2}:?\d{2}`),
 // the literal `Z` / `UTC` suffix, nor any other timezone marker.
 // `TIMESTAMP_ADD` and other identifier prefixes are unaffected because
-// the scanner consumes them as a single word.
+// the scanner consumes them as a single word. RANGE<TIMESTAMP> literal
+// bounds without a zone get the same treatment.
 func applyNaiveTimestampUTC(query string) string {
 	if !timestampNeedle.MatchString(query) {
 		return query
@@ -1006,6 +1007,20 @@ func applyNaiveTimestampUTC(query string) string {
 			word := query[i:j]
 			b.WriteString(word)
 			i = j
+			if strings.EqualFold(word, "RANGE") {
+				if k, ok := rangeTimestampLiteralStart(query, i); ok {
+					end := scanStringLiteral(query, k)
+					if end > k+1 && end <= len(query) {
+						b.WriteString(query[i:k])
+						quote := query[k]
+						b.WriteByte(quote)
+						b.WriteString(naiveRangeBoundsUTC(query[k+1 : end-1]))
+						b.WriteByte(quote)
+						i = end
+						continue
+					}
+				}
+			}
 			if strings.EqualFold(word, "TIMESTAMP") {
 				// Skip whitespace, then if the next token is a string
 				// literal without a TZ marker, rewrite it to UTC.
@@ -1023,7 +1038,7 @@ func applyNaiveTimestampUTC(query string) string {
 						if !timestampHasTZ(content) {
 							b.WriteByte(quote)
 							b.WriteString(content)
-							b.WriteString("+00:00")
+							b.WriteString(naiveUTCSuffix(content))
 							b.WriteByte(quote)
 						} else {
 							b.WriteString(query[k:end])
@@ -1040,11 +1055,66 @@ func applyNaiveTimestampUTC(query string) string {
 	return b.String()
 }
 
+// rangeTimestampLiteralStart reports whether query[i:] continues a
+// RANGE keyword with `<TIMESTAMP> '...'`, returning the index of the
+// string literal's opening quote.
+func rangeTimestampLiteralStart(query string, i int) (int, bool) {
+	skip := func(k int) int {
+		for k < len(query) && isSpaceByte(query[k]) {
+			k++
+		}
+		return k
+	}
+	k := skip(i)
+	if k >= len(query) || query[k] != '<' {
+		return 0, false
+	}
+	k = skip(k + 1)
+	if k+len("TIMESTAMP") > len(query) || !strings.EqualFold(query[k:k+len("TIMESTAMP")], "TIMESTAMP") {
+		return 0, false
+	}
+	k = skip(k + len("TIMESTAMP"))
+	if k >= len(query) || query[k] != '>' {
+		return 0, false
+	}
+	k = skip(k + 1)
+	if k >= len(query) || (query[k] != '\'' && query[k] != '"') {
+		return 0, false
+	}
+	return k, true
+}
+
+// naiveRangeBoundsUTC appends +00:00 to each zone-less bound of a
+// RANGE<TIMESTAMP> literal body such as `[2024-01-01 10:00:00, UNBOUNDED)`,
+// for the same reason applyNaiveTimestampUTC rewrites TIMESTAMP literals.
+func naiveRangeBoundsUTC(body string) string {
+	t := strings.TrimSpace(body)
+	if len(t) < 2 || t[0] != '[' || t[len(t)-1] != ')' {
+		return body
+	}
+	parts := strings.Split(t[1:len(t)-1], ",")
+	if len(parts) != 2 {
+		return body
+	}
+	for i, part := range parts {
+		p := strings.TrimSpace(part)
+		if p == "" || strings.EqualFold(p, "UNBOUNDED") || strings.EqualFold(p, "NULL") || timestampHasTZ(p) {
+			parts[i] = p
+			continue
+		}
+		parts[i] = p + naiveUTCSuffix(p)
+	}
+	return "[" + parts[0] + ", " + parts[1] + ")"
+}
+
 // timestampHasTZ reports whether a TIMESTAMP literal body already
 // carries a timezone marker (offset, `Z`, or an IANA / abbreviation
 // timezone name).
 func timestampHasTZ(s string) bool {
 	if len(s) == 0 {
+		return false
+	}
+	if dateOnlyRe.MatchString(s) {
 		return false
 	}
 	if strings.HasSuffix(s, "Z") || strings.HasSuffix(s, "z") {
@@ -1063,7 +1133,10 @@ func timestampHasTZ(s string) bool {
 }
 
 var (
-	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*['"]`)
+	// A bare date such as `2020-01-01` ends in `-01`, which is not an
+	// offset: an offset only follows a time of day.
+	dateOnlyRe = regexp.MustCompile(`^\s*\d{4}-\d{1,2}-\d{1,2}\s*$`)
+	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*(?:>\s*)?['"]`)
 	// Match `[+-]HH`, `[+-]HHMM`, or `[+-]HH:MM` at the tail.
 	tzOffsetTail = regexp.MustCompile(`[+-]\d{2}(?::?\d{2})?\s*$`)
 	// Match a trailing alphabetic timezone identifier separated from
@@ -1570,7 +1643,7 @@ const pivotCollationUnsupported = "Collation is not supported in a PIVOT clause 
 // its case-insensitive COLLATE(x, '...:ci') calls folded to LOWER(x)
 // (see analyzeWithFoldedCollate); foldedQuery is then the rewritten
 // text the resolved AST's parse locations refer to, "" otherwise.
-func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string) (_ googlesql.ResolvedStatementNode, foldedQuery string, _ error) {
+func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string, unfold bool) (_ googlesql.ResolvedStatementNode, foldedQuery string, _ error) {
 	wasmAnalyzeMu.Lock()
 	defer wasmAnalyzeMu.Unlock()
 	a.opt.SetParameterMode(mode)
@@ -1578,30 +1651,19 @@ func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode 
 		return nil, "", fmt.Errorf("failed to declare parameter types: %w", err)
 	}
 	// The analyzer folds literal casts in its built-in default time zone
-	// (America/Los_Angeles), and go-googlesql v0.4.0 exposes no way to
-	// build a UTC TimeZone for SetDefaultTimeZone, so
-	// CAST(TIMESTAMP '2024-01-01 03:00:00+00' AS DATE) folded to
-	// 2023-12-31. For statements that involve TIMESTAMP, leave literal
-	// casts to the runtime, which uses UTC. Unfolded, a floating-point
-	// literal cast such as CAST(1.123456789 AS NUMERIC) reaches the
-	// formatter as a DOUBLE; CastNode.FormatSQL recovers the literal's
-	// source image so the NUMERIC/BIGNUMERIC value stays exact.
-	unfold := timestampCastRe.MatchString(query)
+	// (America/Los_Angeles), and go-googlesql v0.4.0 cannot be given a
+	// UTC TimeZone. Folding stays on: the formatter re-evaluates the
+	// zone-dependent folded literals in UTC from their source text
+	// (utcLiteralSQL). When a folded literal has a shape it cannot
+	// re-evaluate, the statement is analyzed again with unfold set, so
+	// the casts reach the runtime, which uses UTC. See
+	// docs/decisions/analyzer-default-time-zone.md.
 	if unfold {
 		if ferr := a.opt.SetFoldLiteralCast(false); ferr == nil {
 			defer func() { _ = a.opt.SetFoldLiteralCast(true) }()
 		}
 	}
 	out, err := googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
-	if unfold && err != nil && strings.Contains(err.Error(), "Invalid cast from") {
-		// Without literal-cast folding the analyzer types a bare NULL
-		// as INT64 and then rejects its coercion to types such as
-		// GEOGRAPHY (UNION ALL ... NULL). Retry with folding for this
-		// statement only; see newAnalyzerOptions for why it is off.
-		if ferr := a.opt.SetFoldLiteralCast(true); ferr == nil {
-			out, err = googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
-		}
-	}
 	if err != nil && strings.Contains(err.Error(), pivotCollationUnsupported) {
 		if retry, rquery, rerr := a.analyzeWithFoldedCollate(stmt, query); rerr == nil {
 			out, err, foldedQuery = retry, nil, rquery
@@ -1767,19 +1829,39 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
 				return nil, err
 			}
 			a.preRegisterWildcardTables(stmt)
-			stmtNode, foldedQuery, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query)
+			stmtNode, foldedQuery, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, false)
 			if err != nil {
 				return nil, err
 			}
-			sourceQuery := query
-			if foldedQuery != "" {
-				sourceQuery = foldedQuery
+			build := func(node googlesql.ResolvedStatementNode, foldedQuery string, allowRefold bool) (StmtAction, *zoneFoldState, error) {
+				sourceQuery := query
+				if foldedQuery != "" {
+					sourceQuery = foldedQuery
+				}
+				state := newZoneFoldState(sourceQuery, allowRefold && refoldableStmt(node))
+				sctx := a.context(ctx, funcMap, tvfMap)
+				sctx = withSystemVars(sctx, conn.systemVars)
+				sctx = withConn(sctx, conn)
+				sctx = withSourceQuery(sctx, sourceQuery)
+				sctx = withZoneFoldState(sctx, state)
+				action, err := a.newStmtAction(sctx, query, stmtArgs, node)
+				return action, state, err
 			}
-			ctx = a.context(ctx, funcMap, tvfMap)
-			ctx = withSystemVars(ctx, conn.systemVars)
-			ctx = withConn(ctx, conn)
-			ctx = withSourceQuery(ctx, sourceQuery)
-			action, err := a.newStmtAction(ctx, query, stmtArgs, stmtNode)
+			action, state, err := build(stmtNode, foldedQuery, true)
+			if state.needRefold {
+				// A literal was folded in the analyzer's default time
+				// zone in a shape utcLiteralSQL cannot re-evaluate:
+				// analyze again without literal-cast folding so the
+				// conversion runs at runtime, in UTC.
+				unfolded, ufq, uerr := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, true)
+				if uerr != nil {
+					// Without folding the analyzer rejects some
+					// statements (a bare NULL typed as INT64 cannot be
+					// coerced to GEOGRAPHY); keep the folded form.
+					unfolded, ufq = stmtNode, foldedQuery
+				}
+				action, _, err = build(unfolded, ufq, false)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -3409,6 +3491,16 @@ func getArgsFromParams(values []driver.NamedValue, params []*googlesql.ResolvedP
 	return args, nil
 }
 
-// timestampCastRe matches statements where unfolded literal casts are
-// needed to keep TIMESTAMP conversions in UTC.
-var timestampCastRe = regexp.MustCompile(`(?i)\bTIMESTAMP\b`)
+func isSpaceByte(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// naiveUTCSuffix is the text appended to a zone-less TIMESTAMP value to
+// make it UTC. A bare date gets a midnight time first, since an offset
+// may only follow a time of day.
+func naiveUTCSuffix(s string) string {
+	if dateOnlyRe.MatchString(s) {
+		return " 00:00:00+00:00"
+	}
+	return "+00:00"
+}

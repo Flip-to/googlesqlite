@@ -163,7 +163,11 @@ func rangeBoundDisplay(v Value) (string, error) {
 	case DatetimeValue:
 		return time.Time(x).Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(x)), nil
 	case TimestampValue:
-		return time.Time(x).UTC().Format("2006-01-02 15:04:05.000000") + "+00", nil
+		// BigQuery prints a TIMESTAMP bound like TIMESTAMP text: no
+		// fraction when it is zero, otherwise groups of three digits
+		// ("[2022-10-01 21:53:27+00, 2022-10-01 23:00:00.500+00)").
+		t := time.Time(x).UTC()
+		return t.Format("2006-01-02 15:04:05") + fractionInGroups(t) + "+00", nil
 	}
 	return v.ToString()
 }

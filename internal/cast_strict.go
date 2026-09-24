@@ -39,8 +39,14 @@ func castScalarStrict(kind googlesql.TypeKind, v value.Value) (out value.Value, 
 			return value.FloatValue(f), true, err
 		}
 	case googlesql.TypeKindTypeBool:
-		if x, ok := v.(value.StringValue); ok {
-			switch strings.ToLower(strings.TrimSpace(string(x))) {
+		switch x := v.(type) {
+		case value.IntValue:
+			// Any non-zero INT64 is TRUE (flipto-dbt probe cast_as_bool-1821.8).
+			return value.BoolValue(x != 0), true, nil
+		case value.StringValue:
+			// Only "true" / "false" in any case; no surrounding
+			// whitespace (flipto-dbt probe cast_as_bool-1821.5).
+			switch strings.ToLower(string(x)) {
 			case "true":
 				return value.BoolValue(true), true, nil
 			case "false":
@@ -55,7 +61,9 @@ func castScalarStrict(kind googlesql.TypeKind, v value.Value) (out value.Value, 
 		case value.StringValue:
 			s := strings.TrimSpace(string(x))
 			rr, ok := new(big.Rat).SetString(s)
-			if !ok || s == "" {
+			// big.Rat also takes hex, octal, binary and fractions;
+			// NUMERIC takes decimal text only (probe cast_as_numeric-3243.25).
+			if !ok || s == "" || !decimalLiteralRe.MatchString(s) {
 				return nil, true, fmt.Errorf("invalid NUMERIC value: %s", string(x))
 			}
 			r = rr
@@ -97,6 +105,13 @@ func castScalarStrict(kind googlesql.TypeKind, v value.Value) (out value.Value, 
 			if err == nil && zone != "" {
 				err = fmt.Errorf("failed to convert %s to time.Time type", string(x))
 			}
+			// A DATETIME leap second drops its fraction:
+			// 12:59:60.123456 is 13:00:00 (civil_time.test
+			// cast_from_datetime_to_time, checked on BigQuery). A
+			// TIMESTAMP keeps it.
+			if m := civilLiteralRe.FindStringSubmatch(strings.TrimSpace(string(x))); m != nil && m[6] == "60" {
+				t = t.Truncate(time.Second)
+			}
 			return value.DatetimeValue(t), true, err
 		}
 	case googlesql.TypeKindTypeTimestamp:
@@ -104,6 +119,11 @@ func castScalarStrict(kind googlesql.TypeKind, v value.Value) (out value.Value, 
 			t, zone, err := parseCivilLiteral(string(x))
 			if err != nil {
 				return nil, true, err
+			}
+			// TIMESTAMP has microsecond precision; more fractional
+			// digits are an error (probe cast_as_timestamp-6219.5).
+			if m := civilLiteralRe.FindStringSubmatch(strings.TrimSpace(string(x))); m != nil && len(m[7]) > 6 {
+				return nil, true, fmt.Errorf("failed to convert %s to time.Time type", string(x))
 			}
 			loc, err := zoneLocation(zone)
 			if err != nil {
@@ -195,12 +215,26 @@ func parseFloatLiteral(s string) (float64, error) {
 	case "-inf", "-infinity":
 		return math.Inf(-1), nil
 	}
+	// A 0x-prefixed integer is accepted (probe cast_as_float64-5980.20).
+	if body := strings.TrimLeft(t, "+-"); len(body) > 2 && strings.EqualFold(body[:2], "0x") && len(t)-len(body) <= 1 {
+		u, err := strconv.ParseUint(body[2:], 16, 64)
+		if err != nil {
+			return 0, fmt.Errorf("bad double value: %s", s)
+		}
+		f := float64(u)
+		if t[0] == '-' {
+			f = -f
+		}
+		return f, nil
+	}
 	f, err := strconv.ParseFloat(t, 64)
 	if err != nil {
 		return 0, fmt.Errorf("bad double value: %s", s)
 	}
 	return f, nil
 }
+
+var decimalLiteralRe = regexp.MustCompile(`^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$`)
 
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 

@@ -14,7 +14,7 @@ func TO_JSON_STRING(v value.Value, prettyPrint bool) (value.Value, error) {
 		// literal rather than SQL NULL.
 		return value.StringValue("null"), nil
 	}
-	s, err := value.EncodeJSON(v)
+	s, err := value.EncodeJSONString(v)
 	if err != nil {
 		return nil, err
 	}
