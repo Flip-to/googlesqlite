@@ -45,7 +45,7 @@ func BindString(args ...value.Value) (value.Value, error) {
 			return nil, nil
 		}
 		if body == "" || body[0] != '"' {
-			return nil, fmt.Errorf("The provided JSON input is not a string")
+			return nil, fmt.Errorf("The provided JSON input is not a string") //nolint:staticcheck // BigQuery's error text
 		}
 		return value.StringValue(fmt.Sprint(jsonValue.Interface())), nil
 	}

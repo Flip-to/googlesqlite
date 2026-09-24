@@ -33,7 +33,7 @@ import (
 // on merge (legacy value type moved to field 4, sparse_size / values
 // recomputed) were checked against BigQuery.
 
-var errIncompatibleSketch = errors.New("Invalid or incompatible sketch")
+var errIncompatibleSketch = errors.New("Invalid or incompatible sketch") //nolint:staticcheck // BigQuery's error text
 
 type zetaSketch struct {
 	numValues       int64

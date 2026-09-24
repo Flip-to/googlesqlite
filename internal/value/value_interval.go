@@ -71,7 +71,7 @@ func NewIntervalFromParts(months, days, nanos *big.Int) (*IntervalValue, error) 
 
 func checkIntervalField(name string, v, limit *big.Int) error {
 	if v.CmpAbs(limit) > 0 {
-		return fmt.Errorf("Interval field %s '%s' is out of range %s to %s", name, v, new(big.Int).Neg(limit), limit)
+		return fmt.Errorf("Interval field %s '%s' is out of range %s to %s", name, v, new(big.Int).Neg(limit), limit) //nolint:staticcheck // BigQuery's error text
 	}
 	return nil
 }

@@ -48,7 +48,7 @@ func buildJSONObject(keys, vals []value.Value) (value.Value, error) {
 	seen := make(map[string]struct{}, len(keys))
 	for i, k := range keys {
 		if k == nil {
-			return nil, fmt.Errorf("Invalid input to JSON_OBJECT: A key cannot be NULL")
+			return nil, fmt.Errorf("Invalid input to JSON_OBJECT: A key cannot be NULL") //nolint:staticcheck // BigQuery's error text, checked by the compliance fixtures
 		}
 		key, err := k.ToString()
 		if err != nil {
@@ -81,10 +81,10 @@ func JSON_OBJECT_ARRAYS(args ...value.Value) (value.Value, error) {
 		return nil, fmt.Errorf("JSON_OBJECT: expected 2 array arguments, got %d", len(args))
 	}
 	if args[0] == nil {
-		return nil, fmt.Errorf("Invalid input to JSON_OBJECT: The keys array cannot be NULL")
+		return nil, fmt.Errorf("Invalid input to JSON_OBJECT: The keys array cannot be NULL") //nolint:staticcheck // BigQuery's error text, checked by the compliance fixtures
 	}
 	if args[1] == nil {
-		return nil, fmt.Errorf("Invalid input to JSON_OBJECT: The values array cannot be NULL")
+		return nil, fmt.Errorf("Invalid input to JSON_OBJECT: The values array cannot be NULL") //nolint:staticcheck // BigQuery's error text, checked by the compliance fixtures
 	}
 	keys, err := args[0].ToArray()
 	if err != nil {
@@ -95,7 +95,7 @@ func JSON_OBJECT_ARRAYS(args ...value.Value) (value.Value, error) {
 		return nil, err
 	}
 	if len(keys.Values) != len(vals.Values) {
-		return nil, fmt.Errorf("Invalid input to JSON_OBJECT: The number of keys and values must match")
+		return nil, fmt.Errorf("Invalid input to JSON_OBJECT: The number of keys and values must match") //nolint:staticcheck // BigQuery's error text, checked by the compliance fixtures
 	}
 	return buildJSONObject(keys.Values, vals.Values)
 }

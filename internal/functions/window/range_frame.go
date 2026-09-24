@@ -223,10 +223,10 @@ func offsetKey(v value.Value) (rangeKey, error) {
 		return k, err
 	}
 	if k.null {
-		return k, fmt.Errorf("Window frame offset for PRECEDING or FOLLOWING cannot be NULL")
+		return k, fmt.Errorf("Window frame offset for PRECEDING or FOLLOWING cannot be NULL") //nolint:staticcheck // BigQuery's error text, checked by the compliance fixtures
 	}
 	if k.nan || (k.isFloat && k.f < 0) || (!k.isFloat && k.r.Sign() < 0) {
-		return k, fmt.Errorf("Window frame offset for PRECEDING or FOLLOWING must be non-negative")
+		return k, fmt.Errorf("Window frame offset for PRECEDING or FOLLOWING must be non-negative") //nolint:staticcheck // BigQuery's error text, checked by the compliance fixtures
 	}
 	return k, nil
 }

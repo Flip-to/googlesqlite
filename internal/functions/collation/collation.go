@@ -88,13 +88,6 @@ func (sp spec) keyOf(s string) string {
 	return hex.EncodeToString(c.KeyFromString(&buf, s))
 }
 
-func (sp spec) equal(a, b string) bool {
-	if sp.binary {
-		return a == b
-	}
-	return sp.keyOf(a) == sp.keyOf(b)
-}
-
 func specArg(v value.Value) (spec, error) {
 	if v == nil {
 		return spec{binary: true}, nil

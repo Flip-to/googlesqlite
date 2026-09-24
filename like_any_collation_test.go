@@ -16,6 +16,7 @@ import (
 // like_any.test, like_all.test, collation.test, json_queries.test; the
 // case name is cited per entry) and docs/third_party/googlesql-docs
 // (operators.md, collation-concepts.md, json_functions.md).
+//nolint:staticcheck // ST1018: case text is copied verbatim from the compliance fixtures.
 func TestLikeAnyCollationJSON(t *testing.T) {
 	db, err := sql.Open("googlesqlite", ":memory:")
 	if err != nil {
@@ -187,6 +188,7 @@ SELECT 17, "h܏ello", "a"`,
 // parameters on collated cast targets. Expected values come from the
 // GoogleSQL compliance fixtures (compliance/testdata/pivot.test,
 // unpivot.test, cast_function.test); the case name is cited per entry.
+//nolint:staticcheck // ST1018: case text is copied verbatim from the compliance fixtures.
 func TestCollationPivotUnpivotCast(t *testing.T) {
 	db, err := sql.Open("googlesqlite", ":memory:")
 	if err != nil {

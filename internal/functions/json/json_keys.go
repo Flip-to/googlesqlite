@@ -140,7 +140,7 @@ func BindJsonKeys(args ...value.Value) (value.Value, error) {
 		switch v := a.(type) {
 		case value.IntValue:
 			if v <= 0 {
-				return nil, fmt.Errorf("max_depth must be positive.")
+				return nil, fmt.Errorf("max_depth must be positive.") //nolint:staticcheck // BigQuery's error text, checked by the compliance fixtures
 			}
 			maxDepth = int(v)
 		case value.StringValue:
@@ -152,7 +152,7 @@ func BindJsonKeys(args ...value.Value) (value.Value, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", "strict", "lax", "lax recursive":
 	default:
-		return nil, fmt.Errorf("Invalid JSON mode specified")
+		return nil, fmt.Errorf("Invalid JSON mode specified") //nolint:staticcheck // BigQuery's error text
 	}
 	return JSON_KEYS(jsonText, maxDepth, mode)
 }

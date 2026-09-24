@@ -8,6 +8,8 @@ import (
 	"github.com/goccy/googlesqlite/internal/value"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // gsqlPath is a parsed GoogleSQL JSONPath (json_functions.md, JSONPath
@@ -30,8 +32,35 @@ type pathStep struct {
 // `['name']` selector, which only the legacy JSON_EXTRACT family allows.
 func (p *gsqlPath) UsedSingleQuotePathSelector() bool { return p.usedSingleQuote }
 
-// createPath parses a JSONPath expression.
+var (
+	pathCache     sync.Map // string -> *gsqlPath
+	pathCacheSize atomic.Int64
+)
+
+// maxCachedPaths bounds pathCache so per-row computed paths cannot grow
+// it without limit; past the cap paths are parsed on every call.
+const maxCachedPaths = 4096
+
+// createPath parses a JSONPath expression. Parsed paths are cached: the
+// path is usually a literal repeated for every row. A cached *gsqlPath
+// is never mutated.
 func createPath(path string) (*gsqlPath, error) {
+	if p, ok := pathCache.Load(path); ok {
+		return p.(*gsqlPath), nil
+	}
+	p, err := parsePath(path)
+	if err != nil {
+		return nil, err
+	}
+	if pathCacheSize.Load() < maxCachedPaths {
+		if _, loaded := pathCache.LoadOrStore(path, p); !loaded {
+			pathCacheSize.Add(1)
+		}
+	}
+	return p, nil
+}
+
+func parsePath(path string) (*gsqlPath, error) {
 	s := strings.TrimSpace(path)
 	if !strings.HasPrefix(s, "$") {
 		return nil, fmt.Errorf("JSONPath must start with '$'")
@@ -153,53 +182,147 @@ func (p *gsqlPath) Extract(doc []byte) ([][]byte, error) {
 }
 
 // rawObjectMember returns the raw value of the first member named key
-// when raw is a JSON object.
+// when raw is a JSON object. It scans the bytes directly (no decoder)
+// because JSON_VALUE and friends run it once per row.
 func rawObjectMember(raw []byte, key string) ([]byte, bool) {
 	if len(raw) == 0 || raw[0] != '{' {
 		return nil, false
 	}
-	dec := stdjson.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if _, err := dec.Token(); err != nil {
+	i := skipSpace(raw, 1)
+	if i < len(raw) && raw[i] == '}' {
 		return nil, false
 	}
-	for dec.More() {
-		tok, err := dec.Token()
-		if err != nil {
+	for i < len(raw) {
+		if raw[i] != '"' {
 			return nil, false
 		}
-		k, _ := tok.(string)
-		var v stdjson.RawMessage
-		if err := dec.Decode(&v); err != nil {
+		end, ok := skipString(raw, i)
+		if !ok {
 			return nil, false
 		}
-		if k == key {
-			return bytes.TrimSpace(v), true
+		k := raw[i+1 : end-1]
+		i = skipSpace(raw, end)
+		if i >= len(raw) || raw[i] != ':' {
+			return nil, false
 		}
+		i = skipSpace(raw, i+1)
+		vEnd, ok := skipValue(raw, i)
+		if !ok {
+			return nil, false
+		}
+		if keyEquals(k, key) {
+			return raw[i:vEnd], true
+		}
+		i = skipSpace(raw, vEnd)
+		if i >= len(raw) {
+			return nil, false
+		}
+		if raw[i] == '}' {
+			return nil, false
+		}
+		if raw[i] != ',' {
+			return nil, false
+		}
+		i = skipSpace(raw, i+1)
 	}
 	return nil, false
 }
 
 // rawArrayElem returns the raw idx-th element when raw is a JSON array.
 func rawArrayElem(raw []byte, idx int) ([]byte, bool) {
-	if len(raw) == 0 || raw[0] != '[' {
+	if len(raw) == 0 || raw[0] != '[' || idx < 0 {
 		return nil, false
 	}
-	dec := stdjson.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	if _, err := dec.Token(); err != nil {
+	i := skipSpace(raw, 1)
+	if i < len(raw) && raw[i] == ']' {
 		return nil, false
 	}
-	for i := 0; dec.More(); i++ {
-		var v stdjson.RawMessage
-		if err := dec.Decode(&v); err != nil {
+	for n := 0; i < len(raw); n++ {
+		vEnd, ok := skipValue(raw, i)
+		if !ok {
 			return nil, false
 		}
-		if i == idx {
-			return bytes.TrimSpace(v), true
+		if n == idx {
+			return raw[i:vEnd], true
 		}
+		i = skipSpace(raw, vEnd)
+		if i >= len(raw) || raw[i] != ',' {
+			return nil, false
+		}
+		i = skipSpace(raw, i+1)
 	}
 	return nil, false
+}
+
+// keyEquals compares a raw (still escaped) member name with key.
+func keyEquals(rawKey []byte, key string) bool {
+	if bytes.IndexByte(rawKey, 0x5c) < 0 {
+		return string(rawKey) == key
+	}
+	var k string
+	if err := stdjson.Unmarshal(append(append([]byte{'"'}, rawKey...), '"'), &k); err != nil {
+		return false
+	}
+	return k == key
+}
+
+func skipSpace(b []byte, i int) int {
+	for i < len(b) && (b[i] == ' ' || b[i] == '\t' || b[i] == '\n' || b[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+// skipString returns the index just past the string starting at b[i].
+func skipString(b []byte, i int) (int, bool) {
+	for j := i + 1; j < len(b); j++ {
+		switch b[j] {
+		case 0x5c:
+			j++
+		case '"':
+			return j + 1, true
+		}
+	}
+	return 0, false
+}
+
+// skipValue returns the index just past the JSON value starting at b[i].
+func skipValue(b []byte, i int) (int, bool) {
+	if i >= len(b) {
+		return 0, false
+	}
+	switch b[i] {
+	case '"':
+		return skipString(b, i)
+	case '{', '[':
+		depth := 0
+		for j := i; j < len(b); j++ {
+			switch b[j] {
+			case '"':
+				end, ok := skipString(b, j)
+				if !ok {
+					return 0, false
+				}
+				j = end - 1
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return j + 1, true
+				}
+			}
+		}
+		return 0, false
+	}
+	j := i
+	for j < len(b) && b[j] != ',' && b[j] != '}' && b[j] != ']' && b[j] != ' ' && b[j] != '\t' && b[j] != '\n' && b[j] != '\r' {
+		j++
+	}
+	if j == i {
+		return 0, false
+	}
+	return j, true
 }
 
 // Unmarshal decodes the selected value into *[]any (zero or one
