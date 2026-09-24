@@ -5559,7 +5559,8 @@ SELECT characters, CHARACTER_LENGTH(characters) FROM example`,
 		{
 			name:         "chr",
 			query:        `SELECT CHR(65), CHR(255), CHR(513), CHR(1024), CHR(97), CHR(0xF9B5), CHR(0), CHR(NULL)`,
-			expectedRows: [][]any{{"A", "ÿ", "ȁ", "Ѐ", "a", "例", "", nil}},
+			// CHR(0) is the NUL character in BigQuery (strings.test strings_function_chr).
+			expectedRows: [][]any{{"A", "ÿ", "ȁ", "Ѐ", "a", "例", "\x00", nil}},
 		},
 		{
 			name:         "code_points_to_bytes",
@@ -5569,7 +5570,8 @@ SELECT characters, CHARACTER_LENGTH(characters) FROM example`,
 		{
 			name:         "code_points_to_string",
 			query:        `SELECT CODE_POINTS_TO_STRING([65, 255, 513, 1024]), CODE_POINTS_TO_STRING([97, 0, 0xF9B5]), CODE_POINTS_TO_STRING([65, 255, NULL, 1024]), CODE_POINTS_TO_STRING(NULL)`,
-			expectedRows: [][]any{{"AÿȁЀ", "a例", nil, nil}},
+			// Code point 0 is kept as NUL, as in BigQuery.
+			expectedRows: [][]any{{"AÿȁЀ", "a\x00例", nil, nil}},
 		},
 		// TODO: currently collate function is unsupported.
 		// {
