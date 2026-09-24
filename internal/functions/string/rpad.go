@@ -11,7 +11,7 @@ import (
 
 func RPAD(originalValue value.Value, returnLength int64, pattern value.Value) (value.Value, error) {
 	if returnLength < 0 {
-		return nil, fmt.Errorf("RPAD: unexpected returnLength value. returnLength must be positive number")
+		return nil, fmt.Errorf("LPAD/RPAD: second argument (output size) cannot be negative")
 	}
 	retLen, err := helper.SafeInt(returnLength)
 	if err != nil {
@@ -37,6 +37,9 @@ func RPAD(originalValue value.Value, returnLength int64, pattern value.Value) (v
 				return nil, err
 			}
 			pat = []rune(p)
+			if len(pat) == 0 {
+				return nil, fmt.Errorf("RPAD: pattern must not be empty")
+			}
 			if remainLen-len(pat) > 0 {
 				// needs to repeat pattern
 				repeatNum := ((remainLen - len(pat)) / len(pat)) + 2
@@ -61,6 +64,10 @@ func RPAD(originalValue value.Value, returnLength int64, pattern value.Value) (v
 			if err != nil {
 				return nil, err
 			}
+			if len(p) == 0 {
+				return nil, fmt.Errorf("RPAD: pattern must not be empty")
+			}
+			pat = p
 			if remainLen-len(p) > 0 {
 				// needs to repeat pattern
 				repeatNum := ((remainLen - len(p)) / len(p)) + 2

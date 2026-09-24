@@ -1,8 +1,13 @@
 spec: docs/specs/googlesql/functions/string/regexp_extract_all.md
 dialect: googlesql
 cases:
+  # More than one capturing group is an error: string_functions.md
+  # (REGEXP_EXTRACT_ALL, "Returns an error if ... the regular expression
+  # has more than one capturing group"), confirmed on real BigQuery,
+  # which fails this query with "Regular expressions passed into
+  # extraction functions must not have more than 1 capturing group".
   - desc: capture-group extraction returns digits
     sql: SELECT TO_JSON_STRING(REGEXP_EXTRACT_ALL('a1 b2 c3', r'(\w)(\d)'))
     expected:
-      rows:
-        - ['["1","2","3"]']
+      error:
+        contains: "must not have more than 1 capturing group"

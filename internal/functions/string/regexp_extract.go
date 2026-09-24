@@ -19,6 +19,9 @@ func REGEXP_EXTRACT(val value.Value, expr string, position, occurrence int64) (v
 	if err != nil {
 		return nil, err
 	}
+	if re.NumSubexp() > 1 {
+		return nil, fmt.Errorf("REGEXP_EXTRACT: regular expressions passed into extraction functions must not have more than 1 capturing group")
+	}
 	posInt, err := helper.SafeInt(position)
 	if err != nil {
 		return nil, err

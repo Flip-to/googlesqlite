@@ -10,6 +10,9 @@ import (
 )
 
 func LPAD(originalValue value.Value, returnLength int64, pattern value.Value) (value.Value, error) {
+	if returnLength < 0 {
+		return nil, fmt.Errorf("LPAD/RPAD: second argument (output size) cannot be negative")
+	}
 	retLen, err := helper.SafeInt(returnLength)
 	if err != nil {
 		return nil, err
@@ -34,6 +37,9 @@ func LPAD(originalValue value.Value, returnLength int64, pattern value.Value) (v
 				return nil, err
 			}
 			pat = []rune(p)
+			if len(pat) == 0 {
+				return nil, fmt.Errorf("LPAD: pattern must not be empty")
+			}
 			if remainLen-len(pat) > 0 {
 				// needs to repeat pattern
 				repeatNum := ((remainLen - len(pat)) / len(pat)) + 2
@@ -58,6 +64,10 @@ func LPAD(originalValue value.Value, returnLength int64, pattern value.Value) (v
 			if err != nil {
 				return nil, err
 			}
+			if len(p) == 0 {
+				return nil, fmt.Errorf("LPAD: pattern must not be empty")
+			}
+			pat = p
 			if remainLen-len(p) > 0 {
 				// needs to repeat pattern
 				repeatNum := ((remainLen - len(p)) / len(p)) + 2

@@ -130,7 +130,16 @@ func castScalarStrict(kind googlesql.TypeKind, v value.Value) (out value.Value, 
 				return nil, true, err
 			}
 			// Reinterpret the civil time in the zone (UTC by default).
+			// A time in a DST gap keeps the offset in effect before the
+			// transition, as BigQuery does: 02:30 America/New_York on
+			// 2024-03-10 is 07:30 UTC (probe cast_as_string-6504.35).
+			// Go's time.Date picks the offset after it.
+			wall := t
 			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+			if t.Hour() != wall.Hour() || t.Minute() != wall.Minute() || t.Day() != wall.Day() {
+				_, before := t.Add(-2 * time.Hour).Zone()
+				t = wall.Add(-time.Duration(before) * time.Second)
+			}
 			return value.TimestampValue(t.UTC()), true, nil
 		}
 	}
