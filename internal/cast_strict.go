@@ -105,6 +105,13 @@ func castScalarStrict(kind googlesql.TypeKind, v value.Value) (out value.Value, 
 			if err == nil && zone != "" {
 				err = fmt.Errorf("failed to convert %s to time.Time type", string(x))
 			}
+			// A DATETIME leap second drops its fraction:
+			// 12:59:60.123456 is 13:00:00 (civil_time.test
+			// cast_from_datetime_to_time, checked on BigQuery). A
+			// TIMESTAMP keeps it.
+			if m := civilLiteralRe.FindStringSubmatch(strings.TrimSpace(string(x))); m != nil && m[6] == "60" {
+				t = t.Truncate(time.Second)
+			}
 			return value.DatetimeValue(t), true, err
 		}
 	case googlesql.TypeKindTypeTimestamp:

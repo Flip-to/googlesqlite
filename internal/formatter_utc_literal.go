@@ -79,6 +79,24 @@ func zoneFoldStateFromContext(ctx context.Context) *zoneFoldState {
 // probe cast_as_datetime-2057.6).
 var timestampKeywordRe = regexp.MustCompile(`(?i)\b(?:TIMESTAMP|DATETIME)\b`)
 
+var (
+	onlyTimestampKeywordRe = regexp.MustCompile(`(?i)\bTIMESTAMP\b`)
+	datetimeKeywordRe      = regexp.MustCompile(`(?i)\bDATETIME\b`)
+	dateKeywordRe          = regexp.MustCompile(`(?i)\bDATE\b`)
+)
+
+// misfoldedCastSource reports whether the source of a folded cast may
+// have been folded wrongly: it involves a TIMESTAMP (zone), or a DATE
+// and a DATETIME (the DATE-to-DATETIME fold). Other DATETIME casts,
+// such as leap-second DATETIME literals, are folded correctly and are
+// left to the analyzer.
+func misfoldedCastSource(src string) bool {
+	if onlyTimestampKeywordRe.MatchString(src) {
+		return true
+	}
+	return datetimeKeywordRe.MatchString(src) && dateKeywordRe.MatchString(src)
+}
+
 // newZoneFoldState builds the per-statement state for query.
 func newZoneFoldState(query string, allowRefold bool) *zoneFoldState {
 	return &zoneFoldState{
@@ -129,7 +147,7 @@ func utcLiteralSQL(ctx context.Context, lit *googlesql.ResolvedLiteral) (sql str
 		if isTypedStringLiteral(src, "TIMESTAMP") {
 			return "", false, nil
 		}
-	} else if !startsWithCast(src) || !timestampKeywordRe.MatchString(src) {
+	} else if !startsWithCast(src) || !misfoldedCastSource(src) {
 		return "", false, nil
 	}
 	out, err := evalConstantInUTC(src, kind)
@@ -169,7 +187,7 @@ func compositeZoneLiteral(ctx context.Context, state *zoneFoldState, lit *google
 		// Only a composite with a TIMESTAMP-derived member can differ;
 		// it needs a CAST in the source.
 		src, ok := literalSourceText(ctx, lit)
-		if !ok || !strings.Contains(strings.ToUpper(src), "CAST") || !timestampKeywordRe.MatchString(src) {
+		if !ok || !strings.Contains(strings.ToUpper(src), "CAST") || !misfoldedCastSource(src) {
 			return "", false, nil
 		}
 		return state.fallback()

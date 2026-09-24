@@ -131,11 +131,17 @@ suite is unchanged within noise.
   unsupported shape keeps the analyzer's Los Angeles value.
 - The GoogleSQL compliance suite assumes an America/Los_Angeles default
   zone; its TIMESTAMP-to-string and naive-TIMESTAMP cases disagree with
-  BigQuery and are expected to fail here. That includes the RANGE cases
-  `is_distinct_range_timestamp`, `is_distinct_range_timestamp_vs_null`
-  (comparison_functions.test) and `array_reverse_range_timestamp`
-  (range_functions.test), whose expected bounds are Los Angeles
-  midnight (`08:00:00+00`) for zone-less dates.
+  BigQuery and are expected to fail here. That includes 32 RANGE<TIMESTAMP>
+  cases (aggregation_distinct_queries, aggregation_queries,
+  analytic_any_value, analytic_count, analytic_lag, analytic_lead,
+  array_functions, comparison_functions and range_functions tests)
+  whose expected bounds are Los Angeles midnight (`08:00:00+00`) for
+  zone-less dates. With every zone-less bound in those cases pinned to
+  `America/Los_Angeles`, all 32 pass, so the zone is the only
+  difference.
+- A DATETIME cast is only re-evaluated when its source also has a DATE
+  (the DATE-to-DATETIME fold); other DATETIME casts, such as leap-second
+  literals, keep the analyzer fold, which matches BigQuery.
 
 ## When to revisit
 

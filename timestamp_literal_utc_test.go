@@ -99,6 +99,12 @@ func TestTimestampLiteralUTC(t *testing.T) {
 		// (flipto-dbt probe cast_as_datetime-2057.6, BigQuery answer).
 		{"date_to_datetime", `CAST(CAST($1 AS DATETIME) AS STRING)`, []string{`DATE '2024-02-29'`}, "2024-02-29 00:00:00"},
 		{"date_to_datetime_in_struct", `CAST($1.d AS STRING)`, []string{`STRUCT(CAST(DATE '2024-02-29' AS DATETIME) AS d)`}, "2024-02-29 00:00:00"},
+		// DATETIME leap seconds drop the fraction (civil_time.test
+		// cast_from_datetime_to_time; checked on BigQuery).
+		{"datetime_leap_second_to_time", `CAST($1 AS TIME)`, []string{`DATETIME '2015-11-06 12:59:60.123456'`}, "13:00:00"},
+		{"datetime_leap_second_midnight", `CAST($1 AS TIME)`, []string{`DATETIME '2015-11-06 23:59:60'`}, "00:00:00"},
+		{"string_leap_second_to_datetime", `CAST(CAST($1 AS DATETIME) AS STRING)`, []string{`'2015-11-06 12:59:60.123456'`}, "2015-11-06 13:00:00"},
+		{"string_leap_second_to_ts", `CAST($1 AS TIMESTAMP)`, []string{`'2015-11-06 12:59:60.5'`}, "2015-11-06 13:00:00.500+00"},
 		// Composite literals.
 		{"range_ts_literal", `RANGE_START($1)`, []string{`RANGE<TIMESTAMP> '[2024-01-01 10:00:00, 2024-01-02 10:00:00)'`}, "2024-01-01 10:00:00+00"},
 		{"array_ts_coerced", `$1[OFFSET(0)]`, []string{`ARRAY<TIMESTAMP>['2024-01-01 10:00:00']`}, "2024-01-01 10:00:00+00"},
@@ -184,4 +190,22 @@ func checkUTCText(t *testing.T, db *sql.DB, query, want string) {
 	if !got.Valid || got.String != want {
 		t.Errorf("%s = %v, want %q", query, got, want)
 	}
+}
+
+// TestTimestampLiteralUTCRangeLag reads zone-less RANGE<TIMESTAMP>
+// bounds as UTC through LAG, as the compliance analytic_lag cases do.
+// BigQuery returns NULL, then [2020-01-01 00:00:00+00, ...) (checked on
+// BigQuery 2026-09-24).
+func TestTimestampLiteralUTCRangeLag(t *testing.T) {
+	t.Parallel()
+	db, err := sql.Open("googlesqlite", ":memory:?_test=timestamp_literal_utc_lag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	checkUTCText(t, db, `SELECT STRING_AGG(IFNULL(FORMAT('%t', RANGE_START(l)), 'NULL'), ';' ORDER BY i)
+		FROM (SELECT i, LAG(r) OVER (ORDER BY i) l FROM UNNEST([
+			STRUCT(1 AS i, RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)' AS r),
+			(2, RANGE<TIMESTAMP> '[2021-01-01 10:00:00, UNBOUNDED)')]))`,
+		"NULL;2020-01-01 00:00:00+00")
 }
