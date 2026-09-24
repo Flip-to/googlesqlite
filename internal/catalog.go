@@ -167,6 +167,13 @@ func newSimpleCatalog(name string) *googlesql.SimpleCatalog {
 			googlesql.LanguageFeatureFeatureProtoExtensionsWithNew,
 			googlesql.LanguageFeatureFeatureProtoExtensionsWithSet,
 			googlesql.LanguageFeatureFeatureEnumValueDescriptorProto,
+			// `$like_any_array` / `$like_all_array` builtins are
+			// only registered when the array form is enabled.
+			googlesql.LanguageFeatureFeatureLikeAnySomeAllArray,
+			// COLLATE(value, collate_specification) is registered only
+			// with collation support on.
+			googlesql.LanguageFeatureFeatureAnnotationFramework,
+			googlesql.LanguageFeatureFeatureCollationSupport,
 		} {
 			_ = opts.EnableLanguageFeature(f)
 		}
@@ -314,6 +321,17 @@ func newDPBuiltinFunctionOptions(opts *googlesql.LanguageOptions) *googlesql.Bui
 		googlesql.FunctionSignatureIdFnDeterministicEncryptBytes,
 		googlesql.FunctionSignatureIdFnDeterministicDecryptString,
 		googlesql.FunctionSignatureIdFnDeterministicDecryptBytes,
+		// LIKE ANY|SOME|ALL UNNEST(array) — `$like_any_array` and
+		// friends. The analyzer's LIKE_ANY_ALL rewriter lowers them to
+		// ordinary LIKE predicates over the unnested array.
+		googlesql.FunctionSignatureIdFnStringArrayLikeAny,
+		googlesql.FunctionSignatureIdFnByteArrayLikeAny,
+		googlesql.FunctionSignatureIdFnStringArrayLikeAll,
+		googlesql.FunctionSignatureIdFnByteArrayLikeAll,
+		googlesql.FunctionSignatureIdFnStringArrayNotLikeAny,
+		googlesql.FunctionSignatureIdFnByteArrayNotLikeAny,
+		googlesql.FunctionSignatureIdFnStringArrayNotLikeAll,
+		googlesql.FunctionSignatureIdFnByteArrayNotLikeAll,
 	}
 	bf := &googlesql.BuiltinFunctionOptions{LanguageOptions: opts}
 	for _, id := range ids {
@@ -814,14 +832,6 @@ func registerSpannerSearchFuncs(catalog *googlesql.SimpleCatalog, factory *googl
 		}
 		_ = catalog.AddFunction2(name, fn)
 	}
-	// COLLATE(value, collate_specification) — the function-call form of
-	// the COLLATE clause. Upstream googlesql exposes it as docs-only
-	// syntactic sugar (no FN_COLLATE function ID). We surface it as a
-	// scalar so the analyzer can resolve the call sites used by the
-	// upstream string_functions Examples.
-	registerRoot("collate", googlesql.FunctionEnums_ModeScalar,
-		mkArg(googlesql.TypeKindTypeString),
-		[]*googlesql.FunctionArgumentType{mkArg(googlesql.TypeKindTypeString), mkArg(googlesql.TypeKindTypeString)})
 	registerRoot("tokenize_fulltext", googlesql.FunctionEnums_ModeScalar,
 		mkArg(googlesql.TypeKindTypeBytes),
 		[]*googlesql.FunctionArgumentType{mkArg(googlesql.TypeKindTypeString)})
@@ -2463,14 +2473,14 @@ func (c *Catalog) addTableSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *
 // and an old cached handle would then expose stale columns.
 func (c *Catalog) tableHandleForSpec(spec *TableSpec) (*googlesql.SimpleTable, error) {
 	storageName := spec.TableName()
-	columns := []*googlesql.SimpleColumn{}
+	columns := []googlesql.Googlesql_ColumnNode{}
 	colIndex := map[string]int32{}
 	for i, column := range spec.Columns {
 		typ, err := column.Type.ToGoogleSQLType()
 		if err != nil {
 			return nil, err
 		}
-		columns = append(columns, m1(googlesql.NewSimpleColumn(storageName, column.Name, typ, false, true)))
+		columns = append(columns, newCatalogColumn(storageName, column, typ))
 		colIndex[column.Name] = int32(i)
 	}
 	tbl := newSimpleTableWithColumns(storageName, columns)
@@ -2515,16 +2525,14 @@ func applyTableOptions(tbl *googlesql.SimpleTable, opts []*tableOptionSpec) {
 }
 
 func (c *Catalog) createSimpleTable(tableName string, spec *TableSpec) (*googlesql.SimpleTable, error) {
-	columns := []*googlesql.SimpleColumn{}
+	columns := []googlesql.Googlesql_ColumnNode{}
 	colIndex := map[string]int32{}
 	for i, column := range spec.Columns {
 		typ, err := column.Type.ToGoogleSQLType()
 		if err != nil {
 			return nil, err
 		}
-		columns = append(columns, m1(googlesql.NewSimpleColumn(
-			tableName, column.Name, typ, false, true,
-		)))
+		columns = append(columns, newCatalogColumn(tableName, column, typ))
 		colIndex[column.Name] = int32(i)
 	}
 	tbl := newSimpleTableWithColumns(tableName, columns)
@@ -2553,16 +2561,23 @@ func (c *Catalog) createSimpleTable(tableName string, spec *TableSpec) (*googles
 // Each column is added with isOwned=true; v0.2.1 of go-googlesql
 // neutralises the column's Go-side finalizer inside AddColumn2 itself,
 // so we don't need to follow up with any finalizer suppression here.
-func newSimpleTableWithColumns(name string, columns []*googlesql.SimpleColumn) *googlesql.SimpleTable {
+func newSimpleTableWithColumns(name string, columns []googlesql.Googlesql_ColumnNode) *googlesql.SimpleTable {
 	tbl, err := googlesql.NewSimpleTable(name, 0)
 	if err != nil {
 		return nil
 	}
 	for _, c := range columns {
-		if c == nil {
+		switch cc := c.(type) {
+		case nil:
 			continue
+		case *googlesql.SimpleColumn:
+			if cc == nil {
+				continue
+			}
+			_ = tbl.AddColumn2(cc, true)
+		default:
+			_ = tbl.AddColumn2(cc, false)
 		}
-		_ = tbl.AddColumn2(c, true)
 	}
 	return tbl
 }
@@ -2903,4 +2918,70 @@ func (c *Catalog) copyFunctionSpec(spec *FunctionSpec, newNamePath []string) *Fu
 		Code:        spec.Code,
 		Body:        spec.Body,
 	}
+}
+
+// newCatalogColumn builds a writable catalog column. A column declared
+// with a non-binary `COLLATE '<spec>'` is exposed through a Go-side
+// Column implementation whose GetTypeAnnotationMap carries the
+// collation, so the analyzer propagates it into every expression that
+// reads the column. (SimpleColumn's AnnotatedType constructor does not
+// round-trip the annotation map through the wasm bridge.)
+func newCatalogColumn(tableName string, column *ColumnSpec, typ googlesql.Googlesql_TypeNode) googlesql.Googlesql_ColumnNode {
+	if column.Collation != "" && column.Collation != "binary" {
+		if col := newCollatedColumn(tableName, column.Name, column.Collation, typ); col != nil {
+			return col
+		}
+	}
+	return m1(googlesql.NewSimpleColumn(tableName, column.Name, typ, false, true))
+}
+
+type collatedColumn struct {
+	googlesql.Googlesql_ColumnCallbackDefaults
+	tableName string
+	name      string
+	typ       googlesql.Googlesql_TypeNode
+	am        *googlesql.AnnotationMap
+}
+
+func (c *collatedColumn) FullName() (string, error) { return c.tableName + "." + c.name, nil }
+func (c *collatedColumn) GetType() (googlesql.Googlesql_TypeNode, error) {
+	return c.typ, nil
+}
+func (c *collatedColumn) GetTypeAnnotationMap() (*googlesql.AnnotationMap, error) {
+	return c.am, nil
+}
+func (c *collatedColumn) IsPseudoColumn() (bool, error)   { return false, nil }
+func (c *collatedColumn) IsWritableColumn() (bool, error) { return true, nil }
+func (c *collatedColumn) Name() (string, error)           { return c.name, nil }
+
+var (
+	collatedColumnsMu sync.Mutex
+	// collatedColumns pins the callback-backed columns: the wasm-side
+	// table does not own them.
+	collatedColumns []*googlesql.Googlesql_Column
+)
+
+func newCollatedColumn(tableName, name, collation string, typ googlesql.Googlesql_TypeNode) *googlesql.Googlesql_Column {
+	coll, err := googlesql.NewCollationMakeScalar(collation)
+	if err != nil || coll == nil {
+		return nil
+	}
+	am, err := coll.ToAnnotationMap(typ)
+	if err != nil || am == nil {
+		return nil
+	}
+	owned, err := tf().TakeOwnership(am, true)
+	if err != nil || owned == nil {
+		return nil
+	}
+	col, err := googlesql.NewGooglesql_ColumnFromImpl(&collatedColumn{
+		tableName: tableName, name: name, typ: typ, am: owned,
+	})
+	if err != nil || col == nil {
+		return nil
+	}
+	collatedColumnsMu.Lock()
+	collatedColumns = append(collatedColumns, col)
+	collatedColumnsMu.Unlock()
+	return col
 }

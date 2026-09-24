@@ -264,6 +264,10 @@ type ColumnSpec struct {
 	// INSERT column list. Empty string means no default; the
 	// downstream insert path leaves the column NULL when omitted.
 	DefaultExpr string `json:"defaultExpr,omitempty"`
+	// Collation is the column's `COLLATE '<spec>'` (e.g. "und:ci"),
+	// re-attached to the catalog column so the analyzer propagates it
+	// into every expression that reads the column.
+	Collation string `json:"collation,omitempty"`
 }
 
 // TVFSpec captures a `CREATE TABLE FUNCTION` definition so the call
@@ -825,10 +829,12 @@ func newColumnsFromDef(ctx context.Context, def []*googlesql.ResolvedColumnDefin
 	for _, columnNode := range def {
 		annotation, _ := columnNode.Annotations()
 		var isNotNull bool
+		var collation string
 		if annotation != nil {
 			// annotation.TypeParameters isn't exposed on the bridge
 			// yet; keep the hook but skip type-param extraction.
 			isNotNull, _ = annotation.NotNull()
+			collation = columnCollationName(annotation)
 		}
 		var defaultExpr string
 		if dv, _ := columnNode.DefaultValue(); dv != nil {
@@ -843,6 +849,7 @@ func newColumnsFromDef(ctx context.Context, def []*googlesql.ResolvedColumnDefin
 			Type:        newType(m1(columnNode.Type())),
 			IsNotNull:   isNotNull,
 			DefaultExpr: defaultExpr,
+			Collation:   collation,
 		})
 	}
 	return columns
@@ -1119,4 +1126,26 @@ func newType(t googlesql.Googlesql_TypeNode) *Type {
 		ElementType:   elem,
 		FieldTypes:    fieldTypes,
 	}
+}
+
+// columnCollationName reads the top-level `COLLATE '<spec>'` literal
+// of a column definition, or "".
+func columnCollationName(a *googlesql.ResolvedColumnAnnotations) string {
+	expr, err := a.CollationName()
+	if err != nil || expr == nil {
+		return ""
+	}
+	lit, ok := expr.(*googlesql.ResolvedLiteral)
+	if !ok {
+		return ""
+	}
+	v, err := lit.Value()
+	if err != nil || v == nil {
+		return ""
+	}
+	name, err := v.StringValue()
+	if err != nil {
+		return ""
+	}
+	return name
 }

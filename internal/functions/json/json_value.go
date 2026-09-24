@@ -10,7 +10,7 @@ import (
 )
 
 func JSON_VALUE(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}

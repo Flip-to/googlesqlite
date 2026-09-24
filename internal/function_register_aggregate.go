@@ -62,6 +62,7 @@ var aggregateFuncs = []*aggregateFuncInfo{
 	{Name: "differential_privacy_percentile_cont", BindFunc: aggregate.BindDifferentialPrivacyPercentileCont},
 	{Name: "differential_privacy_quantiles", BindFunc: aggregate.BindDifferentialPrivacyQuantiles},
 	{Name: "array_agg", BindFunc: aggregate.BindArrayAgg},
+	{Name: "array_agg_nullable", BindFunc: aggregate.BindArrayAggNullable},
 	{Name: "array_concat_agg", BindFunc: aggregate.BindArrayConcatAgg},
 	{Name: "avg", BindFunc: aggregate.BindAvg},
 	{Name: "count", BindFunc: aggregate.BindCount},

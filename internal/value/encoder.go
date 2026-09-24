@@ -32,6 +32,8 @@ func EncodeValue(v Value) (any, error) {
 		return v.ToBool()
 	case *SafeValue:
 		return EncodeValue(vv.Value)
+	case EnvelopedBool:
+		return encodeLayout(vv.BoolValue)
 	}
 	return encodeLayout(v)
 }
@@ -157,6 +159,10 @@ func EncodeElement(v Value) (any, error) {
 
 func valueLayoutFromValue(v Value) (*ValueLayout, error) {
 	switch vv := v.(type) {
+	case BoolValue:
+		// Only produced by EncodeBoolLayout: a top-level BOOL normally
+		// crosses SQLite as an integer.
+		return &ValueLayout{Header: BoolValueType, Body: strconv.FormatBool(bool(vv))}, nil
 	case FloatValue:
 		return &ValueLayout{Header: FloatValueType, Body: strconv.FormatFloat(float64(vv), 'g', -1, 64)}, nil
 	case StringValue:
@@ -322,3 +328,8 @@ func valueLayoutFromValue(v Value) (*ValueLayout, error) {
 	}
 	return nil, fmt.Errorf("unexpected value type for layout: %T", v)
 }
+
+// EnvelopedBool is a BOOL that EncodeValue writes in the (header,
+// body) envelope, so it reaches the next UDF as BoolValue instead of
+// the INTEGER SQLite would otherwise hand over.
+type EnvelopedBool struct{ BoolValue }

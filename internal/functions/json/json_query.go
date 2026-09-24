@@ -11,7 +11,7 @@ import (
 )
 
 func JSON_QUERY(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ var BindJsonQuery = helper.Scalar2(func(a, b value.Value) (value.Value, error) {
 
 // jsonPathMatchesNull reports whether path selects a JSON null in v.
 func jsonPathMatchesNull(v, path string) bool {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return false
 	}
