@@ -13,6 +13,9 @@ func REGEXP_EXTRACT_ALL(val value.Value, expr string) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
+	if re.NumSubexp() > 1 {
+		return nil, fmt.Errorf("REGEXP_EXTRACT_ALL: regular expressions passed into extraction functions must not have more than 1 capturing group")
+	}
 	var v string
 	isBytes := false
 	switch val.(type) {
