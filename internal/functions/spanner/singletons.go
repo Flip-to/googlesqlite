@@ -194,9 +194,16 @@ func BindZstdCompress(args ...value.Value) (value.Value, error) {
 		return nil, err
 	}
 	level := zstd.SpeedDefault
-	if len(args) >= 2 && args[1] != nil {
+	if len(args) >= 2 && args[1] == nil {
+		// compression.test zstd_compress_optional_arg_null.
+		return nil, nil
+	}
+	if len(args) >= 2 {
 		n, err := args[1].ToInt64()
 		if err == nil {
+			if n < -5 || n > 22 {
+				return nil, fmt.Errorf("ZSTD compression level must be between -5 and 22, but was %d", n)
+			}
 			switch {
 			case n <= 3:
 				level = zstd.SpeedFastest
@@ -230,6 +237,17 @@ func BindZstdDecompressToBytes(args ...value.Value) (value.Value, error) {
 	if len(args) >= 2 && args[1] == nil {
 		return nil, nil
 	}
+	var sizeLimit int64 = -1
+	if len(args) >= 2 {
+		n, err := args[1].ToInt64()
+		if err != nil {
+			return nil, err
+		}
+		if n <= 0 {
+			return nil, fmt.Errorf("ZSTD size limit must be positive, but was %d", n)
+		}
+		sizeLimit = n
+	}
 	in, err := args[0].ToBytes()
 	if err != nil {
 		return nil, err
@@ -242,6 +260,9 @@ func BindZstdDecompressToBytes(args ...value.Value) (value.Value, error) {
 	out, err := dec.DecodeAll(in, nil)
 	if err != nil {
 		return nil, fmt.Errorf("ZSTD_DECOMPRESS_TO_BYTES: %w", err)
+	}
+	if sizeLimit >= 0 && int64(len(out)) > sizeLimit {
+		return nil, fmt.Errorf("ZSTD decompressed size exceeds the size limit of %d bytes", sizeLimit)
 	}
 	return value.BytesValue(out), nil
 }

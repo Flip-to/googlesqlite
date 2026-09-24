@@ -230,6 +230,11 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureDifferentialPrivacy,
 	googlesql.LanguageFeatureFeatureDifferentialPrivacyReportFunctions,
 	googlesql.LanguageFeatureFeatureDifferentialPrivacyThresholding,
+	// SELECT WITH AGGREGATION_THRESHOLD (BigQuery aggregation
+	// threshold analysis rules). The formatter lowers the resulting
+	// ResolvedAggregationThresholdAggregateScan directly (see
+	// AggregationThresholdAggregateScanNode).
+	googlesql.LanguageFeatureFeatureAggregationThreshold,
 	// BigQuery AEAD encryption family (KEYS.* / AEAD.* /
 	// DETERMINISTIC_*). The catalog-side registration uses the
 	// same flag; the analyzer's resolver also gates the

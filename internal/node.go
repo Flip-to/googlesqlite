@@ -73,6 +73,8 @@ func newNode(node googlesql.ResolvedNode) Formatter {
 		return &AssertScanNode{node: node.(*googlesql.ResolvedAssertScan)}
 	case googlesql.ResolvedNodeKindResolvedAggregateScan:
 		return newAggregateScanNode(node.(*googlesql.ResolvedAggregateScan))
+	case googlesql.ResolvedNodeKindResolvedAggregationThresholdAggregateScan:
+		return &AggregationThresholdAggregateScanNode{node: node.(*googlesql.ResolvedAggregationThresholdAggregateScan)}
 	case googlesql.ResolvedNodeKindResolvedAnonymizedAggregateScan:
 		return newAnonymizedAggregateScanNode(node.(*googlesql.ResolvedAnonymizedAggregateScan))
 	case googlesql.ResolvedNodeKindResolvedDifferentialPrivacyAggregateScan:
@@ -257,6 +259,10 @@ type BarrierScanNode struct {
 
 type AggregateScanNode struct {
 	node *googlesql.ResolvedAggregateScan
+}
+
+type AggregationThresholdAggregateScanNode struct {
+	node *googlesql.ResolvedAggregationThresholdAggregateScan
 }
 
 type AnonymizedAggregateScanNode struct {

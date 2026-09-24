@@ -111,6 +111,12 @@ func (a *aggregator) Step(v value.Value) error {
 }
 
 func (a *aggregator) Done() (value.Value, error) {
+	// No non-NULL input yields a NULL sketch
+	// (kll_quantiles_init.test init_*_no_input_rows_input,
+	// init_*_all_null_input_or_weight_input).
+	if len(a.values) == 0 {
+		return nil, nil
+	}
 	s := &sketch{Values: a.values}
 	b, err := s.marshal()
 	if err != nil {
@@ -180,6 +186,23 @@ func (m *mergeAggregator) DoneArray() (value.Value, error) {
 
 // ---------------- bindings ----------------
 
+// maxInvEps is the upper bound the reference KLL implementation
+// accepts for the precision (inverse epsilon) argument.
+const maxInvEps = 200000000
+
+// checkPrecision validates INIT's precision argument
+// (kll_quantiles_init.test init_*_negative_precision_input_negative_precision).
+func checkPrecision(v value.Value) error {
+	n, err := v.ToInt64()
+	if err != nil {
+		return err
+	}
+	if n < 1 || n > maxInvEps {
+		return fmt.Errorf("KLL failed: Provided inv_eps:%d but inv_eps needs to be >= 1 and <= %d.", n, maxInvEps)
+	}
+	return nil
+}
+
 // BindInit returns a constructor for the INIT aggregator. Same
 // function works for both int64 and float64 because we store as
 // float64 internally.
@@ -188,6 +211,11 @@ func BindInit() func() *helper.Aggregator {
 		a := &aggregator{}
 		return helper.NewAggregator(
 			func(args []value.Value, opt *helper.Option) error {
+				if len(args) >= 2 && args[1] != nil {
+					if err := checkPrecision(args[1]); err != nil {
+						return err
+					}
+				}
 				return a.Step(args[0])
 			},
 			func() (value.Value, error) {

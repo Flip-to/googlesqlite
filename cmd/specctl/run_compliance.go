@@ -334,6 +334,9 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 	if c.ParamErr != "" {
 		return skip("runner: cannot parse parameters: " + c.ParamErr)
 	}
+	if reason := compliancetest.CaseSkipReason(c.File, c.Name); reason != "" {
+		return skip(reason)
+	}
 	if reason := compliancetest.SkipReason(c.AllFeatures, c.Forbidden, query, header); reason != "" {
 		return skip(reason)
 	}
