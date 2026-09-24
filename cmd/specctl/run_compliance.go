@@ -304,7 +304,21 @@ func queryAll(ctx context.Context, conn *sql.Conn, q string, args ...any) ([][]a
 	return out, rows.Err()
 }
 
-var tempFuncRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TEMP(?:ORARY)?\s+(?:AGGREGATE\s+)?FUNCTION[[:space:](]`)
+// tempFuncRe matches setup statements whose object lives only for the
+// statement (script) that creates it in the driver, so the runner
+// replays them in front of every case: TEMP functions and TEMP views
+// (invoke_view.test).
+var tempFuncRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TEMP(?:ORARY)?\s+(?:(?:AGGREGATE\s+)?FUNCTION[[:space:](]|VIEW\s)`)
+
+// expectedSetupFailures lists [prepare_database] statements that the
+// upstream fixture documents as intentionally invalid; rejecting them
+// is the correct outcome.
+var expectedSetupFailures = map[string]bool{
+	// "This function definition is invalid, but since [prepare_database]
+	// statements are not tests, this should not cause compliance test
+	// failures."
+	"call_sql_udf.test/skip_failed_reference_setup": true,
+}
 
 var createConstantRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+|PUBLIC\s+|PRIVATE\s+)?CONSTANT\s`)
 
@@ -422,6 +436,19 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 	}
 
 	if c.Prepare {
+		if expectedSetupFailures[c.File+"/"+c.Name] {
+			if err == nil {
+				res.Status, res.Kind = statusFail, kindExpectedError
+				res.Reason = "intentionally invalid setup statement was accepted"
+				res.Score = kindScore[res.Kind]
+				return res
+			}
+			if obj != "" {
+				fr.setup.failed[obj] = "setup failed (expected): " + oneLine(err.Error())
+			}
+			res.Status = statusPass
+			return res
+		}
 		if err != nil {
 			if obj != "" {
 				fr.setup.failed[obj] = "setup failed: " + oneLine(err.Error())

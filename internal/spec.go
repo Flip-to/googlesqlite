@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -290,6 +291,48 @@ type TVFSpec struct {
 	Code        string    `json:"code,omitempty"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 	CreatedAt   time.Time `json:"createdAt"`
+	// argSignature is a copy of the CREATE TABLE FUNCTION signature.
+	// Its argument types carry the parameter names, which the bridge
+	// cannot set on a FunctionArgumentType built from scratch, so named
+	// arguments (`arg1 => ...`) resolve only through it
+	// (pipe_call.test, tvf_call_two_tables_input_table_named_args).
+	// It is not persisted: a spec reloaded from storage falls back to
+	// positional-only arguments.
+	argSignature *googlesql.FunctionSignature
+}
+
+// namedArgumentTypes returns the argument types of the original
+// signature (with names), or nil when unavailable.
+func (s *TVFSpec) namedArgumentTypes() []*googlesql.FunctionArgumentType {
+	if s.argSignature == nil {
+		return nil
+	}
+	args, err := s.argSignature.Arguments()
+	if err != nil || len(args) != len(s.Args) {
+		return nil
+	}
+	return args
+}
+
+// copyTVFArgSignature copies the signature's arguments into a new
+// signature owned by the spec, so it outlives the analyzer output.
+func copyTVFArgSignature(sig *googlesql.FunctionSignature) *googlesql.FunctionSignature {
+	if sig == nil {
+		return nil
+	}
+	args, err := sig.Arguments()
+	if err != nil {
+		return nil
+	}
+	result, err := sig.ResultType()
+	if err != nil || result == nil {
+		return nil
+	}
+	copied, err := googlesql.NewFunctionSignature3(result, args, 0)
+	if err != nil {
+		return nil
+	}
+	return copied
 }
 
 func (s *TVFSpec) TVFName() string {
@@ -338,9 +381,32 @@ func (s *TVFSpec) CallSQLWithColumnIndexes(argValues []string, callOutputColumns
 		return len(s.Args[order[a]].Name) > len(s.Args[order[b]].Name)
 	})
 	body := s.Body
+	// A TABLE argument is evaluated once even when the body reads it
+	// several times; inlining a volatile one (RAND) would evaluate it
+	// per reference, so it is bound to a materialized CTE instead
+	// (call_sql_tvf.test, tvf_references_arg_multiple_times).
+	var bound []string
 	for _, i := range order {
 		argRef := fmt.Sprintf("@%s", s.Args[i].Name)
-		body = strings.Replace(body, argRef, argValues[i], -1)
+		value := argValues[i]
+		refRe := regexp.MustCompile(regexp.QuoteMeta(argRef) + `\b`)
+		if strings.HasPrefix(value, "(SELECT") && isVolatileSQL(value) && len(refRe.FindAllStringIndex(body, -1)) > 1 {
+			alias := fmt.Sprintf("googlesqlite_tvf_arg_%d", i)
+			bound = append(bound, fmt.Sprintf("`%s` AS MATERIALIZED %s", alias, value))
+			value = "`" + alias + "`"
+		}
+		body = strings.Replace(body, argRef, value, -1)
+	}
+	if len(bound) > 0 {
+		trimmed := strings.TrimSpace(body)
+		switch {
+		case strings.HasPrefix(trimmed, "WITH RECURSIVE "):
+			body = "WITH RECURSIVE " + strings.Join(bound, ", ") + ", " + strings.TrimPrefix(trimmed, "WITH RECURSIVE ")
+		case strings.HasPrefix(trimmed, "WITH "):
+			body = "WITH " + strings.Join(bound, ", ") + ", " + strings.TrimPrefix(trimmed, "WITH ")
+		default:
+			body = "WITH " + strings.Join(bound, ", ") + " " + body
+		}
 	}
 	projections := make([]string, 0, len(callOutputColumns))
 	for i, idx := range columnIndexes {
@@ -968,13 +1034,14 @@ func newTVFSpec(ctx context.Context, namePath *NamePath, stmt *googlesql.Resolve
 		}
 		now := time.Now()
 		return &TVFSpec{
-			IsTemp:      resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
-			NamePath:    namePath.mergePath(m1(stmt.NamePath())),
-			Args:        args,
-			IsTemplated: true,
-			Code:        code,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			IsTemp:       resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+			NamePath:     namePath.mergePath(m1(stmt.NamePath())),
+			Args:         args,
+			IsTemplated:  true,
+			Code:         code,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			argSignature: copyTVFArgSignature(signature),
 		}, nil
 	}
 	innerBody, err := newNode(innerScan).FormatSQL(ctx)
@@ -1008,6 +1075,7 @@ func newTVFSpec(ctx context.Context, namePath *NamePath, stmt *googlesql.Resolve
 		Body:          body,
 		CreatedAt:     now,
 		UpdatedAt:     now,
+		argSignature:  copyTVFArgSignature(signature),
 	}, nil
 }
 
@@ -1148,4 +1216,42 @@ func columnCollationName(a *googlesql.ResolvedColumnAnnotations) string {
 		return ""
 	}
 	return name
+}
+
+// SafeCallSQL inlines a SAFE.<SQL UDF>(...) call: the body is formatted
+// again in the IFERROR-style safe-evaluation mode, so a runtime error
+// inside it becomes a deferred-error marker, which the wrapper turns
+// into NULL. Errors raised while evaluating the arguments still
+// propagate (call_sql_udf.test, safe_call_sql_udf_division).
+func (s *FunctionSpec) SafeCallSQL(ctx context.Context, callNode *ResolvedBaseFunctionCallNode, argValues []string) (string, error) {
+	if s.Language == "js" || s.IsAggregate || s.Code == "" {
+		return "", fmt.Errorf("SAFE is not supported for function %s", s.FuncName())
+	}
+	args, _ := callNode.ArgumentList()
+	if len(args) != len(s.Args) {
+		return "", fmt.Errorf("SAFE.%s: call has %d arguments, function declares %d", s.FuncName(), len(args), len(s.Args))
+	}
+	definedArgs := make([]string, 0, len(args))
+	for idx, arg := range args {
+		definedArgs = append(definedArgs, fmt.Sprintf("%s %s", s.Args[idx].Name, newType(m1(arg.Type())).FormatType()))
+	}
+	runtimeDefinedFunc := fmt.Sprintf(
+		"CREATE FUNCTION `%s`(%s) as (%s)",
+		strings.Join(s.NamePath, "."),
+		strings.Join(definedArgs, ","),
+		s.Code,
+	)
+	analyzer := analyzerFromContext(ctx)
+	if analyzer == nil {
+		return "", fmt.Errorf("SAFE.%s: no analyzer in context", s.FuncName())
+	}
+	runtimeSpec, err := analyzer.analyzeTemplatedFunctionWithRuntimeArgument(withSafeEvalMode(ctx), runtimeDefinedFunc)
+	if err != nil {
+		return "", err
+	}
+	call, err := runtimeSpec.CallSQL(ctx, callNode, argValues)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("googlesqlite_deferred_to_null(%s)", call), nil
 }

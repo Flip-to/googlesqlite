@@ -303,6 +303,9 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeaturePipeWith,
 	// PIVOT ... IN (<named constant>) (pivot.test).
 	googlesql.LanguageFeatureFeatureAnalysisConstantPivotColumn,
+	// `|> CALL tvf(INPUT TABLE, ...)` names the pipe input's position
+	// among the TVF arguments (pipe_call.test).
+	googlesql.LanguageFeatureFeaturePipeCallInputTable,
 }
 
 // supportedStatementKinds lists the ResolvedStatement kinds the
