@@ -41,6 +41,12 @@ import (
 // the runtime CAST, which uses UTC. Shapes it cannot evaluate are
 // reported through the zoneFoldState in the context so the statement
 // is re-analyzed with literal-cast folding disabled.
+//
+// The same path corrects a fold that is wrong regardless of the zone:
+// CAST(DATE ... AS DATETIME) folds to 1970-01-01T00:00:00 (flipto-dbt
+// probe cast_as_datetime-2057.6). CAST(-0.0 AS STRING) folds to "0",
+// which is also what BigQuery returns for the literal form, so it is
+// left alone.
 
 // errZoneFoldedLiteral reports a folded literal whose value depends on
 // the analyzer's default time zone and that could not be re-evaluated
@@ -53,7 +59,7 @@ type zoneFoldStateKey struct{}
 // zone-dependent folded literal was seen (needRefold) and whether the
 // caller can re-analyze the statement without folding (allowRefold).
 type zoneFoldState struct {
-	hasTimestampKeyword bool
+	hasTimestampKeyword bool // TIMESTAMP or DATETIME
 	allowRefold         bool
 	needRefold          bool
 }
@@ -67,7 +73,11 @@ func zoneFoldStateFromContext(ctx context.Context) *zoneFoldState {
 	return s
 }
 
-var timestampKeywordRe = regexp.MustCompile(`(?i)\bTIMESTAMP\b`)
+// timestampKeywordRe matches the keywords a mis-folded temporal cast
+// needs: TIMESTAMP (zone-dependent casts) and DATETIME (the analyzer
+// folds CAST(DATE ... AS DATETIME) to 1970-01-01T00:00:00, flipto-dbt
+// probe cast_as_datetime-2057.6).
+var timestampKeywordRe = regexp.MustCompile(`(?i)\b(?:TIMESTAMP|DATETIME)\b`)
 
 // newZoneFoldState builds the per-statement state for query.
 func newZoneFoldState(query string, allowRefold bool) *zoneFoldState {
@@ -93,8 +103,9 @@ func utcLiteralSQL(ctx context.Context, lit *googlesql.ResolvedLiteral) (sql str
 	switch kind {
 	case googlesql.TypeKindTypeTimestamp:
 	case googlesql.TypeKindTypeDate, googlesql.TypeKindTypeDatetime, googlesql.TypeKindTypeTime, googlesql.TypeKindTypeString:
-		// Only a cast from a TIMESTAMP yields a zone-dependent value of
-		// these types, and that requires the TIMESTAMP keyword.
+		// Only a cast from a TIMESTAMP (zone) or to a DATETIME (the
+		// DATE-to-DATETIME fold) is wrong for these types, and that
+		// needs one of those keywords.
 		if !state.hasTimestampKeyword {
 			return "", false, nil
 		}

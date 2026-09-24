@@ -1,6 +1,7 @@
 package approx_aggregate
 
 import (
+	"math"
 	"sort"
 	"sync"
 
@@ -33,6 +34,11 @@ func (f *APPROX_QUANTILES) Done() (value.Value, error) {
 		if a == nil || b == nil {
 			return a == nil && b != nil
 		}
+		// NaN sorts before every other FLOAT64, as in BigQuery's
+		// ordering (flipto-dbt probe approx_quantiles-6302.6).
+		if an, bn := isNaN(a), isNaN(b); an || bn {
+			return an && !bn
+		}
 		lt, err := a.LT(b)
 		return err == nil && lt
 	})
@@ -57,4 +63,9 @@ func (f *APPROX_QUANTILES) Done() (value.Value, error) {
 	}
 	quantiles = append(quantiles, f.values[len(f.values)-1])
 	return &value.ArrayValue{Values: quantiles}, nil
+}
+
+func isNaN(v value.Value) bool {
+	f, ok := v.(value.FloatValue)
+	return ok && math.IsNaN(float64(f))
 }

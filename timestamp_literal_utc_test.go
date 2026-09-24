@@ -18,10 +18,8 @@ import (
 // string without a zone is UTC and that TIMESTAMP to DATE / DATETIME /
 // TIME / STRING conversions use UTC unless a zone is given
 // (docs/third_party/googlesql-docs/conversion_rules.md,
-// data-types.md "Time zones", timestamp_functions.md). The S1 values
-// match the real BigQuery answers already recorded in
-// TestBigQueryDivergences / TestDBTDifferentialProbes; the rest were
-// not re-run on live BigQuery (the connection was unavailable).
+// data-types.md "Time zones", timestamp_functions.md), and every
+// expected value was checked on real BigQuery on 2026-09-24.
 //
 // Every case runs in two forms: with literal inputs (folded by the
 // analyzer) and with the inputs read from UNNEST (not folded, evaluated
@@ -97,6 +95,10 @@ func TestTimestampLiteralUTC(t *testing.T) {
 		{"range_equal_utc", `$1 = $2`, []string{`RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)'`, `RANGE<TIMESTAMP> '[2020-01-01 00:00:00.000000+00, 2020-01-02)'`}, "true"},
 		{"range_distinct_offset", `$1 IS DISTINCT FROM $2`, []string{`RANGE<TIMESTAMP> '[2020-01-01, 2020-01-02)'`, `RANGE<TIMESTAMP> '[2020-01-01 00:00:00.000000+02, 2020-01-02)'`}, "true"},
 		{"range_offset_self_equal", `$1 = $2`, []string{`RANGE<TIMESTAMP> '[2020-01-01 12:00:00.000005+01, 2020-01-02)'`, `RANGE<TIMESTAMP> '[2020-01-01 12:00:00.000005+01, 2020-01-02)'`}, "true"},
+		// CAST(DATE AS DATETIME) folds to 1970-01-01 in the analyzer
+		// (flipto-dbt probe cast_as_datetime-2057.6, BigQuery answer).
+		{"date_to_datetime", `CAST(CAST($1 AS DATETIME) AS STRING)`, []string{`DATE '2024-02-29'`}, "2024-02-29 00:00:00"},
+		{"date_to_datetime_in_struct", `CAST($1.d AS STRING)`, []string{`STRUCT(CAST(DATE '2024-02-29' AS DATETIME) AS d)`}, "2024-02-29 00:00:00"},
 		// Composite literals.
 		{"range_ts_literal", `RANGE_START($1)`, []string{`RANGE<TIMESTAMP> '[2024-01-01 10:00:00, 2024-01-02 10:00:00)'`}, "2024-01-01 10:00:00+00"},
 		{"array_ts_coerced", `$1[OFFSET(0)]`, []string{`ARRAY<TIMESTAMP>['2024-01-01 10:00:00']`}, "2024-01-01 10:00:00+00"},

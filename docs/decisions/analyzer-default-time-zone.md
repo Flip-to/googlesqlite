@@ -96,6 +96,13 @@ BigQuery computes it in UTC:
     keyword);
   - a STRING literal coerced to TIMESTAMP (comparisons, TIMESTAMP
     function arguments, INSERT values).
+  - `CAST(DATE ... AS DATETIME)`, which the analyzer folds to
+    `1970-01-01T00:00:00` whatever the zone (flipto-dbt probe
+    cast_as_datetime-2057.6); the DATETIME keyword triggers the same
+    check.
+- A literal `CAST(-0.0 AS STRING)` folds to `"0"`. BigQuery folds it
+  the same way (checked on BigQuery), so it is not corrected; from a
+  column the runtime gives `"-0"`, as BigQuery does.
 - Function calls are never folded: `DATE(ts)`, `STRING(ts)`,
   `EXTRACT`, `TIMESTAMP_ADD` / `SUB` / `DIFF` / `TRUNC`,
   `FORMAT_TIMESTAMP` and so on reach the runtime and already use UTC.

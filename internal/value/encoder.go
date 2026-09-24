@@ -25,8 +25,9 @@ func EncodeValue(v Value) (any, error) {
 	case IntValue:
 		return v.ToInt64()
 	case FloatValue:
-		if !math.IsNaN(float64(vv)) {
-			return float64(vv), nil
+		// NaN and -0.0 use the envelope; SQLite does not keep either.
+		if f := float64(vv); !math.IsNaN(f) && (f != 0 || !math.Signbit(f)) {
+			return f, nil
 		}
 	case BoolValue:
 		return v.ToBool()
