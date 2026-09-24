@@ -17,6 +17,7 @@ import (
 
 	internal "github.com/goccy/googlesqlite/internal"
 	"github.com/goccy/googlesqlite/internal/sqlitex"
+	"github.com/goccy/googlesqlite/internal/zoneinfo"
 )
 
 // dsnParts splits a googlesqlite DSN into the filename portion the SQLite
@@ -45,9 +46,23 @@ func dsnParts(dsn string) (path, query string) {
 // The runtime is the wasm2go-transpiled module — already AOT-compiled
 // into Go at generation time — so there is no runtime compilation
 // mode to pick and no on-disk cache to configure.
+//
+// Before that, zoneinfo.Prepare makes sure the analyzer can read IANA
+// time zone files (extracting an embedded copy and setting TZDIR when
+// the host has none, e.g. on Windows). It must run first because the
+// runtime snapshots the process environment during Init.
 var ensureGoogleSQLInit = sync.OnceValue(func() error {
+	_ = zoneinfo.Prepare(EnvWasmEmbeddedZoneinfo)
 	return googlesql.Init()
 })
+
+// EnvWasmEmbeddedZoneinfo names the environment variable that controls
+// the embedded time zone database for the wasm analyzer. When the
+// analyzer would find no zone files (TZDIR unset or unusable and no
+// /usr/share/zoneinfo, as on Windows), the driver extracts an embedded
+// copy to the user cache directory and sets TZDIR to it. Set this
+// variable to "0", "false", "off" or "no" to disable that behavior.
+const EnvWasmEmbeddedZoneinfo = "GOOGLESQLITE_WASM_EMBEDDED_ZONEINFO"
 
 var (
 	_ driver.Driver = &Driver{}
