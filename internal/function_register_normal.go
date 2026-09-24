@@ -579,7 +579,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "is_inf", BindFunc: helper.Scalar1(mathfn.IS_INF)},
 	{Name: "is_nan", BindFunc: helper.Scalar1(mathfn.IS_NAN)},
 	{Name: "ieee_divide", BindFunc: helper.Scalar2(mathfn.IEEE_DIVIDE)},
-	{Name: "rand", BindFunc: mathfn.BindRand},
+	{Name: "rand", NonDeterministic: true, BindFunc: mathfn.BindRand},
 	{Name: "sqrt", BindFunc: helper.Scalar1(mathfn.SQRT)},
 	{Name: "pow", BindFunc: helper.Scalar2(mathfn.POW)},
 	{Name: "power", BindFunc: helper.Scalar2(mathfn.POW)},

@@ -1909,6 +1909,32 @@ func (n *ArrayScanNode) FormatSQL(ctx context.Context) (string, error) {
 var tokensAfterFromClause = [...]string{"WHERE", "GROUP BY", "HAVING", "QUALIFY", "WINDOW", "ORDER BY", "COLLATE"}
 var removeExpressions = regexp.MustCompile(`\(.+?\)`)
 
+// completeScanQuery turns a scan fragment into a complete SELECT when
+// the scan is consumed directly as a query body. Standard syntax always
+// puts a ProjectScan on top, but pipe operators leave other scans as
+// the outermost one: pipe WHERE yields a FilterScan rendered as
+// "<input> WHERE <filter>", a pipe JOIN yields a bare JoinScan, and a
+// bare `FROM t` yields a parenthesized TableScan. allowWith reports
+// whether a leading WITH clause is acceptable in the caller's position
+// (SQLite rejects `WITH a AS (...) WITH b AS (...) SELECT ...`, which
+// consecutive pipe WITH operators would otherwise produce).
+func completeScanQuery(scan googlesql.ResolvedNode, input string, allowWith bool) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if _, isFilter := scan.(*googlesql.ResolvedFilterScan); !isFilter {
+		if strings.HasPrefix(trimmed, "SELECT") || (allowWith && strings.HasPrefix(trimmed, "WITH")) {
+			return input, nil
+		}
+	}
+	if strings.HasPrefix(trimmed, "WITH") {
+		return fmt.Sprintf("SELECT * FROM (%s)", input), nil
+	}
+	from, err := formatInput(input)
+	if err != nil {
+		return "", err
+	}
+	return "SELECT * " + from, nil
+}
+
 func (n *FilterScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
@@ -2854,7 +2880,44 @@ func (n *ProjectScanNode) FormatSQL(ctx context.Context) (string, error) {
 		return "", err
 	}
 	formattedColumns := strings.Join(columns, ",")
+	if containsNonDeterministicCall(formattedColumns) {
+		// SQLite's query flattener substitutes a subquery's result
+		// expressions into every reference in the outer query, so
+		// `SELECT r = r FROM (SELECT RAND() AS r)` would call RAND()
+		// twice. A subquery with an OFFSET is never flattened (nor
+		// has predicates pushed into it), which keeps each
+		// non-deterministic value computed once per row.
+		return fmt.Sprintf("SELECT * FROM (SELECT %s %s) LIMIT -1 OFFSET 0", formattedColumns, formattedInput), nil
+	}
 	return fmt.Sprintf("SELECT %s %s", formattedColumns, formattedInput), nil
+}
+
+var (
+	nonDeterministicCallsOnce sync.Once
+	nonDeterministicCalls     []string
+)
+
+// containsNonDeterministicCall reports whether formatted SQL calls a
+// runtime function registered as non-deterministic (RAND,
+// GENERATE_UUID, KEYS.NEW_KEYSET, ...).
+func containsNonDeterministicCall(sql string) bool {
+	nonDeterministicCallsOnce.Do(func() {
+		for _, info := range normalFuncs {
+			if info.NonDeterministic {
+				nonDeterministicCalls = append(nonDeterministicCalls,
+					"googlesqlite_"+info.Name+"(", "googlesqlite_safe_"+info.Name+"(")
+			}
+		}
+	})
+	if !strings.Contains(sql, "googlesqlite_") {
+		return false
+	}
+	for _, name := range nonDeterministicCalls {
+		if strings.Contains(sql, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *TVFScanNode) FormatSQL(ctx context.Context) (string, error) {
@@ -2990,6 +3053,10 @@ func (n *QueryStmtNode) FormatSQL(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	input, err := newNode(m1(n.node.Query())).FormatSQL(ctx)
+	if err != nil {
+		return "", err
+	}
+	input, err = completeScanQuery(m1(n.node.Query()), input, true)
 	if err != nil {
 		return "", err
 	}
@@ -3202,6 +3269,10 @@ func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	query, err = completeScanQuery(m1(n.node.Query()), query, false)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf(
 		"%s %s %s",
 		keyword,
@@ -3247,10 +3318,15 @@ func (n *WithEntryNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if subKind != googlesql.ResolvedNodeKindResolvedRecursiveScan {
+		if subquery, err = completeScanQuery(sub, subquery, true); err != nil {
+			return "", err
+		}
+	}
 	tableToColumnList := tableNameToColumnListMap(ctx)
 	tableToColumnList[queryName] = m1(sub.MutableColumnList())
 	hint := cteMaterializeHint(ctx, queryName, subKind)
-	if hint == "" && subKind != googlesql.ResolvedNodeKindResolvedRecursiveScan && containsNonDeterministicCall(sub) {
+	if hint == "" && subKind != googlesql.ResolvedNodeKindResolvedRecursiveScan && subtreeCallsNonDeterministic(sub) {
 		// WITH has exactly-once evaluation semantics; without
 		// MATERIALIZED SQLite may inline the body and evaluate a
 		// volatile call once per reference
@@ -3279,9 +3355,9 @@ var (
 	nonDeterministicFuncNames     map[string]struct{}
 )
 
-// containsNonDeterministicCall reports whether the subtree calls a
+// subtreeCallsNonDeterministic reports whether the subtree calls a
 // scalar function registered as NonDeterministic.
-func containsNonDeterministicCall(node googlesql.ResolvedNode) bool {
+func subtreeCallsNonDeterministic(node googlesql.ResolvedNode) bool {
 	nonDeterministicFuncNamesOnce.Do(func() {
 		nonDeterministicFuncNames = map[string]struct{}{}
 		for _, f := range normalFuncs {

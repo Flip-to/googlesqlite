@@ -253,7 +253,7 @@ func (fr *fileRunner) open(ctx context.Context) error {
 
 // exec runs one statement and returns its rows. timedOut is true when
 // the statement exceeded the timeout; the connection is then unusable.
-func (fr *fileRunner) exec(ctx context.Context, q string) (rows [][]any, timedOut bool, err error) {
+func (fr *fileRunner) exec(ctx context.Context, q string, args ...any) (rows [][]any, timedOut bool, err error) {
 	type out struct {
 		rows [][]any
 		err  error
@@ -268,7 +268,7 @@ func (fr *fileRunner) exec(ctx context.Context, q string) (rows [][]any, timedOu
 				ch <- out{err: fmt.Errorf("panic: %v", p)}
 			}
 		}()
-		r, err := queryAll(cctx, conn, q)
+		r, err := queryAll(cctx, conn, q, args...)
 		ch <- out{r, err}
 	}()
 	select {
@@ -279,8 +279,8 @@ func (fr *fileRunner) exec(ctx context.Context, q string) (rows [][]any, timedOu
 	}
 }
 
-func queryAll(ctx context.Context, conn *sql.Conn, q string) ([][]any, error) {
-	rows, err := conn.QueryContext(ctx, q)
+func queryAll(ctx context.Context, conn *sql.Conn, q string, args ...any) ([][]any, error) {
+	rows, err := conn.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -305,6 +305,27 @@ func queryAll(ctx context.Context, conn *sql.Conn, q string) ([][]any, error) {
 }
 
 var tempFuncRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TEMP(?:ORARY)?\s+(?:AGGREGATE\s+)?FUNCTION[[:space:](]`)
+
+var createConstantRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+|PUBLIC\s+|PRIVATE\s+)?CONSTANT\s`)
+
+var literalOnlyArgRe = regexp.MustCompile(`must be a string literal or query parameter|must be one of .* but is`)
+
+// paramArgs evaluates each parameter expression and returns the values
+// as named query arguments.
+func (fr *fileRunner) paramArgs(ctx context.Context, params []compliancetest.Param) ([]any, error) {
+	args := make([]any, 0, len(params))
+	for _, p := range params {
+		rows, err := queryAll(ctx, fr.conn, "SELECT "+p.Expr)
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) != 1 || len(rows[0]) != 1 {
+			return nil, fmt.Errorf("parameter %s: unexpected shape", p.Name)
+		}
+		args = append(args, sql.Named(p.Name, rows[0][0]))
+	}
+	return args, nil
+}
 
 var tableNotFoundRe = regexp.MustCompile(`(?:Table|Function) not found: ([\w.` + "`" + `]+)`)
 
@@ -343,6 +364,15 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 	if tz, ok := c.Attrs["default_time_zone"]; ok && !strings.EqualFold(tz, "UTC") {
 		return skip("non-UTC default_time_zone " + tz + " (BigQuery sessions default to UTC)")
 	}
+	if mode := c.Attrs["primary_key_mode"]; mode != "" && mode != "no_primary_key" {
+		return skip("primary_key_mode " + mode + " (BigQuery primary keys are NOT ENFORCED)")
+	}
+	if strings.HasPrefix(res.Expected, "ERROR: generic::unimplemented") {
+		return skip("reference implementation limitation (expected generic::unimplemented)")
+	}
+	if createConstantRe.MatchString(query) {
+		return skip("CREATE CONSTANT is not BigQuery DDL")
+	}
 	if strings.HasPrefix(res.Expected, "ScriptResult") || c.Attrs["script_mode"] != "" {
 		return skip("runner: script-mode cases not supported")
 	}
@@ -367,6 +397,18 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 		run = strings.Join(fr.setup.temp, ";\n") + ";\n" + query
 	}
 	rows, timedOut, err := fr.exec(ctx, run)
+	if !timedOut && err != nil && len(c.Params) > 0 && literalOnlyArgRe.MatchString(err.Error()) {
+		// Inlining a parameter as (expr) breaks arguments that must be
+		// "a string literal or query parameter" (KEYS.NEW_KEYSET's key
+		// type, ...). Bind the parameters for real and rerun.
+		if args, perr := fr.paramArgs(ctx, c.Params); perr == nil {
+			bound := c.SQL
+			if len(fr.setup.temp) > 0 {
+				bound = strings.Join(fr.setup.temp, ";\n") + ";\n" + bound
+			}
+			rows, timedOut, err = fr.exec(ctx, bound, args...)
+		}
+	}
 	if timedOut {
 		// Closing would block on the still-running statement, so the
 		// timed-out connection is abandoned and a fresh one opened.

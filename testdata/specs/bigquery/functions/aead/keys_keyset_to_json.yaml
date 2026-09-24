@@ -1,10 +1,12 @@
 spec: docs/specs/bigquery/functions/aead/keys_keyset_to_json.md
 dialect: bigquery
-# KEYS.KEYSET_TO_JSON serialises a keyset to a JSON STRING. Asserted
-# property: the output includes the documented `algorithm` field.
+# KEYS.KEYSET_TO_JSON serialises a keyset to a JSON STRING shaped like
+# the google.crypto.tink.Keyset proto. Asserted property: the output of
+# the spec's Example carries the documented AesGcmKey type URL and
+# SYMMETRIC key material type.
 cases:
-  - desc: JSON form mentions algorithm field
-    sql: SELECT KEYS.KEYSET_TO_JSON(KEYS.NEW_KEYSET('AEAD_AES_GCM_256')) LIKE '%algorithm%' AS r
+  - desc: JSON form carries the documented Tink keyData fields
+    sql: SELECT KEYS.KEYSET_TO_JSON(KEYS.NEW_KEYSET('AEAD_AES_GCM_256')) LIKE '{"key":[{"keyData":{"keyMaterialType":"SYMMETRIC","typeUrl":"type.googleapis.com/google.crypto.tink.AesGcmKey","value":"%"},"keyId":%,"outputPrefixType":"TINK","status":"ENABLED"}],"primaryKeyId":%}' AS r
     expected:
       rows:
         - [true]
