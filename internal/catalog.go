@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,11 +62,11 @@ type Catalog struct {
 	// retiredCatalogs counts SimpleCatalogs replaced by resetCatalog
 	// since the last forced GC (see releaseRetiredCatalogs).
 	retiredCatalogs int
-	mu           sync.Mutex
-	tables       []*TableSpec
-	functions    []*FunctionSpec
-	tvfs         []*TVFSpec
-	catalog      *googlesql.SimpleCatalog
+	mu              sync.Mutex
+	tables          []*TableSpec
+	functions       []*FunctionSpec
+	tvfs            []*TVFSpec
+	catalog         *googlesql.SimpleCatalog
 	// tvfOwners holds the Go wrappers that own the native TVF objects
 	// registered on catalog. SimpleCatalog only keeps the embedded
 	// *TableValuedFunction alive, which has no finalizer; the owning
@@ -2657,8 +2657,34 @@ func (c *Catalog) functionHandleForSpec(spec *FunctionSpec) (*googlesql.Function
 	if err != nil {
 		return nil, err
 	}
-	sig := m1(googlesql.NewFunctionSignature3(retType, argTypes, 0))
-	fn, err := googlesql.NewFunction([]string{storageName}, "", googlesql.FunctionEnums_ModeScalar, []*googlesql.FunctionSignature{sig}, nil)
+	var sigs []*googlesql.FunctionSignature
+	// Concrete signatures of a templated function come first so a call
+	// whose argument types were resolved at CREATE time gets the exact
+	// result type; the templated signature stays as the fallback.
+	for _, concrete := range spec.Signatures {
+		if len(concrete.Args) != len(spec.Args) {
+			continue
+		}
+		concreteArgs := make([]*googlesql.FunctionArgumentType, 0, len(concrete.Args))
+		for i, t := range concrete.Args {
+			argType, err := (&NameWithType{Name: spec.Args[i].Name, Type: t, NotAggregate: spec.Args[i].NotAggregate}).FunctionArgumentType()
+			if err != nil {
+				return nil, err
+			}
+			concreteArgs = append(concreteArgs, argType)
+		}
+		concreteRet, err := concrete.Return.FunctionArgumentType()
+		if err != nil {
+			return nil, err
+		}
+		sigs = append(sigs, m1(googlesql.NewFunctionSignature3(concreteRet, concreteArgs, 0)))
+	}
+	sigs = append(sigs, m1(googlesql.NewFunctionSignature3(retType, argTypes, 0)))
+	mode := googlesql.FunctionEnums_ModeScalar
+	if spec.IsAggregate {
+		mode = googlesql.FunctionEnums_ModeAggregate
+	}
+	fn, err := googlesql.NewFunction([]string{storageName}, "", mode, sigs, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -2868,11 +2894,13 @@ func (c *Catalog) copyTableSpec(spec *TableSpec, newNamePath []string) *TableSpe
 
 func (c *Catalog) copyFunctionSpec(spec *FunctionSpec, newNamePath []string) *FunctionSpec {
 	return &FunctionSpec{
-		NamePath: newNamePath,
-		Language: spec.Language,
-		Args:     spec.Args,
-		Return:   spec.Return,
-		Code:     spec.Code,
-		Body:     spec.Body,
+		NamePath:    newNamePath,
+		Language:    spec.Language,
+		IsAggregate: spec.IsAggregate,
+		Args:        spec.Args,
+		Return:      spec.Return,
+		Signatures:  spec.Signatures,
+		Code:        spec.Code,
+		Body:        spec.Body,
 	}
 }

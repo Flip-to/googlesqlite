@@ -507,6 +507,7 @@ func (a *QueryStmtAction) QueryContext(ctx context.Context, conn *Conn) (*Rows, 
 	}
 	rows, err := conn.QueryContext(ctx, a.formattedQuery, a.args...)
 	if err != nil {
+		fmt.Fprintf(debugStream(), "[googlesqlite][query] %s\n", a.formattedQuery)
 		return nil, fmt.Errorf("failed to query %s: %w", a.query, err)
 	}
 	if err := rows.Err(); err != nil {

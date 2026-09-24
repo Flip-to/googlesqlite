@@ -28,13 +28,27 @@ func protoNameFromDebug(s string) string {
 type NameWithType struct {
 	Name string `json:"name"`
 	Type *Type  `json:"type"`
+	// NotAggregate marks a NOT AGGREGATE parameter of a SQL
+	// user-defined aggregate function: the argument must be constant
+	// for the whole group and is not aggregated.
+	NotAggregate bool `json:"notAggregate,omitempty"`
+}
+
+func (t *NameWithType) argumentTypeOptions() *googlesql.FunctionArgumentTypeOptions {
+	opt := m1(googlesql.NewFunctionArgumentTypeOptions())
+	if t.NotAggregate {
+		if o, err := opt.SetIsNotAggregate(true); err == nil && o != nil {
+			opt = o
+		}
+	}
+	return opt
 }
 
 func (t *NameWithType) FunctionArgumentType() (*googlesql.FunctionArgumentType, error) {
 	if t.Type.SignatureKind != googlesql.SignatureArgumentKindArgTypeFixed {
 		return m1(googlesql.NewFunctionArgumentType5(
 			t.Type.SignatureKind,
-			m1(googlesql.NewFunctionArgumentTypeOptions()),
+			t.argumentTypeOptions(),
 			-1,
 		)), nil
 	}
@@ -42,7 +56,7 @@ func (t *NameWithType) FunctionArgumentType() (*googlesql.FunctionArgumentType, 
 	if err != nil {
 		return nil, err
 	}
-	opt := m1(googlesql.NewFunctionArgumentTypeOptions())
+	opt := t.argumentTypeOptions()
 	// SetArgumentName isn't exposed on the bridge; argument names flow
 	// through the FunctionSignature builder separately in modern API.
 	_ = t.Name
@@ -50,15 +64,31 @@ func (t *NameWithType) FunctionArgumentType() (*googlesql.FunctionArgumentType, 
 }
 
 type FunctionSpec struct {
-	IsTemp    bool            `json:"isTemp"`
-	NamePath  []string        `json:"name"`
-	Language  string          `json:"language"`
-	Args      []*NameWithType `json:"args"`
-	Return    *Type           `json:"return"`
-	Body      string          `json:"body"`
-	Code      string          `json:"code"`
-	UpdatedAt time.Time       `json:"updatedAt"`
-	CreatedAt time.Time       `json:"createdAt"`
+	IsTemp   bool     `json:"isTemp"`
+	NamePath []string `json:"name"`
+	Language string   `json:"language"`
+	// IsAggregate is set for CREATE AGGREGATE FUNCTION. The body is
+	// then an aggregate expression that is inlined at each call site.
+	IsAggregate bool            `json:"isAggregate,omitempty"`
+	Args        []*NameWithType `json:"args"`
+	Return      *Type           `json:"return"`
+	// Signatures lists concrete signatures of a templated (ANY TYPE)
+	// function, one per argument type its body was resolved for. They
+	// give the analyzer the exact result type of calls whose result
+	// type is not simply the templated argument type (for example a
+	// STRUCT built from the argument).
+	Signatures []*FunctionSignatureSpec `json:"signatures,omitempty"`
+	Body       string                   `json:"body"`
+	Code       string                   `json:"code"`
+	UpdatedAt  time.Time                `json:"updatedAt"`
+	CreatedAt  time.Time                `json:"createdAt"`
+}
+
+// FunctionSignatureSpec is one concrete signature of a templated
+// function.
+type FunctionSignatureSpec struct {
+	Args   []*Type `json:"args"`
+	Return *Type   `json:"return"`
 }
 
 func (s *FunctionSpec) FuncName() string {
@@ -89,6 +119,9 @@ func (s *FunctionSpec) CallSQL(ctx context.Context, callNode *ResolvedBaseFuncti
 		definedArgs := make([]string, 0, len(args))
 		for idx, arg := range args {
 			typeName := newType(m1(arg.Type())).FormatType()
+			if s.Args[idx].NotAggregate {
+				typeName += " NOT AGGREGATE"
+			}
 			definedArgs = append(
 				definedArgs,
 				fmt.Sprintf("%s %s", s.Args[idx].Name, typeName),
@@ -96,7 +129,8 @@ func (s *FunctionSpec) CallSQL(ctx context.Context, callNode *ResolvedBaseFuncti
 		}
 		funcName := strings.Join(s.NamePath, ".")
 		runtimeDefinedFunc := fmt.Sprintf(
-			"CREATE FUNCTION `%s`(%s) as (%s)",
+			"CREATE %sFUNCTION `%s`(%s) as (%s)",
+			aggregateKeyword(s.IsAggregate),
 			funcName,
 			strings.Join(definedArgs, ","),
 			s.Code,
@@ -110,12 +144,32 @@ func (s *FunctionSpec) CallSQL(ctx context.Context, callNode *ResolvedBaseFuncti
 	} else {
 		body = s.Body
 	}
+	// A SQL function argument is evaluated once, even if the body
+	// references it several times. Inlining a volatile argument (RAND,
+	// GENERATE_UUID) would evaluate it per reference, so such arguments
+	// are bound once in a derived table instead. Aggregate bodies must
+	// stay inline to aggregate over the caller's rows.
+	var bound []string
 	for i := 0; i < len(s.Args); i++ {
 		argRef := fmt.Sprintf("@%s", s.Args[i].Name)
 		value := argValues[i]
+		if !s.IsAggregate && isVolatileSQL(value) && strings.Count(body, argRef) > 1 {
+			alias := fmt.Sprintf("googlesqlite_udf_arg_%d", i)
+			bound = append(bound, fmt.Sprintf("%s AS `%s`", value, alias))
+			value = "`" + alias + "`"
+		}
 		body = strings.Replace(body, argRef, value, -1)
 	}
+	if len(bound) != 0 {
+		return fmt.Sprintf("( SELECT %s FROM (SELECT %s) )", body, strings.Join(bound, ", ")), nil
+	}
 	return fmt.Sprintf("( %s )", body), nil
+}
+
+// isVolatileSQL reports whether formatted SQL calls a function whose
+// result differs between evaluations.
+func isVolatileSQL(sql string) bool {
+	return strings.Contains(sql, "googlesqlite_rand(") || strings.Contains(sql, "googlesqlite_generate_uuid(")
 }
 
 type TableSpec struct {
@@ -583,10 +637,12 @@ func newFunctionSpec(ctx context.Context, namePath *NamePath, stmt *googlesql.Re
 	signature, _ := stmt.Signature()
 	for _, arg := range m1(signature.Arguments()) {
 		args = append(args, &NameWithType{
-			Name: m1(arg.ArgumentName()),
-			Type: newTypeFromFunctionArgumentType(arg),
+			Name:         m1(arg.ArgumentName()),
+			Type:         newTypeFromFunctionArgumentType(arg),
+			NotAggregate: argumentIsNotAggregate(arg),
 		})
 	}
+	isAggregate, _ := stmt.IsAggregate()
 
 	var body string
 	language, _ := stmt.Language()
@@ -624,27 +680,66 @@ func newFunctionSpec(ctx context.Context, namePath *NamePath, stmt *googlesql.Re
 			)
 		}
 	default:
-		funcExpr, _ := stmt.FunctionExpression()
-		if funcExpr != nil {
-			bodyQuery, err := newNode(funcExpr).FormatSQL(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to format function expression: %w", err)
-			}
-			body = bodyQuery
+		bodyQuery, err := formatFunctionBody(ctx, stmt)
+		if err != nil {
+			return nil, err
 		}
+		body = bodyQuery
 	}
 	now := time.Now()
 	return &FunctionSpec{
-		IsTemp:    resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
-		NamePath:  namePath.mergePath(m1(stmt.NamePath())),
-		Args:      args,
-		Return:    newType(m1(stmt.ReturnType())),
-		Code:      m1(stmt.Code()),
-		Body:      body,
-		Language:  language,
-		CreatedAt: now,
-		UpdatedAt: now,
+		IsTemp:      resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+		NamePath:    namePath.mergePath(m1(stmt.NamePath())),
+		IsAggregate: isAggregate,
+		Args:        args,
+		Return:      newType(m1(stmt.ReturnType())),
+		Code:        m1(stmt.Code()),
+		Body:        body,
+		Language:    language,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}, nil
+}
+
+// argumentIsNotAggregate reports whether a function parameter was
+// declared NOT AGGREGATE.
+func argumentIsNotAggregate(t *googlesql.FunctionArgumentType) bool {
+	opts, err := t.Options()
+	if err != nil || opts == nil {
+		return false
+	}
+	v, _ := opts.IsNotAggregate()
+	return v
+}
+
+// formatFunctionBody formats the SQL body of a CREATE FUNCTION
+// statement. For CREATE AGGREGATE FUNCTION the resolved body refers to
+// the aggregate calls through columns of aggregate_expression_list;
+// those references are replaced by the formatted aggregate calls so the
+// body can be inlined into the caller's aggregation.
+func formatFunctionBody(ctx context.Context, stmt *googlesql.ResolvedCreateFunctionStmt) (string, error) {
+	funcExpr, _ := stmt.FunctionExpression()
+	if funcExpr == nil {
+		return "", nil
+	}
+	aggList, _ := stmt.AggregateExpressionList()
+	if len(aggList) != 0 {
+		subst := map[int32]string{}
+		for _, agg := range aggList {
+			expr, err := newNode(m1(agg.Expr())).FormatSQL(ctx)
+			if err != nil {
+				return "", fmt.Errorf("failed to format aggregate expression: %w", err)
+			}
+			id, _ := m1(agg.Column()).ColumnId()
+			subst[id] = "(" + expr + ")"
+		}
+		ctx = withColumnIDSubstitution(ctx, subst)
+	}
+	body, err := newNode(funcExpr).FormatSQL(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to format function expression: %w", err)
+	}
+	return body, nil
 }
 
 func newTypeFromFunctionArgumentTypeByRealType(t *googlesql.FunctionArgumentType, realType googlesql.Googlesql_TypeNode) *Type {
@@ -690,28 +785,38 @@ func newTemplatedFunctionSpec(ctx context.Context, namePath *NamePath, stmt *goo
 				arguments[i],
 				m1(realArguments[i].Type()),
 			),
+			NotAggregate: argumentIsNotAggregate(arguments[i]),
 		})
 	}
-	funcExpr, _ := stmt.FunctionExpression()
-	var body string
-	if funcExpr != nil {
-		bodyQuery, err := newNode(funcExpr).FormatSQL(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to format function expression: %w", err)
+	var signatures []*FunctionSignatureSpec
+	if !allSameResultType {
+		for _, real := range realStmts {
+			realSig := m1(real.Signature())
+			sig := &FunctionSignatureSpec{Return: newType(m1(m1(realSig.ResultType()).Type()))}
+			for _, arg := range m1(realSig.Arguments()) {
+				sig.Args = append(sig.Args, newType(m1(arg.Type())))
+			}
+			signatures = append(signatures, sig)
 		}
-		body = bodyQuery
+	}
+	isAggregate, _ := stmt.IsAggregate()
+	body, err := formatFunctionBody(ctx, stmt)
+	if err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	return &FunctionSpec{
-		IsTemp:    resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
-		NamePath:  namePath.mergePath(m1(stmt.NamePath())),
-		Args:      args,
-		Return:    retType,
-		Code:      m1(stmt.Code()),
-		Body:      body,
-		Language:  m1(stmt.Language()),
-		CreatedAt: now,
-		UpdatedAt: now,
+		IsTemp:      resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+		NamePath:    namePath.mergePath(m1(stmt.NamePath())),
+		IsAggregate: isAggregate,
+		Args:        args,
+		Return:      retType,
+		Signatures:  signatures,
+		Code:        m1(stmt.Code()),
+		Body:        body,
+		Language:    m1(stmt.Language()),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}, nil
 }
 

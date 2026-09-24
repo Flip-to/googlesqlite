@@ -83,7 +83,11 @@ type caseResult struct {
 var verboseLog bool
 
 type setupState struct {
-	stmts  []string          // successful setup statements, for replay
+	stmts []string // successful setup statements, for replay
+	// temp holds successful CREATE TEMP FUNCTION setup statements. The
+	// driver scopes temp objects to the script that creates them (as
+	// BigQuery does), so they are prepended to every later case.
+	temp   []string
 	failed map[string]string // lower-case object name -> reason
 }
 
@@ -300,6 +304,8 @@ func queryAll(ctx context.Context, conn *sql.Conn, q string) ([][]any, error) {
 	return out, rows.Err()
 }
 
+var tempFuncRe = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TEMP(?:ORARY)?\s+(?:AGGREGATE\s+)?FUNCTION[[:space:](]`)
+
 var tableNotFoundRe = regexp.MustCompile(`(?:Table|Function) not found: ([\w.` + "`" + `]+)`)
 
 func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (res caseResult) {
@@ -338,6 +344,10 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 		return skip("runner: script-mode cases not supported")
 	}
 	expected, perr := compliancetest.ParseResult(c.Expected)
+	if perr != nil && c.Prepare && strings.TrimSpace(c.Expected) == "" {
+		// Setup DDL without an expected result (CREATE TEMP FUNCTION).
+		expected, perr = compliancetest.Result{}, nil
+	}
 	if perr != nil {
 		shape := firstLineOf(res.Expected)
 		if strings.HasPrefix(shape, "STRUCT<num_rows_modified") || strings.HasPrefix(shape, "STRUCT<") {
@@ -349,7 +359,11 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 		return skip("depends on " + deps[0])
 	}
 
-	rows, timedOut, err := fr.exec(ctx, query)
+	run := query
+	if len(fr.setup.temp) > 0 {
+		run = strings.Join(fr.setup.temp, ";\n") + ";\n" + query
+	}
+	rows, timedOut, err := fr.exec(ctx, run)
 	if timedOut {
 		// Closing would block on the still-running statement, so the
 		// timed-out connection is abandoned and a fresh one opened.
@@ -371,7 +385,11 @@ func (fr *fileRunner) runCase(ctx context.Context, c compliancetest.SuiteCase) (
 			res.Score = kindScore[res.Kind]
 			return res
 		}
-		fr.setup.stmts = append(fr.setup.stmts, query)
+		if tempFuncRe.MatchString(query) {
+			fr.setup.temp = append(fr.setup.temp, strings.TrimRight(strings.TrimSpace(query), ";"))
+		} else {
+			fr.setup.stmts = append(fr.setup.stmts, query)
+		}
 		// CREATE TABLE AS SELECT reports the created rows; the driver
 		// returns none for DDL, so a successful setup counts as pass.
 		res.Status = statusPass

@@ -12,6 +12,7 @@ type (
 	analyzerKey                     struct{}
 	namePathKey                     struct{}
 	columnRefMapKey                 struct{}
+	columnIDSubstitutionKey         struct{}
 	funcMapKey                      struct{}
 	tvfMapKey                       struct{}
 	systemVarsKey                   struct{}
@@ -72,6 +73,18 @@ func namePathFromContext(ctx context.Context) *NamePath {
 
 func withNamePath(ctx context.Context, namePath *NamePath) context.Context {
 	return context.WithValue(ctx, namePathKey{}, namePath)
+}
+
+// withColumnIDSubstitution makes every ColumnRef to one of the given
+// column IDs format as the mapped SQL. Unlike the column ref map, the
+// entries are not consumed, so a column may be referenced many times.
+func withColumnIDSubstitution(ctx context.Context, m map[int32]string) context.Context {
+	return context.WithValue(ctx, columnIDSubstitutionKey{}, m)
+}
+
+func columnIDSubstitution(ctx context.Context) map[int32]string {
+	m, _ := ctx.Value(columnIDSubstitutionKey{}).(map[int32]string)
+	return m
 }
 
 func withColumnRefMap(ctx context.Context, m map[string]string) context.Context {
