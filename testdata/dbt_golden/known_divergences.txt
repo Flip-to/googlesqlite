@@ -1,0 +1,21 @@
+# Probes in probes.jsonl whose driver result does not match the recorded
+# BigQuery answer yet. Format: <probe id> <reason>. TestDBTGolden fails
+# when an unlisted probe diverges and when a listed probe matches, so
+# remove a line as soon as its probe is fixed.
+#
+# BigQuery-only restrictions: BigQuery rejects SQL that GoogleSQL (and
+# the go-googlesql analyzer) accepts; the driver returns the GoogleSQL
+# answer.
+array_agg-2494.h0 BigQuery-only restriction: a top-level result ARRAY with a NULL element is rejected when BigQuery writes the result; belongs in the emulator's output step
+array_agg_order_by-5180.h0 BigQuery-only restriction: aggregate ORDER BY ... ASC NULLS LAST is rejected
+order_by_nulls_first_last-3197.h0 BigQuery-only restriction: aggregate ORDER BY ... ASC NULLS LAST is rejected
+contains_substr-7314.10.direct BigQuery-only restriction: CONTAINS_SUBSTR with a NULL literal search value is rejected at analysis (the column form returns NULL and matches)
+contains_substr-7314.10.out BigQuery-only restriction: CONTAINS_SUBSTR with a NULL literal search value is rejected at analysis (the column form returns NULL and matches)
+count_distinct-3075.h0 BigQuery-only restriction: COUNT(DISTINCT struct) is rejected
+full_outer_join-0303.h1 BigQuery-only restriction: FULL JOIN with an UNNEST array scan is rejected
+timestamp_literal-0295.h0 BigQuery-only restriction: a TIMESTAMP literal with 9 fractional digits is rejected (the analyzer accepts nanoseconds and the driver truncates to microseconds)
+#
+# Not yet fixed.
+regexp_extract_all-1845.4.direct not yet fixed: REGEXP_EXTRACT_ALL with 2 capturing groups must error (string_functions.md, BigQuery); blocked by the non-upstream spec case testdata/specs/googlesql/functions/string/regexp_extract_all.yaml "capture-group extraction returns digits", which expects a result
+regexp_extract_all-1845.4.in not yet fixed: REGEXP_EXTRACT_ALL with 2 capturing groups must error; see regexp_extract_all-1845.4.direct
+regexp_extract_all-1845.4.out not yet fixed: REGEXP_EXTRACT_ALL with 2 capturing groups must error; see regexp_extract_all-1845.4.direct

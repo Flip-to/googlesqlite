@@ -270,6 +270,11 @@ func DistinctKey(v Value) (string, error) {
 	if iv, ok := v.(*IntervalValue); ok {
 		return "interval:" + iv.compareKey().String(), nil
 	}
+	// -0.0 and 0.0 are equal, so they are one distinct value
+	// (COUNT(DISTINCT x) over [-0.0, 0.0] is 1 in BigQuery).
+	if fv, ok := v.(FloatValue); ok && fv == 0 {
+		v = FloatValue(0)
+	}
 	s, err := v.ToString()
 	if err != nil {
 		return "", err
