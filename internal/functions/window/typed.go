@@ -150,6 +150,8 @@ type navIgnoreNullsWindow struct {
 	frame frameValues
 	kind  string // "first", "last" or "nth"
 	n     int64
+	// respectNulls counts NULL rows too (RESPECT NULLS semantics).
+	respectNulls bool
 }
 
 func NewFirstValueIgnoreNullsWindowNative() func() any {
@@ -189,6 +191,31 @@ func (a *navIgnoreNullsWindow) Step(args ...any) error {
 func (a *navIgnoreNullsWindow) Inverse(_ ...any) error { a.frame.popFront(); return nil }
 
 func (a *navIgnoreNullsWindow) Done() (any, error) {
+	if a.respectNulls {
+		vals := a.frame.values
+		var v value.Value
+		switch a.kind {
+		case "first":
+			if len(vals) == 0 {
+				return nil, nil
+			}
+			v = vals[0]
+		case "last":
+			if len(vals) == 0 {
+				return nil, nil
+			}
+			v = vals[len(vals)-1]
+		case "nth":
+			if a.n < 1 || a.n > int64(len(vals)) {
+				return nil, nil
+			}
+			v = vals[a.n-1]
+		}
+		if v == nil {
+			return nil, nil
+		}
+		return value.EncodeValue(v)
+	}
 	var found value.Value
 	var seen int64
 	for _, v := range a.frame.values {
@@ -210,4 +237,49 @@ func (a *navIgnoreNullsWindow) Done() (any, error) {
 		return value.EncodeValue(found)
 	}
 	return nil, nil
+}
+
+// countWindowNative implements COUNT(x): the number of non-NULL
+// values in the frame. It backs RANGE frames over typed keys, where
+// SQLite's built-in count cannot be used (see range_frame.go).
+type countWindowNative struct {
+	frame frameValues
+	n     int64
+}
+
+func NewCountWindowNative() func() any { return func() any { return &countWindowNative{} } }
+
+func (a *countWindowNative) Step(args ...any) error {
+	v, err := a.frame.step(args...)
+	if err != nil {
+		return err
+	}
+	if v != nil {
+		a.n++
+	}
+	return nil
+}
+
+func (a *countWindowNative) Inverse(_ ...any) error {
+	if a.frame.popFront() != nil {
+		a.n--
+	}
+	return nil
+}
+
+func (a *countWindowNative) Done() (any, error) { return a.n, nil }
+
+// NewFirstValueWindowNative, NewLastValueWindowNative and
+// NewNthValueWindowNative are the RESPECT NULLS navigation functions,
+// used where SQLite's built-ins cannot drive the frame.
+func NewFirstValueWindowNative() func() any {
+	return func() any { return &navIgnoreNullsWindow{kind: "first", respectNulls: true} }
+}
+
+func NewLastValueWindowNative() func() any {
+	return func() any { return &navIgnoreNullsWindow{kind: "last", respectNulls: true} }
+}
+
+func NewNthValueWindowNative() func() any {
+	return func() any { return &navIgnoreNullsWindow{kind: "nth", respectNulls: true} }
 }

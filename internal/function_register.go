@@ -3,12 +3,14 @@ package internal
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"sync"
 
 	"github.com/goccy/go-json"
 	sqlite3 "github.com/ncruces/go-sqlite3"
 
+	"github.com/goccy/googlesqlite/internal/functions/hll"
 	"github.com/goccy/googlesqlite/internal/functions/window"
 	"github.com/goccy/googlesqlite/internal/sqlitex"
 	"github.com/goccy/googlesqlite/internal/value"
@@ -157,6 +159,61 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		windowFuncMap["array_concat_agg"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_array_concat_agg", Func: window.NewArrayConcatAggWindowNative()},
 		}
+		// PERCENTILE_CONT / PERCENTILE_DISC as plain aggregates
+		// (aggregate_percentile_cont.test) share the window natives.
+		aggregateFuncMap["percentile_cont"] = []*nameAndFunc{
+			{Name: "googlesqlite_percentile_cont", Func: window.NewPercentileContWindowNative()},
+		}
+		aggregateFuncMap["percentile_disc"] = []*nameAndFunc{
+			{Name: "googlesqlite_percentile_disc", Func: window.NewPercentileDiscWindowNative()},
+		}
+		// HLL_COUNT.* in OVER context. The plain aggregates have no
+		// Inverse, so sqlitex.RegisterWindow wraps them in the buffered
+		// adapter that replays the active frame on each Value.
+		windowFuncMap["hll_count_init"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_hll_count_init", Func: hll.BindHllCountInit()},
+		}
+		windowFuncMap["hll_count_merge"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_hll_count_merge", Func: hll.BindHllCountMerge()},
+		}
+		windowFuncMap["hll_count_merge_partial"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_hll_count_merge_partial", Func: hll.BindHllCountMergePartial()},
+		}
+		// Inner aggregates for RANGE frames over typed ORDER BY keys
+		// (see internal/functions/window/range_frame.go) whose plain
+		// window form is a SQLite built-in.
+		windowFuncMap["count_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_count", Func: window.NewCountWindowNative()},
+		}
+		windowFuncMap["first_value_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_first_value", Func: window.NewFirstValueWindowNative()},
+		}
+		windowFuncMap["last_value_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_last_value", Func: window.NewLastValueWindowNative()},
+		}
+		windowFuncMap["nth_value_typed"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_typed_nth_value", Func: window.NewNthValueWindowNative()},
+		}
+		innerCtors := map[string]func() any{}
+		for _, values := range windowFuncMap {
+			for _, v := range values {
+				if ctor, ok := v.Func.(func() any); ok {
+					innerCtors[v.Name] = ctor
+					continue
+				}
+				// Plain aggregates (func() *T) are usable as inner
+				// functions too; they are rebuilt per frame.
+				if rv := reflect.ValueOf(v.Func); rv.Kind() == reflect.Func && rv.Type().NumIn() == 0 && rv.Type().NumOut() == 1 {
+					innerCtors[v.Name] = func() any { return rv.Call(nil)[0].Interface() }
+				}
+			}
+		}
+		windowFuncMap["range_frame"] = []*nameAndFunc{
+			{Name: "googlesqlite_window_range", Func: window.NewRangeFrameWindowNative(func(name string) (func() any, bool) {
+				ctor, ok := innerCtors[name]
+				return ctor, ok
+			})},
+		}
 	})
 	if onceErr != nil {
 		return onceErr
@@ -164,6 +221,27 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 
 	deterministic := sqlitex.FunctionFlags{Deterministic: true}
 
+	// googlesqlite_int64_sum_combine(hi, lo) rebuilds a window SUM over
+	// INT64 from the sums of the high (x >> 32) and low (x & 0xffffffff)
+	// 32-bit halves, which SQLite's sum never overflows on. Only the
+	// final total is range-checked, so intermediate overflow in a
+	// running sum is not an error (analytic_sum.test,
+	// analytic_sum_int64_overflow_3).
+	if err := sqlitex.RegisterFunc(conn, "googlesqlite_int64_sum_combine", func(hi, lo any) (any, error) {
+		h, ok1 := hi.(int64)
+		l, ok2 := lo.(int64)
+		if !ok1 || !ok2 {
+			return nil, nil
+		}
+		h += l >> 32
+		l &= 0xffffffff
+		if h > math.MaxInt32 || h < math.MinInt32 {
+			return nil, fmt.Errorf("int64 overflow: SUM result exceeds INT64 range")
+		}
+		return h<<32 | l, nil
+	}, deterministic); err != nil {
+		return err
+	}
 	if err := sqlitex.RegisterFunc(conn, "googlesqlite_decode_array", func(v any) (string, error) {
 		decoded, err := DecodeValue(v)
 		if err != nil {
@@ -242,6 +320,14 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 			// (INTERVAL 1 MONTH = INTERVAL 30 DAY); group on the
 			// normalised key. The selected column keeps its own text.
 			return value.DistinctKey(decoded)
+		case value.FloatValue:
+			// SQLite stores a NaN REAL as NULL, which would merge the
+			// NaN group into the NULL group; GoogleSQL groups all NaNs
+			// together, apart from NULL (grouping_sets_queries.test,
+			// grouping_sets_with_alias).
+			if math.IsNaN(float64(decoded.(value.FloatValue))) {
+				return "NaN", nil
+			}
 		}
 		return decoded.Interface(), nil
 	}, deterministic); err != nil {
