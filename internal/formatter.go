@@ -139,8 +139,16 @@ func formatInput(input string) (string, error) {
 
 func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode, isWindowFunc bool) (string, []string, error) {
 	args := []string{}
+	deferred := inDeferredErrorMode(ctx)
 	for _, a := range m1(node.ArgumentList()) {
-		arg, err := newNode(a).FormatSQL(ctx)
+		argCtx := ctx
+		if deferred {
+			// Deferral only chains through scalar calls that have a
+			// googlesqlite_deferred_ variant (formatter_deferred.go).
+			fc, ok := newNode(a).(*FunctionCallNode)
+			argCtx = withDeferredErrorMode(ctx, ok && functionCallDeferrable(fc.node.ResolvedFunctionCallBase))
+		}
+		arg, err := newNode(a).FormatSQL(argCtx)
 		if err != nil {
 			return "", nil, err
 		}
@@ -165,10 +173,20 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 
 	funcPrefix := "googlesqlite"
 	if m1(node.ErrorMode()) == googlesql.ResolvedFunctionCallBaseEnums_ErrorModeSafeErrorMode {
-		if !existsNormalFuncForSafe {
+		safeAggregate := (!isWindowFunc && existsAggregateFunc) || (isWindowFunc && existsWindowFunc)
+		if !existsNormalFuncForSafe && !safeAggregate {
 			return "", nil, fmt.Errorf("SAFE is not supported for function %s", funcName)
 		}
 		funcPrefix = "googlesqlite_safe"
+	} else if inSafeEvalMode(ctx) && functionCallDeferrable(node) {
+		// IFERROR / ISERROR / NULLIFERROR sub-context: an error becomes
+		// a deferred-error marker the enclosing handler detects, so a
+		// genuine NULL is not mistaken for an error (iserror.test,
+		// nested_iserror_absorbs_errors).
+		funcPrefix = "googlesqlite_deferred"
+	} else if inSafeEvalMode(ctx) && isDeferredSpecialForm(node) {
+		// IF / CASE / IFNULL / ERROR / nested IFERROR keep their
+		// special lowering (lazy branches) inside the sub-context.
 	} else if inSafeEvalMode(ctx) && existsNormalFuncForSafe {
 		// IFERROR / ISERROR / NULLIFERROR sub-context: route through the
 		// safe variant so a runtime failure folds to NULL instead of
@@ -176,6 +194,8 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 		// stay on the raising form — callers that hit them inside an
 		// error-handling expression need to use SAFE.<func> explicitly.
 		funcPrefix = "googlesqlite_safe"
+	} else if deferred && !isWindowFunc && functionCallDeferrable(node) {
+		funcPrefix = "googlesqlite_deferred"
 	}
 
 	if strings.HasPrefix(funcName, "$") {
@@ -253,7 +273,7 @@ func (n *ColumnRefNode) FormatSQL(ctx context.Context) (string, error) {
 		delete(columnMap, colName)
 		return ref, nil
 	}
-	return fmt.Sprintf("`%s`", colName), nil
+	return wrapDeferredAggColumn(ctx, colName, fmt.Sprintf("`%s`", colName)), nil
 }
 
 func (n *SystemVariableNode) FormatSQL(ctx context.Context) (string, error) {
@@ -377,6 +397,10 @@ func (n *FunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 		return n.formatEnumValueDescriptorProto(ctx, args)
 	case "googlesqlite_iferror", "googlesqlite_iserror", "googlesqlite_nulliferror":
 		return n.formatErrorHandling(ctx, funcName, args)
+	case "googlesqlite_safe_iferror", "googlesqlite_safe_iserror", "googlesqlite_safe_nulliferror":
+		// SAFE. adds nothing to functions that already absorb errors
+		// (iserror.test, safe_mode).
+		return n.formatErrorHandling(ctx, strings.Replace(funcName, "_safe_", "_", 1), args)
 	case "googlesqlite_error", "googlesqlite_safe_error":
 		return n.formatErrorBuiltin(ctx, funcName, args)
 	case "googlesqlite_ifnull":
@@ -594,11 +618,11 @@ func (n *FunctionCallNode) formatErrorHandling(ctx context.Context, funcName str
 		if len(args) < 2 {
 			return "", fmt.Errorf("IFERROR: needs catch_expression")
 		}
-		return fmt.Sprintf("CASE WHEN (%s) IS NULL THEN %s ELSE (%s) END", safeX, args[1], safeX), nil
+		return fmt.Sprintf("CASE WHEN googlesqlite_is_deferred_error(%s) THEN %s ELSE (%s) END", safeX, args[1], safeX), nil
 	case "googlesqlite_iserror":
-		return fmt.Sprintf("((%s) IS NULL)", safeX), nil
+		return fmt.Sprintf("googlesqlite_is_deferred_error(%s)", safeX), nil
 	case "googlesqlite_nulliferror":
-		return fmt.Sprintf("(%s)", safeX), nil
+		return fmt.Sprintf("googlesqlite_deferred_to_null(%s)", safeX), nil
 	}
 	return safeX, nil
 }
@@ -610,7 +634,11 @@ func (n *FunctionCallNode) formatErrorHandling(ctx context.Context, funcName str
 // raises.
 func (n *FunctionCallNode) formatErrorBuiltin(ctx context.Context, funcName string, args []string) (string, error) {
 	if inSafeEvalMode(ctx) {
-		return "NULL", nil
+		msg := "NULL"
+		if len(args) > 0 {
+			msg = args[0]
+		}
+		return fmt.Sprintf("googlesqlite_make_deferred_error(%s)", msg), nil
 	}
 	// Fall through to the default emission below.
 	funcMap := funcMapFromContext(ctx)
@@ -671,7 +699,11 @@ func (n *AggregateFunctionCallNode) formatSQL(ctx context.Context) (string, erro
 	if sql, ok, err := tryFormatMeasureAGG(ctx, n.node); ok || err != nil {
 		return sql, err
 	}
-	funcName, args, err := getFuncNameAndArgs(ctx, n.node.ResolvedFunctionCallBase, false)
+	argCtx := ctx
+	if aggregateCallDeferrable(ctx, n) {
+		argCtx = withDeferredErrorMode(ctx, true)
+	}
+	funcName, args, err := getFuncNameAndArgs(argCtx, n.node.ResolvedFunctionCallBase, false)
 	if err != nil {
 		return "", err
 	}
@@ -1262,8 +1294,8 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf(
-			"googlesqlite_cast(%s, '%s', '%s', %t)",
-			lit, encodedStrType, encodedToType, m1(n.node.ReturnNullOnError()),
+			"%s(%s, '%s', '%s', %t)",
+			castFuncName(ctx, "cast"), lit, encodedStrType, encodedToType, m1(n.node.ReturnNullOnError()),
 		), nil
 	}
 	expr, err := newNode(m1(n.node.Expr())).FormatSQL(ctx)
@@ -1286,13 +1318,13 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 			timeZoneSQL = ", " + tzSQL
 		}
 		return fmt.Sprintf(
-			"googlesqlite_cast_format(%s, %s, '%s', '%s', %t%s)",
-			expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), timeZoneSQL,
+			"%s(%s, %s, '%s', '%s', %t%s)",
+			castFuncName(ctx, "cast_format"), expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), timeZoneSQL,
 		), nil
 	}
 	castSQL := fmt.Sprintf(
-		"googlesqlite_cast(%s, '%s', '%s', %t)",
-		expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
+		"%s(%s, '%s', '%s', %t)",
+		castFuncName(ctx, "cast"), expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
 	)
 	// STRING(L) / BYTES(L) targets (possibly inside ARRAY / STRUCT)
 	// reject values longer than L; SAFE_CAST turns that into NULL.
@@ -1301,7 +1333,7 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fn := "googlesqlite_check_type_parameters"
+		fn := castFuncName(ctx, "check_type_parameters")
 		if m1(n.node.ReturnNullOnError()) {
 			fn = "googlesqlite_safe_check_type_parameters"
 		}
@@ -1328,6 +1360,14 @@ func (n *MakeStructNode) FormatSQL(ctx context.Context) (string, error) {
 		field, err := newNode(fields[i]).FormatSQL(ctx)
 		if err != nil {
 			return "", err
+		}
+		// SQLite carries a BOOL column as the integer 0/1; envelope it
+		// so the struct field keeps its BOOL type (strings.test,
+		// to_json_string_with_json_extract).
+		if ft := sf.Type_; ft != nil {
+			if isBool, _ := ft.IsBool(); isBool {
+				field = fmt.Sprintf("googlesqlite_bool_envelope(%s)", field)
+			}
 		}
 		args = append(args, field)
 	}
@@ -1681,7 +1721,7 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 			// COUNT(*) probe. Re-evaluates the inner sub-select twice
 			// — acceptable in error-handling expressions.
 			return fmt.Sprintf(
-				"(SELECT CASE WHEN (SELECT COUNT(*) FROM (%s)) = 1 THEN (%s) ELSE NULL END)",
+				"(SELECT CASE WHEN (SELECT COUNT(*) FROM (%s)) <= 1 THEN (%s) ELSE googlesqlite_make_deferred_error('Scalar subquery returned more than one row') END)",
 				sql, sql,
 			), nil
 		}
@@ -2562,7 +2602,7 @@ func (n *LimitOffsetScanNode) FormatSQL(ctx context.Context) (string, error) {
 		} else {
 			columns = append(
 				columns,
-				fmt.Sprintf("`%s`", colName),
+				projectColumnSQL(ctx, colName),
 			)
 		}
 	}
@@ -2809,6 +2849,7 @@ func (n *ProjectScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
+	ctx = withDeferredAggColumns(ctx, m1(n.node.InputScan()))
 	for _, col := range m1(n.node.ExprList()) {
 		// assign expr to columnRefMap
 		if _, err := newNode(col).FormatSQL(ctx); err != nil {
@@ -2829,7 +2870,7 @@ func (n *ProjectScanNode) FormatSQL(ctx context.Context) (string, error) {
 		} else {
 			columns = append(
 				columns,
-				fmt.Sprintf("`%s`", colName),
+				projectColumnSQL(ctx, colName),
 			)
 		}
 	}
@@ -3792,6 +3833,9 @@ func (n *AnalyticFunctionCallNode) formatInt64Sum(ctx context.Context, orderColu
 	lo, err := n.formatNative(ctx, "sum", orderColumns, false, func(a string) string { return "((" + a + ") & 4294967295)" })
 	if err != nil {
 		return "", err
+	}
+	if m1(n.node.ErrorMode()) == googlesql.ResolvedFunctionCallBaseEnums_ErrorModeSafeErrorMode {
+		return "googlesqlite_safe_int64_sum_combine(" + hi + "," + lo + ")", nil
 	}
 	return "googlesqlite_int64_sum_combine(" + hi + "," + lo + ")", nil
 }

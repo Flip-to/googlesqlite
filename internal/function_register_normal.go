@@ -679,7 +679,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "iferror", BindFunc: longtail.BindIfError},
 	{Name: "iserror", BindFunc: longtail.BindIsError},
 	{Name: "nulliferror", BindFunc: longtail.BindNullIfError},
-	{Name: "regexp_match", BindFunc: longtail.BindRegexpMatch},
+	{Name: "regexp_match", BindFunc: str.BytesAsLatin1(longtail.BindRegexpMatch)},
 	{Name: "regexp_extract_groups", BindFunc: longtail.BindRegexpExtractGroups},
 	{Name: "split_substr", BindFunc: longtail.BindSplitSubstr},
 	// `collate` is registered earlier from internal/functions/string

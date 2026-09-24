@@ -108,6 +108,9 @@ func (r *Rows) assignValue(src any, dst reflect.Value, typ *Type) error {
 		dst.Set(reflect.New(dst.Type()).Elem())
 		return nil
 	}
+	if de, ok := value.AsDeferredError(src); ok {
+		return de
+	}
 	decodedValue, err := DecodeValue(src)
 	if err != nil {
 		// SQLite TEXT-affinity columns (NUMERIC, BIGNUMERIC, DATE,

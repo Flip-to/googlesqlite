@@ -1,18 +1,76 @@
 spec: docs/specs/googlesql/functions/string/split_substr.md
 dialect: googlesql
+# Expected values follow docs/third_party/googlesql-docs/string_functions.md
+# (SPLIT_SUBSTR): without `count` the substring runs from `start_split` to
+# the end of the input (also compliance strings.test, split_substr).
 cases:
   - desc: take first part
     sql: SELECT SPLIT_SUBSTR('a,b,c,d', ',', 1)
     expected:
       rows:
-        - ['a']
+        - ['a,b,c,d']
   - desc: take second part
     sql: SELECT SPLIT_SUBSTR('a,b,c,d', ',', 2)
     expected:
       rows:
-        - ['b']
+        - ['b,c,d']
   - desc: take last part with negative index
     sql: SELECT SPLIT_SUBSTR('a,b,c,d', ',', -1)
     expected:
       rows:
         - ['d']
+  - desc: upstream example 1 (count 0)
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 0) AS example
+    expected:
+      rows:
+        - ['']
+  - desc: upstream example 2
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 2) AS example
+    expected:
+      rows:
+        - ['www.abc']
+  - desc: upstream example 3
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 1) AS example
+    expected:
+      rows:
+        - ['www']
+  - desc: upstream example 4
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", -1, 1) AS example
+    expected:
+      rows:
+        - ['com']
+  - desc: upstream example 5
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 1, 3) AS example
+    expected:
+      rows:
+        - ['www.abc.xyz']
+  - desc: upstream example 6 (start_split 0)
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 0, 3) AS example
+    expected:
+      rows:
+        - ['www.abc.xyz']
+  - desc: upstream example 7 (start_split past the end)
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 5, 3) AS example
+    expected:
+      rows:
+        - ['']
+  - desc: upstream example 8 (start_split below -splits)
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", -5, 3) AS example
+    expected:
+      rows:
+        - ['www.abc.xyz']
+  - desc: upstream example 9 (no count)
+    sql: SELECT SPLIT_SUBSTR("www.abc.xyz.com", ".", 3) AS example
+    expected:
+      rows:
+        - ['xyz.com']
+  - desc: upstream example 10 (multi-character delimiter)
+    sql: SELECT SPLIT_SUBSTR('aaa***bbb***ccc', '**', 1, 2) AS example
+    expected:
+      rows:
+        - ['aaa***bbb']
+  - desc: upstream example 11 (multi-character delimiter)
+    sql: SELECT SPLIT_SUBSTR('aaa***bbb***ccc', '**', 2, 2) AS example
+    expected:
+      rows:
+        - ['*bbb***ccc']

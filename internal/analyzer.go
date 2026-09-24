@@ -265,6 +265,12 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// flags. REGEXP_EXTRACT_GROUPS' Pipe-syntax upstream Example
 	// exercises this path.
 	googlesql.LanguageFeatureFeaturePipes,
+	// Adjacent string literals concatenate ('abc' '123' = 'abc123'),
+	// as in BigQuery (strings.test, string_literal_concat).
+	googlesql.LanguageFeatureFeatureLiteralConcatenation,
+	// LCASE / UCASE aliases of LOWER / UPPER (strings.test,
+	// strings_function_lcase; bytes.test, function_lcase).
+	googlesql.LanguageFeatureFeatureAliasesForStringAndDateFunctions,
 	// `|> IF ... ELSEIF ... ELSE ...` and `|> ASSERT ...` pipe
 	// operators. The Debug ERROR / IFERROR upstream Examples
 	// exercise the pipe-IF cascade; without these toggles the

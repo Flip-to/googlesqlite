@@ -174,6 +174,8 @@ func newSimpleCatalog(name string) *googlesql.SimpleCatalog {
 			// with collation support on.
 			googlesql.LanguageFeatureFeatureAnnotationFramework,
 			googlesql.LanguageFeatureFeatureCollationSupport,
+			// LCASE / UCASE aliases (strings.test, strings_function_lcase).
+			googlesql.LanguageFeatureFeatureAliasesForStringAndDateFunctions,
 		} {
 			_ = opts.EnableLanguageFeature(f)
 		}
@@ -186,7 +188,7 @@ func newSimpleCatalog(name string) *googlesql.SimpleCatalog {
 		if bf == nil {
 			bf = &googlesql.BuiltinFunctionOptions{LanguageOptions: opts}
 		}
-		if err := catalog.AddGoogleSQLFunctions2(bf); err != nil {
+		if err := catalog.AddBuiltinFunctionsAndTypes(bf); err != nil {
 			_ = catalog.AddGoogleSQLFunctions()
 		}
 	} else {

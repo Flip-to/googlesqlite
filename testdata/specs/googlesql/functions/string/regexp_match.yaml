@@ -1,11 +1,33 @@
 spec: docs/specs/googlesql/functions/string/regexp_match.md
 dialect: googlesql
 cases:
-  - desc: simple match
+  # REGEXP_MATCH is a full match (string_functions.md, REGEXP_MATCH), so a
+  # prefix-only pattern does not match; see also compliance strings.test,
+  # strings_function_regexp_match.
+  - desc: partial match is not a full match
     sql: SELECT REGEXP_MATCH('hello world', 'hello')
     expected:
       rows:
-        - [true]
+        - [false]
+  - desc: upstream example 1
+    sql: |-
+      WITH email_addresses AS
+        (SELECT 'foo@example.com' as email
+        UNION ALL
+        SELECT 'bar@example.org' as email
+        UNION ALL
+        SELECT 'notavalidemailaddress' as email)
+      SELECT
+        email,
+        REGEXP_MATCH(email,
+                     r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
+                     AS valid_email_address
+      FROM email_addresses
+    expected:
+      rows:
+        - ['foo@example.com', true]
+        - ['bar@example.org', true]
+        - ['notavalidemailaddress', false]
   - desc: no match
     sql: SELECT REGEXP_MATCH('hello world', '^bye')
     expected:

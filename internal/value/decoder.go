@@ -80,6 +80,10 @@ func DecodeValue(v any) (Value, error) {
 	if !ok {
 		return nil, fmt.Errorf("unexpected value type: %T", v)
 	}
+	// A deferred aggregate error is raised by whoever consumes it.
+	if de, ok := AsDeferredError(s); ok {
+		return nil, de
+	}
 	// Try the canonical base64-of-JSON envelope first. If either step
 	// fails the input is most likely a raw SQL string literal (e.g.
 	// `'int32'`, `'date'`, `'bytes'`) that the formatter inlined

@@ -225,8 +225,10 @@ func TestBindJsonExtractArray(t *testing.T) {
 		t.Fatal(err)
 	}
 	arr = mustArray(t, got)
-	if arr.Values[1] != nil {
-		t.Fatal("expected null element")
+	// A JSON null element is the string "null", not SQL NULL
+	// (compliance strings.test, json_query_array; verified against BigQuery).
+	if s, _ := arr.Values[1].ToString(); s != "null" {
+		t.Fatalf("expected \"null\" element, got %v", arr.Values[1])
 	}
 
 	// Non-array path -> NULL.

@@ -49,6 +49,15 @@ func BindString(args ...value.Value) (value.Value, error) {
 		}
 		return value.StringValue(fmt.Sprint(jsonValue.Interface())), nil
 	}
+	// STRING(DATE) is the canonical date text, as in BigQuery
+	// (date.test, date_constructor).
+	if _, ok := args[0].(value.DateValue); ok {
+		s, err := args[0].ToString()
+		if err != nil {
+			return nil, err
+		}
+		return value.StringValue(s), nil
+	}
 	t, err := args[0].ToTime()
 	if err != nil {
 		return nil, err
