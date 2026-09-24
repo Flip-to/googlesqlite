@@ -1,6 +1,7 @@
 package math
 
 import (
+	"math"
 	"math/big"
 
 	"github.com/goccy/googlesqlite/internal/value"
@@ -37,5 +38,11 @@ func SAFE_DIVIDE(x, y value.Value) (value.Value, error) {
 	if yv == 0 {
 		return nil, nil
 	}
-	return value.FloatValue(xv / yv), nil
+	q := xv / yv
+	if math.IsInf(q, 0) && !math.IsInf(xv, 0) && !math.IsInf(yv, 0) {
+		// Overflow of finite operands is an error for "/", so NULL here
+		// (arithmetic_functions.test arithmetic_functions_14_safe_divide).
+		return nil, nil
+	}
+	return value.FloatValue(q), nil
 }

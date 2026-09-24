@@ -41,10 +41,20 @@ func STRUCT_WITH_FIELD_SET(v value.Value, idx int, newValue value.Value) (value.
 }
 
 func BindStructWithFieldSet(args ...value.Value) (value.Value, error) {
-	if len(args) != 3 {
-		return nil, fmt.Errorf("googlesqlite_struct_with_field_set: expected 3 args, got %d", len(args))
+	if len(args) != 3 && len(args) != 4 {
+		return nil, fmt.Errorf("googlesqlite_struct_with_field_set: expected 3 or 4 args, got %d", len(args))
 	}
 	if args[0] == nil {
+		// The optional 4th argument names the struct type: setting a
+		// field of a NULL struct is an error
+		// (dml_update_struct.test assign_struct_field_in_null_struct).
+		if len(args) == 4 && args[3] != nil {
+			name, err := args[3].ToString()
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("Cannot set field of NULL %s", name) //nolint:staticcheck // GoogleSQL's error text
+		}
 		return nil, nil
 	}
 	idx, err := args[1].ToInt64()

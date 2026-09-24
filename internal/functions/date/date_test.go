@@ -315,8 +315,14 @@ func TestBindLastDay(t *testing.T) {
 		}
 	}
 
-	if _, err := BindLastDay(d, value.StringValue("QUARTER")); err == nil {
-		t.Fatalf("QUARTER is documented as unimplemented and should error")
+	// additional_date_time_functions.test last_day_date:
+	// LAST_DAY(DATE '2020-07-10', QUARTER) = 2020-09-30.
+	got, err := BindLastDay(value.DateValue(time.Date(2020, 7, 10, 0, 0, 0, 0, time.UTC)), value.StringValue("QUARTER"))
+	if err != nil {
+		t.Fatalf("LAST_DAY(QUARTER): %v", err)
+	}
+	if tt, _ := got.ToTime(); tt.Year() != 2020 || tt.Month() != 9 || tt.Day() != 30 {
+		t.Fatalf("QUARTER last day = %v, want 2020-09-30", tt)
 	}
 	if _, err := BindLastDay(d, value.StringValue("BAD")); err == nil {
 		t.Fatalf("invalid part should error")
