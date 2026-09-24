@@ -377,18 +377,15 @@ var boolContainerConstructors = map[string]bool{
 
 // envelopeBoolSQL wraps sql in googlesqlite_bool_envelope when t is
 // BOOL, so a column value keeps its BOOL type once it is stored inside
-// an ARRAY or STRUCT. Literals are already encoded with their type.
-func envelopeBoolSQL(expr googlesql.ResolvedExprNode, t googlesql.Googlesql_TypeNode, sql string) string {
+// an ARRAY, STRUCT or JSON value. Literals need it too: a BOOL literal
+// reaches SQLite as the integer 1/0 (JSON_OBJECT('b', true) printed
+// {"b":1}).
+func envelopeBoolSQL(_ googlesql.ResolvedExprNode, t googlesql.Googlesql_TypeNode, sql string) string {
 	if t == nil {
 		return sql
 	}
 	if isBool, _ := t.IsBool(); !isBool {
 		return sql
-	}
-	if expr != nil {
-		if _, ok := expr.(*googlesql.ResolvedLiteral); ok {
-			return sql
-		}
 	}
 	return fmt.Sprintf("googlesqlite_bool_envelope(%s)", sql)
 }
