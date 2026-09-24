@@ -1085,6 +1085,7 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 	// Collect the user-supplied value arguments (without our window
 	// option markers).
 	var valueArgs []string
+	envelopeBools := boolContainerConstructors[rawFuncName(n.node.ResolvedFunctionCallBase)]
 	for _, a := range m1(n.node.ResolvedFunctionCallBase.ArgumentList()) {
 		arg, err := newNode(a).FormatSQL(ctx)
 		if err != nil {
@@ -1092,6 +1093,9 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 		}
 		for _, w := range wrapArg {
 			arg = w(arg)
+		}
+		if envelopeBools {
+			arg = envelopeBoolSQL(a, m1(a.Type()), arg)
 		}
 		valueArgs = append(valueArgs, arg)
 	}
@@ -1332,7 +1336,7 @@ func (n *MakeStructNode) FormatSQL(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		args = append(args, field)
+		args = append(args, envelopeBoolSQL(fields[i], m1(fields[i].Type()), field))
 	}
 	return fmt.Sprintf("googlesqlite_make_struct(%s)", strings.Join(args, ",")), nil
 }
@@ -1709,7 +1713,8 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("failed to find computed column names for array subquery")
 		}
 		colName := uniqueColumnName(ctx, subCols[0])
-		return fmt.Sprintf("(SELECT googlesqlite_array(`%s`) FROM (%s))", colName, sql), nil
+		elem := envelopeBoolSQL(nil, m1(subCols[0].Type()), fmt.Sprintf("`%s`", colName))
+		return fmt.Sprintf("(SELECT googlesqlite_array(%s) FROM (%s))", elem, sql), nil
 	case googlesql.ResolvedSubqueryExprEnums_SubqueryTypeExists:
 		return fmt.Sprintf("EXISTS (%s)", sql), nil
 	case googlesql.ResolvedSubqueryExprEnums_SubqueryTypeIn:
