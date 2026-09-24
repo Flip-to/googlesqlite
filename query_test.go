@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"fmt"
 	"math"
 	"os"
 	"reflect"
@@ -7065,7 +7066,8 @@ SELECT date, EXTRACT(ISOYEAR FROM date), EXTRACT(YEAR FROM date), EXTRACT(MONTH 
 			name:  "current_time",
 			query: `SELECT CURRENT_TIME()`,
 			expectedRows: [][]any{
-				{now.Format("15:04:05.999999")},
+				// TIME text prints the fraction in groups of three digits.
+				{now.Format("15:04:05") + fractionInGroupsOf3(now.Truncate(time.Microsecond))},
 			},
 		},
 		{
@@ -8428,4 +8430,19 @@ func createTimestampFormatFromTime(t time.Time) string {
 // test data reads symmetrically with createTimestampFormatFromTime.
 func createTimestampFormatFromString(v string) string {
 	return v
+}
+
+// fractionInGroupsOf3 mirrors how BigQuery prints fractional seconds:
+// omitted when zero, else padded to 3, 6 or 9 digits.
+func fractionInGroupsOf3(t time.Time) string {
+	ns := t.Nanosecond()
+	switch {
+	case ns == 0:
+		return ""
+	case ns%1000000 == 0:
+		return fmt.Sprintf(".%03d", ns/1000000)
+	case ns%1000 == 0:
+		return fmt.Sprintf(".%06d", ns/1000)
+	}
+	return fmt.Sprintf(".%09d", ns)
 }
