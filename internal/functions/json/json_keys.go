@@ -50,42 +50,32 @@ type jsonKeysCollector struct {
 	mode     string // "" or "strict" / "lax" / "lax recursive"
 }
 
-func (c *jsonKeysCollector) walk(node any, path string, depth int, insideArray bool) {
+// walk records the keys below node. parentIsArray reports whether
+// node sits directly inside an array: "lax" mode skips arrays nested
+// directly in arrays, "lax recursive" descends through any nesting and
+// "strict" does not look inside arrays at all.
+func (c *jsonKeysCollector) walk(node any, path string, depth int, parentIsArray bool) {
 	if c.maxDepth > 0 && depth >= c.maxDepth {
 		return
 	}
 	switch v := node.(type) {
 	case map[string]any:
 		for k, child := range v {
-			// In "strict" mode, keys nested inside any array are
-			// skipped. "lax" allows a single array level; "lax
-			// recursive" allows arbitrary array nesting.
-			if insideArray {
-				switch c.mode {
-				case "", "strict":
-					// Skip — keys inside arrays are excluded.
-					continue
-				}
-			}
 			full := joinJSONKey(path, k)
 			c.seen[full] = struct{}{}
-			c.walk(child, full, depth+1, insideArray)
+			c.walk(child, full, depth+1, false)
 		}
 	case []any:
-		// Array enters; mode controls whether further nested keys
-		// are visible.
-		nextInside := true
-		if c.mode == "lax recursive" {
-			nextInside = insideArray // unchanged: stays at the same nesting level
-		}
-		// "lax" allows only a single array level: subsequent array
-		// nesting hides keys again, which we model by treating
-		// already-insideArray as a hard stop in non-recursive modes.
-		if c.mode == "lax" && insideArray {
+		switch c.mode {
+		case "", "strict":
 			return
+		case "lax":
+			if parentIsArray {
+				return
+			}
 		}
 		for _, child := range v {
-			c.walk(child, path, depth, nextInside)
+			c.walk(child, path, depth, true)
 		}
 	}
 }
@@ -149,12 +139,20 @@ func BindJsonKeys(args ...value.Value) (value.Value, error) {
 		}
 		switch v := a.(type) {
 		case value.IntValue:
+			if v <= 0 {
+				return nil, fmt.Errorf("max_depth must be positive.")
+			}
 			maxDepth = int(v)
 		case value.StringValue:
 			mode = string(v)
 		default:
 			// Unknown trailing arg; fall through.
 		}
+	}
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "strict", "lax", "lax recursive":
+	default:
+		return nil, fmt.Errorf("Invalid JSON mode specified")
 	}
 	return JSON_KEYS(jsonText, maxDepth, mode)
 }

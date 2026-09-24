@@ -846,9 +846,11 @@ func TestCollate(t *testing.T) {
 	if !equalString(got, "Hello") {
 		t.Errorf("COLLATE empty spec")
 	}
-	// COLLATE with und:ci folds to lower per the implementation.
+	// COLLATE only attaches the collation; the value is unchanged
+	// (collation.test collate_function_with_valid_second_argument:
+	// collate('abc', 'und:ci') -> "abc").
 	got, _ = strfn.BindCollate(value.StringValue("Hello"), value.StringValue("und:ci"))
-	if !equalString(got, "hello") {
+	if !equalString(got, "Hello") {
 		t.Errorf("COLLATE und:ci")
 	}
 	// COLLATE with und:cs returns as-is.

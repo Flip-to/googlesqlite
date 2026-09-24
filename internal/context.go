@@ -400,3 +400,19 @@ func sourceQueryFromContext(ctx context.Context) (string, bool) {
 	q, ok := ctx.Value(sourceQueryKey{}).(string)
 	return q, ok
 }
+
+type nestedArrayAggKey struct{}
+
+// withNestedArrayAgg marks that the expressions being formatted sit
+// inside a subquery expression, so an ARRAY_AGG result there is an
+// intermediate value. BigQuery only rejects NULL array elements when
+// the array reaches the query result, so ARRAY_AGG may keep NULLs here
+// (e.g. `x LIKE ANY UNNEST((SELECT ARRAY_AGG(y) ...))`).
+func withNestedArrayAgg(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nestedArrayAggKey{}, true)
+}
+
+func inNestedArrayAgg(ctx context.Context) bool {
+	v, _ := ctx.Value(nestedArrayAggKey{}).(bool)
+	return v
+}

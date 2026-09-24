@@ -147,6 +147,7 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 		args = append(args, arg)
 	}
 	funcName := m1(m1(node.Function()).FullName(false))
+	rawName := funcName
 	funcName = strings.Replace(funcName, ".", "_", -1)
 
 	_, existsCurrentTimeFunc := currentTimeFuncMap[funcName]
@@ -204,6 +205,12 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 		}
 		funcName = fname
 	}
+	args = envelopeJSONBoolArgs(node, rawName, args)
+	if rawName == "json_object" && firstArgIsArray(node) {
+		// JSON_OBJECT(ARRAY<STRING> keys, ARRAY<T> values).
+		funcName += "_arrays"
+	}
+	funcName, args = applyCallCollation(node, rawName, funcName, args)
 	return funcName, args, nil
 }
 
@@ -329,7 +336,7 @@ func (n *FilterFieldNode) FormatSQL(ctx context.Context) (string, error) {
 	), nil
 }
 
-func (n *FunctionCallNode) FormatSQL(ctx context.Context) (string, error) {
+func (n *FunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
@@ -643,7 +650,7 @@ func (n *FunctionCallNode) formatCaseWithValue(_ context.Context, args []string)
 	return stmt, nil
 }
 
-func (n *AggregateFunctionCallNode) FormatSQL(ctx context.Context) (string, error) {
+func (n *AggregateFunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
@@ -713,14 +720,22 @@ func (n *AggregateFunctionCallNode) FormatSQL(ctx context.Context) (string, erro
 	if spec, exists := funcMap[funcName]; exists {
 		return spec.CallSQL(ctx, n.node.ResolvedFunctionCallBase, args)
 	}
+	args = collationPackDistinctArg(n.node.ResolvedFunctionCallBase, m1(n.node.Distinct()), args)
+	if funcName == "googlesqlite_array_agg" && inNestedArrayAgg(ctx) {
+		funcName = "googlesqlite_array_agg_nullable"
+	}
 	var opts []string
 	for _, item := range m1(n.node.OrderByItemList()) {
 		columnRef := m1(item.ColumnRef())
 		colName := uniqueColumnName(ctx, m1(columnRef.Column()))
+		orderKey := fmt.Sprintf("`%s`", colName)
+		if spec := collationName(m1(item.Collation())); spec != "" {
+			orderKey = collationKeySQL(orderKey, spec)
+		}
 		if m1(item.IsDescending()) {
-			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(`%s`, false)", colName))
+			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(%s, false)", orderKey))
 		} else {
-			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(`%s`, true)", colName))
+			opts = append(opts, fmt.Sprintf("googlesqlite_order_by(%s, true)", orderKey))
 		}
 	}
 	if m1(n.node.Distinct()) {
@@ -837,7 +852,7 @@ func nativeWindowFuncForName(name string) string {
 	return ""
 }
 
-func (n *AnalyticFunctionCallNode) FormatSQL(ctx context.Context) (string, error) {
+func (n *AnalyticFunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
@@ -1042,6 +1057,9 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 			return "", err
 		}
 		valueArgs = append(valueArgs, arg)
+	}
+	if _, ok := collationSearchFuncs[rawFuncName(n.node.ResolvedFunctionCallBase)]; !ok {
+		_, valueArgs = applyCallCollation(n.node.ResolvedFunctionCallBase, rawFuncName(n.node.ResolvedFunctionCallBase), sqliteName, valueArgs)
 	}
 	if includeOpts {
 		if m1(n.node.Distinct()) {
@@ -1599,7 +1617,7 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 	}
 	columnNames := &arraySubqueryColumnNames{}
 	ctx = withArraySubqueryColumnName(ctx, columnNames)
-	sql, err := newNode(m1(n.node.Subquery())).FormatSQL(ctx)
+	sql, err := newNode(m1(n.node.Subquery())).FormatSQL(withNestedArrayAgg(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -1641,6 +1659,14 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 		// — matching BigQuery semantics. The collation attached to
 		// the LHS is inherited by the entire IN comparison per
 		// SQLite rules.
+		if spec := collationName(m1(n.node.InCollation())); spec != "" {
+			subCols := m1(m1(n.node.Subquery()).MutableColumnList())
+			if len(subCols) > 0 {
+				colName := uniqueColumnName(ctx, subCols[0])
+				return fmt.Sprintf("%s IN (SELECT %s FROM (%s))",
+					collationKeySQL(expr, spec), collationKeySQL(fmt.Sprintf("`%s`", colName), spec), sql), nil
+			}
+		}
 		if isStructTypedExpr(m1(n.node.InExpr())) {
 			return fmt.Sprintf("(%s) COLLATE googlesqlite_collate IN (%s)", expr, sql), nil
 		}
@@ -1899,6 +1925,14 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 		groupByColumns = append(groupByColumns, fmt.Sprintf("`%s`", colName))
 		groupByColumnMap[colName] = struct{}{}
 	}
+	// GROUP BY a collated column groups on its collation key; the
+	// output column keeps one of the original values.
+	groupByKeys := append([]string(nil), groupByColumns...)
+	for i, c := range m1(n.node.CollationList()) {
+		if spec := collationName(c); spec != "" && i < len(groupByKeys) {
+			groupByKeys[i] = collationKeySQL(groupByKeys[i], spec)
+		}
+	}
 	columns := []string{}
 	columnMap := columnRefMap(ctx)
 	columnNames := []string{}
@@ -2010,7 +2044,7 @@ func (n *AggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
 	var groupBy string
 	if len(groupByColumns) > 0 {
 		annotatedGroupByColumns := make([]string, 0, len(groupByColumns))
-		for _, groupByColumn := range groupByColumns {
+		for _, groupByColumn := range groupByKeys {
 			annotatedGroupByColumns = append(
 				annotatedGroupByColumns,
 				fmt.Sprintf("googlesqlite_group_by(%s)", groupByColumn),
@@ -2259,6 +2293,9 @@ func (n *SetOperationScanNode) FormatSQL(ctx context.Context) (string, error) {
 			),
 		)
 	}
+	if sql, ok := formatCollatedSetOperation(ctx, n.node, queries); ok {
+		return sql, nil
+	}
 	columnMaps := []string{}
 	if inputItems := m1(n.node.InputItemList()); len(inputItems) != 0 {
 		for idx, col := range m1(inputItems[0].OutputColumnList()) {
@@ -2319,10 +2356,14 @@ func (n *OrderByScanNode) FormatSQL(ctx context.Context) (string, error) {
 		if isFloatType(m1(m1(item.ColumnRef()).Column()).Type()) {
 			orderByColumns = append(orderByColumns, floatOrderClassKey(fmt.Sprintf("`%s`", colName), !m1(item.IsDescending())))
 		}
+		orderKey := fmt.Sprintf("`%s`", colName)
+		if spec := collationName(m1(item.Collation())); spec != "" {
+			orderKey = collationKeySQL(orderKey, spec)
+		}
 		if m1(item.IsDescending()) {
-			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate DESC", colName))
+			orderByColumns = append(orderByColumns, fmt.Sprintf("%s COLLATE googlesqlite_collate DESC", orderKey))
 		} else {
-			orderByColumns = append(orderByColumns, fmt.Sprintf("`%s` COLLATE googlesqlite_collate", colName))
+			orderByColumns = append(orderByColumns, fmt.Sprintf("%s COLLATE googlesqlite_collate", orderKey))
 		}
 	}
 	formattedInput, err := formatInput(input)
@@ -2433,8 +2474,14 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 
 		if m1(group.PartitionBy()) != nil {
 			var partitionColumns []string
-			for _, columnRef := range m1(m1(group.PartitionBy()).PartitionByList()) {
+			partitionCollations := m1(m1(group.PartitionBy()).CollationList())
+			for i, columnRef := range m1(m1(group.PartitionBy()).PartitionByList()) {
 				colName := fmt.Sprintf("`%s`", uniqueColumnName(ctx, m1(columnRef.Column())))
+				if i < len(partitionCollations) {
+					if spec := collationName(partitionCollations[i]); spec != "" {
+						colName = collationKeySQL(colName, spec)
+					}
+				}
 				partitionColumns = append(
 					partitionColumns,
 					colName,
@@ -2452,6 +2499,9 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 			for _, item := range m1(m1(group.OrderBy()).OrderByItemList()) {
 				colName := uniqueColumnName(ctx, m1(m1(item.ColumnRef()).Column()))
 				formattedColName := fmt.Sprintf("`%s`", colName)
+				if spec := collationName(m1(item.Collation())); spec != "" {
+					formattedColName = collationKeySQL(formattedColName, spec)
+				}
 				nullOrder := nullOrderUnspecified
 				switch m1(item.NullOrder()) {
 				case googlesql.ResolvedOrderByItemEnums_NullOrderModeNullsFirst:

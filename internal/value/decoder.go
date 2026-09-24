@@ -123,6 +123,8 @@ func decodeFromValueLayout(layout *ValueLayout) (Value, error) {
 		r := new(big.Rat)
 		r.SetString(layout.Body)
 		return &NumericValue{Rat: r, IsBigNumeric: true}, nil
+	case BoolValueType:
+		return BoolValue(layout.Body == "true"), nil
 	case DateValueType:
 		t, err := parseDate(layout.Body)
 		if err != nil {

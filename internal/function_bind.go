@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -49,7 +50,25 @@ var bindBool = helper.Scalar1KeepNull(func(v value.Value) (value.Value, error) {
 })
 
 var bindInt64 = helper.Scalar1KeepNull(func(v value.Value) (value.Value, error) {
-	return v, nil
+	jv, ok := v.(value.JsonValue)
+	if !ok {
+		return v, nil
+	}
+	// INT64(json_expr): a JSON number with a zero fractional part
+	// (e.g. 10.0) converts; anything else is an error
+	// (json_functions.md, INT64).
+	body := strings.TrimSpace(string(jv))
+	if body == "null" {
+		return nil, nil
+	}
+	r, ok := new(big.Rat).SetString(body)
+	if !ok || body == "" || body[0] == '"' {
+		return nil, fmt.Errorf("The provided JSON input is not an integer")
+	}
+	if !r.IsInt() || !r.Num().IsInt64() {
+		return nil, fmt.Errorf("The provided JSON number: %s cannot be converted to an integer", body)
+	}
+	return value.IntValue(r.Num().Int64()), nil
 })
 
 // bindDouble implements `FLOAT64(json_expr[, wide_number_mode])`.
@@ -101,7 +120,8 @@ func bindDouble(args ...value.Value) (value.Value, error) {
 	if mode == "exact" {
 		// Re-serialise and compare; round-trip mismatch means we
 		// lost precision.
-		if strconv.FormatFloat(f, 'g', -1, 64) != body {
+		exact, ok := new(big.Rat).SetString(body)
+		if !ok || new(big.Rat).SetFloat64(f).Cmp(exact) != 0 {
 			return nil, fmt.Errorf("FLOAT64: number %q cannot be represented as FLOAT64 without loss", body)
 		}
 	}

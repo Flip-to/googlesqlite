@@ -9,7 +9,7 @@ import (
 )
 
 func JSON_EXTRACT_ARRAY(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -50,5 +50,13 @@ var BindJsonExtractArray = helper.Scalar2(func(a, b value.Value) (value.Value, e
 	if err != nil {
 		return nil, err
 	}
-	return JSON_EXTRACT_ARRAY(v, path)
+	out, err := JSON_EXTRACT_ARRAY(v, path)
+	if err != nil || out == nil {
+		return out, err
+	}
+	if _, isJSON := a.(value.JsonValue); isJSON {
+		// For JSON input a JSON null element stays JSON 'null'.
+		keepJSONNullElements(out)
+	}
+	return out, nil
 })

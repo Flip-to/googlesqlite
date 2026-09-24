@@ -1,36 +1,32 @@
 package json
 
 import (
-	"fmt"
 
-	"github.com/goccy/go-json"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
 func JSON_SUBSCRIPT(v string, field value.Value) (value.Value, error) {
-	var path *json.Path
+	var path *gsqlPath
 	switch field.(type) {
 	case value.IntValue:
 		index, err := field.ToInt64()
 		if err != nil {
 			return nil, err
 		}
-		p, err := json.CreatePath(fmt.Sprintf(`$[%d]`, index))
-		if err != nil {
-			return nil, err
+		if index < 0 {
+			return nil, nil
 		}
-		path = p
+		path = &gsqlPath{steps: []pathStep{{index: int(index), isIndex: true}}}
 	case value.StringValue:
 		name, err := field.ToString()
 		if err != nil {
 			return nil, err
 		}
-		p, err := json.CreatePath(fmt.Sprintf(`$.%q`, name))
-		if err != nil {
-			return nil, err
-		}
-		path = p
+		path = &gsqlPath{steps: []pathStep{{name: name}}}
+	}
+	if path == nil {
+		return nil, nil
 	}
 	extracted, err := path.Extract([]byte(v))
 	if err != nil {

@@ -87,7 +87,6 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureV12SafeFunctionCall,
 	googlesql.LanguageFeatureFeatureJsonType,
 	googlesql.LanguageFeatureFeatureJsonArrayFunctions,
-	googlesql.LanguageFeatureFeatureJsonStrictNumberParsing,
 	googlesql.LanguageFeatureFeatureV13IsDistinct,
 	googlesql.LanguageFeatureFeatureV13FormatInCast,
 	googlesql.LanguageFeatureFeatureV13DateArithmetics,
@@ -192,6 +191,17 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// appears in a query.
 	googlesql.LanguageFeatureFeatureInlineLambdaArgument,
 	googlesql.LanguageFeatureFeatureLikeAnySomeAll,
+	// LIKE ANY|SOME|ALL UNNEST(array) and LIKE ANY|SOME|ALL (subquery).
+	// Both are lowered by ResolvedASTRewriteRewriteLikeAnyAll.
+	googlesql.LanguageFeatureFeatureLikeAnySomeAllArray,
+	googlesql.LanguageFeatureFeatureLikeAnySomeAllSubquery,
+	// Collation: the analyzer propagates `und:ci` annotations onto
+	// expression types and ResolvedFunctionCall.collation_list; the
+	// formatter lowers collation-sensitive calls to collation-aware
+	// runtime functions.
+	googlesql.LanguageFeatureFeatureAnnotationFramework,
+	googlesql.LanguageFeatureFeatureCollationSupport,
+	googlesql.LanguageFeatureFeatureCollationInExplicitCast,
 	// Anonymization / Differential Privacy syntax gates. The
 	// analyzer-side rewriter
 	// (ResolvedASTRewriteRewriteAnonymization) is enabled above;

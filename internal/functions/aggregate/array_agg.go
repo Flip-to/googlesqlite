@@ -12,10 +12,13 @@ type ARRAY_AGG struct {
 	once   sync.Once
 	opt    *helper.Option
 	values []*helper.OrderedValue
+	// allowNull keeps NULL inputs (intermediate arrays); the default
+	// rejects them as BigQuery does for arrays in the query result.
+	allowNull bool
 }
 
 func (f *ARRAY_AGG) Step(v value.Value, opt *helper.Option) error {
-	if v == nil {
+	if v == nil && !f.allowNull {
 		return fmt.Errorf("ARRAY_AGG: input value must be not null")
 	}
 	f.once.Do(func() { f.opt = opt })
