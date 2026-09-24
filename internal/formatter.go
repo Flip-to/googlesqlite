@@ -1677,7 +1677,10 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 		// — matching BigQuery semantics. The collation attached to
 		// the LHS is inherited by the entire IN comparison per
 		// SQLite rules.
-		if isStructTypedExpr(m1(n.node.InExpr())) {
+		// INTERVAL values that are equal can be encoded differently
+		// (INTERVAL 1 MONTH = INTERVAL 30 DAY), so they take the same
+		// decoding comparison.
+		if inExpr := m1(n.node.InExpr()); isStructTypedExpr(inExpr) || isIntervalType(inExpr.Type()) {
 			return fmt.Sprintf("(%s) COLLATE googlesqlite_collate IN (%s)", expr, sql), nil
 		}
 		return fmt.Sprintf("%s IN (%s)", expr, sql), nil
@@ -2558,9 +2561,16 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 			var partitionColumns []string
 			for _, columnRef := range m1(m1(group.PartitionBy()).PartitionByList()) {
 				colName := fmt.Sprintf("`%s`", uniqueColumnName(ctx, m1(columnRef.Column())))
+				partitionColumn := colName
+				if isIntervalType(m1(columnRef.Column()).Type()) {
+					// Equal intervals can be written differently
+					// (INTERVAL 1 MONTH = INTERVAL 30 DAY), so
+					// partition on the normalised key.
+					partitionColumn = fmt.Sprintf("googlesqlite_group_by(%s)", colName)
+				}
 				partitionColumns = append(
 					partitionColumns,
-					colName,
+					partitionColumn,
 				)
 				order := &analyticOrderBy{
 					column: colName,
@@ -3435,6 +3445,10 @@ func (n *ArgumentRefNode) FormatSQL(ctx context.Context) (string, error) {
 }
 
 // isFloatType reports whether t is DOUBLE or FLOAT.
+func isIntervalType(t googlesql.Googlesql_TypeNode, _ error) bool {
+	return t != nil && m1(t.Kind()) == googlesql.TypeKindTypeInterval
+}
+
 func isFloatType(t googlesql.Googlesql_TypeNode, _ error) bool {
 	if t == nil {
 		return false

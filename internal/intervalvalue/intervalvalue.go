@@ -282,20 +282,23 @@ func (iv *IntervalValue) Canonicalize() *IntervalValue {
 
 	// No canonicalization for the Days part.
 
-	// canonicalize time part by switching to Nanos.
-	totalNanos := int64(iv.Hours)*3600*1e9 +
-		int64(iv.Minutes)*60*1e9 +
-		int64(iv.Seconds)*1e9 +
-		int64(iv.SubSecondNanos)
-
-	// Reduce to parts.
-	newIV.Hours = int32(totalNanos / 60 / 60 / 1e9)
-	totalNanos = totalNanos - (int64(newIV.Hours) * 3600 * 1e9)
-	newIV.Minutes = int32(totalNanos / 60 / 1e9)
-	totalNanos = totalNanos - (int64(newIV.Minutes) * 60 * 1e9)
-	newIV.Seconds = int32(totalNanos / 1e9)
-	totalNanos = totalNanos - (int64(newIV.Seconds) * 1e9)
-	newIV.SubSecondNanos = int32(totalNanos)
+	// Canonicalize the time part through whole seconds plus a sub-second
+	// remainder: the total in nanoseconds can exceed int64.
+	secs := (int64(iv.Hours)*60+int64(iv.Minutes))*60 + int64(iv.Seconds)
+	sub := int64(iv.SubSecondNanos)
+	secs += sub / 1e9
+	sub %= 1e9
+	if secs > 0 && sub < 0 {
+		secs--
+		sub += 1e9
+	} else if secs < 0 && sub > 0 {
+		secs++
+		sub -= 1e9
+	}
+	newIV.Hours = int32(secs / 3600)
+	newIV.Minutes = int32(secs / 60 % 60)
+	newIV.Seconds = int32(secs % 60)
+	newIV.SubSecondNanos = int32(sub)
 	return newIV
 }
 

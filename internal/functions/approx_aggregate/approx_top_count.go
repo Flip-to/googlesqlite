@@ -11,22 +11,30 @@ import (
 
 type APPROX_TOP_COUNT struct {
 	once     sync.Once
-	valueMap map[value.Value]*value.StructValue
+	valueMap map[string]*value.StructValue
 	num      int64
 }
 
 func (f *APPROX_TOP_COUNT) Step(v value.Value, num int64, opt *helper.Option) error {
 	f.once.Do(func() {
-		f.valueMap = map[value.Value]*value.StructValue{}
+		f.valueMap = map[string]*value.StructValue{}
 		f.num = num
 	})
-	val, exists := f.valueMap[v]
+	key := "null"
+	if v != nil {
+		k, err := value.DistinctKey(v)
+		if err != nil {
+			return err
+		}
+		key = k
+	}
+	val, exists := f.valueMap[key]
 	if exists {
 		cur, _ := val.Values[1].ToInt64()
 		val.Values[1] = value.IntValue(cur + 1)
 		val.M["count"] = value.IntValue(cur + 1)
 	} else {
-		f.valueMap[v] = &value.StructValue{
+		f.valueMap[key] = &value.StructValue{
 			Keys:   []string{"value", "count"},
 			Values: []value.Value{v, value.IntValue(1)},
 			M: map[string]value.Value{
