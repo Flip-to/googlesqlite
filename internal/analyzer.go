@@ -139,10 +139,6 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureCreateTableFunction,
 	// CREATE [TEMP] AGGREGATE FUNCTION (SQL user-defined aggregates).
 	googlesql.LanguageFeatureFeatureCreateAggregateFunction,
-	// Set operations matching columns BY NAME / CORRESPONDING.
-	googlesql.LanguageFeatureFeatureByName,
-	googlesql.LanguageFeatureFeatureCorresponding,
-	googlesql.LanguageFeatureFeatureCorrespondingFull,
 	googlesql.LanguageFeatureFeatureOmitInsertColumnList,
 	googlesql.LanguageFeatureFeatureTokenizedSearch,
 	// Permits ResolvedArgumentRef inside JSON_VALUE / JSON_QUERY
