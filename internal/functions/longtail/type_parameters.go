@@ -129,7 +129,7 @@ func applyNumericTypeParams(n *value.NumericValue, spec *TypeParamSpec) (value.V
 		}
 	}
 	r := new(big.Rat).SetFrac(q, pow)
-	if n.Rat.Sign() < 0 {
+	if n.Sign() < 0 {
 		r.Neg(r)
 	}
 	return &value.NumericValue{Rat: r, IsBigNumeric: n.IsBigNumeric}, nil

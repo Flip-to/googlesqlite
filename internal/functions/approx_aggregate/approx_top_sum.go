@@ -18,7 +18,7 @@ type APPROX_TOP_SUM struct {
 
 func (f *APPROX_TOP_SUM) Step(v, weight value.Value, num int64, opt *helper.Option) error {
 	if num > maxApproxTopNumber {
-		return fmt.Errorf("The second argument to APPROX_TOP_SUM function cannot be greater than %d", maxApproxTopNumber)
+		return fmt.Errorf("The second argument to APPROX_TOP_SUM function cannot be greater than %d", maxApproxTopNumber) //nolint:staticcheck // BigQuery's error text
 	}
 	f.once.Do(func() {
 		f.valueMap = map[value.Value]*value.StructValue{}

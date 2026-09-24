@@ -198,7 +198,7 @@ func checkPrecision(v value.Value) error {
 		return err
 	}
 	if n < 1 || n > maxInvEps {
-		return fmt.Errorf("KLL failed: Provided inv_eps:%d but inv_eps needs to be >= 1 and <= %d.", n, maxInvEps)
+		return fmt.Errorf("KLL failed: Provided inv_eps:%d but inv_eps needs to be >= 1 and <= %d.", n, maxInvEps) //nolint:staticcheck // BigQuery's error text
 	}
 	return nil
 }

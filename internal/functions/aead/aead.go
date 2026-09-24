@@ -139,7 +139,7 @@ func (d *keyData) marshal() []byte {
 	return b
 }
 
-var errInvalidKeyset = errors.New("Invalid keyset")
+var errInvalidKeyset = errors.New("Invalid keyset") //nolint:staticcheck // BigQuery's error text
 
 // walkMessage calls fn for every field of a serialized message. fn
 // receives either a varint (for VarintType) or the field bytes (for
@@ -275,17 +275,17 @@ func keyProto(typeURL string, raw []byte) []byte {
 // at least one key, and a primary key id that names one of them.
 func loadKeyset(b []byte) (*keyset, error) {
 	if len(b) == 0 {
-		return nil, errors.New("Invalid keyset: keyset is empty")
+		return nil, errors.New("Invalid keyset: keyset is empty") //nolint:staticcheck // BigQuery's error text
 	}
 	ks, err := unmarshalKeyset(b)
 	if err != nil {
 		return nil, err
 	}
 	if len(ks.Keys) == 0 {
-		return nil, errors.New("Invalid keyset: keyset has no keys")
+		return nil, errors.New("Invalid keyset: keyset has no keys") //nolint:staticcheck // BigQuery's error text
 	}
 	if ks.primary() == nil {
-		return nil, errors.New("Invalid keyset: keyset has no primary key")
+		return nil, errors.New("Invalid keyset: keyset has no primary key") //nolint:staticcheck // BigQuery's error text
 	}
 	return ks, nil
 }
@@ -334,7 +334,7 @@ func (ks *keyset) addGeneratedKey(keyType string) error {
 	case algAESSIVDET:
 		typeURL, size = typeURLAESSIV, 64
 	default:
-		return fmt.Errorf("Unsupported key type: %s", keyType)
+		return fmt.Errorf("Unsupported key type: %s", keyType) //nolint:staticcheck // BigQuery's error text
 	}
 	raw := make([]byte, size)
 	if _, err := rand.Read(raw); err != nil {
@@ -441,15 +441,15 @@ func BindKeysAddKeyFromRawBytes(args ...value.Value) (value.Value, error) {
 	case "AES_GCM":
 		typeURL = typeURLAESGCM
 		if len(raw) != 16 && len(raw) != 32 {
-			return nil, fmt.Errorf("Failed to add a key from raw bytes: Unsupported key size: %d bytes; expected 16 or 32 bytes.", len(raw))
+			return nil, fmt.Errorf("Failed to add a key from raw bytes: Unsupported key size: %d bytes; expected 16 or 32 bytes.", len(raw)) //nolint:staticcheck // BigQuery's error text
 		}
 	case "AES_CBC_PKCS":
 		typeURL = typeURLAESCBCPKCS
 		if len(raw) != 16 && len(raw) != 24 && len(raw) != 32 {
-			return nil, fmt.Errorf("Failed to add a key from raw bytes: Unsupported key size: %d bytes; expected 16, 24, or 32 bytes.", len(raw))
+			return nil, fmt.Errorf("Failed to add a key from raw bytes: Unsupported key size: %d bytes; expected 16, 24, or 32 bytes.", len(raw)) //nolint:staticcheck // BigQuery's error text
 		}
 	default:
-		return nil, fmt.Errorf("Invalid key type provided to KEYS.ADD_KEY_FROM_RAW_BYTES: %s", keyType)
+		return nil, fmt.Errorf("Invalid key type provided to KEYS.ADD_KEY_FROM_RAW_BYTES: %s", keyType) //nolint:staticcheck // BigQuery's error text
 	}
 	ks, err := loadKeyset(ksBytes)
 	if err != nil {
@@ -582,11 +582,11 @@ func enumFromJSON(names map[int64]string, raw json.RawMessage) (int64, error) {
 				return k, nil
 			}
 		}
-		return 0, fmt.Errorf("Invalid keyset JSON: unknown enum value %q", s)
+		return 0, fmt.Errorf("Invalid keyset JSON: unknown enum value %q", s) //nolint:staticcheck // BigQuery's error text
 	}
 	var n int64
 	if err := json.Unmarshal(raw, &n); err != nil {
-		return 0, fmt.Errorf("Invalid keyset JSON: %w", err)
+		return 0, fmt.Errorf("Invalid keyset JSON: %w", err) //nolint:staticcheck // BigQuery's error text
 	}
 	return n, nil
 }
@@ -618,7 +618,7 @@ func parseKeysetJSON(b []byte) (*keyset, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	if err := dec.Decode(&top); err != nil {
-		return nil, fmt.Errorf("Invalid keyset JSON: %w", err)
+		return nil, fmt.Errorf("Invalid keyset JSON: %w", err) //nolint:staticcheck // BigQuery's error text
 	}
 	ks := &keyset{}
 	if top.PrimaryKeyID != nil {
@@ -642,7 +642,7 @@ func parseKeysetJSON(b []byte) (*keyset, error) {
 					KeyMaterialType json.RawMessage `json:"keyMaterialType"`
 				}
 				if err = json.Unmarshal(raw, &d); err != nil {
-					return nil, fmt.Errorf("Invalid keyset JSON: %w", err)
+					return nil, fmt.Errorf("Invalid keyset JSON: %w", err) //nolint:staticcheck // BigQuery's error text
 				}
 				k.Data = &keyData{TypeURL: d.TypeURL, Value: d.Value}
 				if len(d.KeyMaterialType) > 0 {
@@ -653,7 +653,7 @@ func parseKeysetJSON(b []byte) (*keyset, error) {
 			case "keyId":
 				var id uint32
 				if err = json.Unmarshal(raw, &id); err != nil {
-					return nil, fmt.Errorf("Invalid keyset JSON: %w", err)
+					return nil, fmt.Errorf("Invalid keyset JSON: %w", err) //nolint:staticcheck // BigQuery's error text
 				}
 				k.KeyID = id
 			case "status":
@@ -665,7 +665,7 @@ func parseKeysetJSON(b []byte) (*keyset, error) {
 					return nil, err
 				}
 			default:
-				return nil, fmt.Errorf("Invalid keyset JSON: unknown field %q", name)
+				return nil, fmt.Errorf("Invalid keyset JSON: unknown field %q", name) //nolint:staticcheck // BigQuery's error text
 			}
 		}
 		ks.Keys = append(ks.Keys, k)

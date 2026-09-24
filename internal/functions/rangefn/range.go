@@ -48,7 +48,7 @@ func RANGE(start, end value.Value) (value.Value, error) {
 			return nil, err
 		}
 		if !lt {
-			return nil, fmt.Errorf("Range start element must be smaller than range end element")
+			return nil, fmt.Errorf("Range start element must be smaller than range end element") //nolint:staticcheck // BigQuery's error text
 		}
 	}
 	return &value.RangeValue{

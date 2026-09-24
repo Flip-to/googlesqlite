@@ -22,7 +22,7 @@ type APPROX_TOP_COUNT struct {
 
 func (f *APPROX_TOP_COUNT) Step(v value.Value, num int64, opt *helper.Option) error {
 	if num > maxApproxTopNumber {
-		return fmt.Errorf("The second argument to APPROX_TOP_COUNT function cannot be greater than %d", maxApproxTopNumber)
+		return fmt.Errorf("The second argument to APPROX_TOP_COUNT function cannot be greater than %d", maxApproxTopNumber) //nolint:staticcheck // BigQuery's error text
 	}
 	f.once.Do(func() {
 		f.valueMap = map[string]*value.StructValue{}
