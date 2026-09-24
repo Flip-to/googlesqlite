@@ -159,6 +159,23 @@ func init() {
 // internal GoogleSQL product mode (BigQuery runs PRODUCT_EXTERNAL).
 var nonBigQueryTypeRe = regexp.MustCompile(`(?i)\b(INT32|UINT32|UINT64|FLOAT32|PROTO|ENUM|UUID|MAP|GRAPH_ELEMENT|GRAPH_PATH|TOKENLIST)\s*<|(?i)\b(INT32|UINT32|UINT64|FLOAT32|UUID|TOKENLIST|FLOAT)\b|googlesql_test\.`)
 
+// nonBigQueryFunctions matches function calls the GoogleSQL reference
+// implements but BigQuery rejects, each checked against BigQuery:
+//   - ELEMENTWISE_SUM / ELEMENTWISE_AVG: "elementwise_avg aggregate
+//     function is not supported"; absent from the BigQuery reference.
+//   - KLL_QUANTILES.MERGE_UINT64: "Function not found" (BigQuery has
+//     no UINT64 type).
+//   - KLL_QUANTILES.* with OVER: "Analytic function INIT_INT64 is not
+//     supported" (likewise MERGE_*).
+var nonBigQueryFunctions = []struct {
+	re     *regexp.Regexp
+	reason string
+}{
+	{regexp.MustCompile(`(?i)\bELEMENTWISE_(SUM|AVG)\s*\(`), "ELEMENTWISE_SUM / ELEMENTWISE_AVG"},
+	{regexp.MustCompile(`(?i)\bKLL_QUANTILES\.MERGE_UINT64\b`), "KLL_QUANTILES.MERGE_UINT64"},
+	{regexp.MustCompile(`(?is)\bKLL_QUANTILES\.\w+\s*\((?:[^()]|\([^()]*\))*\)\s*OVER\b`), "KLL_QUANTILES.* as an analytic function"},
+}
+
 // SkipReason returns a non-empty skip reason when the case should not
 // run against a BigQuery-dialect emulator.
 func SkipReason(features, forbidden []string, sql, expectedHeader string) string {
@@ -192,6 +209,12 @@ func SkipReason(features, forbidden []string, sql, expectedHeader string) string
 	if m := nonBigQueryTypeRe.FindString(stripStringLiterals(sql)); m != "" {
 		return "non-BigQuery type in SQL: " + strings.TrimSpace(strings.TrimRight(m, "<"))
 	}
+	stripped := stripStringLiterals(sql)
+	for _, f := range nonBigQueryFunctions {
+		if f.re.MatchString(stripped) {
+			return "function not in BigQuery: " + f.reason
+		}
+	}
 	return ""
 }
 
@@ -220,4 +243,23 @@ func stripStringLiterals(s string) string {
 		b.WriteByte(c)
 	}
 	return b.String()
+}
+
+// BigQueryDivergentCases lists individual cases ("file.test/name")
+// whose expected result is the reference implementation's but which
+// BigQuery itself rejects or answers differently. Each entry records
+// the observed BigQuery behavior; these are skipped, not weakened.
+var BigQueryDivergentCases = map[string]string{
+	// BigQuery: "Argument 2 to KLL_QUANTILES.INIT_INT64 must be
+	// non-NULL" (analysis error); the reference returns NULL.
+	"kll_quantiles_init.test/init_int64_null_precision_input_precision":  "BigQuery rejects a NULL precision argument at analysis time",
+	"kll_quantiles_init.test/init_double_null_precision_input_precision": "BigQuery rejects a NULL precision argument at analysis time",
+}
+
+// CaseSkipReason returns the recorded BigQuery divergence for a case.
+func CaseSkipReason(file, name string) string {
+	if r, ok := BigQueryDivergentCases[file+"/"+name]; ok {
+		return "BigQuery divergence: " + r
+	}
+	return ""
 }

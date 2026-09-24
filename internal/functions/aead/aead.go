@@ -29,6 +29,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 
@@ -63,8 +64,16 @@ func loadKeyset(b []byte) (*keyset, error) {
 		return nil, errors.New("keyset is empty")
 	}
 	var ks keyset
-	if err := json.Unmarshal(b, &ks); err != nil {
-		return nil, fmt.Errorf("keyset parse: %w", err)
+	if b[0] == '{' {
+		if err := json.Unmarshal(b, &ks); err != nil {
+			return nil, fmt.Errorf("keyset parse: %w", err)
+		}
+	} else {
+		parsed, err := parseBinaryKeyset(b)
+		if err != nil {
+			return nil, err
+		}
+		ks = *parsed
 	}
 	if len(ks.Keys) == 0 {
 		return nil, errors.New("keyset has no keys")
@@ -96,6 +105,15 @@ func decodeKey(k *keysetKey) ([]byte, error) {
 		return nil, fmt.Errorf("key base64: %w", err)
 	}
 	return raw, nil
+}
+
+// splitSIVKey returns the MAC and encryption halves of a 64-byte
+// AES-SIV key (Tink AesSivKey); shorter keys serve both roles.
+func splitSIVKey(key []byte) (macKey, encKey []byte) {
+	if len(key) == 2*gcmKeySize {
+		return key[:gcmKeySize], key[gcmKeySize:]
+	}
+	return key, key
 }
 
 func generateAESGCMKey() ([]byte, error) {
@@ -475,12 +493,13 @@ func BindDeterministicEncrypt(args ...value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	mac := hmac.New(sha256.New, key)
+	macKey, encKey := splitSIVKey(key)
+	mac := hmac.New(sha256.New, macKey)
 	_, _ = mac.Write(aad)
 	_, _ = mac.Write(plaintext)
 	digest := mac.Sum(nil)
 	nonce := digest[:gcmNonceSize]
-	block, err := aes.NewCipher(key)
+	block, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, err
 	}
@@ -536,7 +555,8 @@ func decryptCommon(name string, args []value.Value) ([]byte, error) {
 	}
 	nonce := ct[tinkPrefixSize : tinkPrefixSize+gcmNonceSize]
 	body := ct[tinkPrefixSize+gcmNonceSize:]
-	block, err := aes.NewCipher(key)
+	_, encKey := splitSIVKey(key)
+	block, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, err
 	}
@@ -544,7 +564,9 @@ func decryptCommon(name string, args []value.Value) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := gcm.Open(nil, nonce, body, aad)
+	// Non-nil destination so an empty plaintext stays distinguishable
+	// from NULL (aead.test encrypt_decrypt_roundtrip, pt_id 3).
+	out, err := gcm.Open(make([]byte, 0, len(body)), nonce, body, aad)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
@@ -572,6 +594,9 @@ func BindAeadDecryptString(args ...value.Value) (value.Value, error) {
 	if out == nil {
 		return nil, nil
 	}
+	if !utf8.Valid(out) {
+		return nil, fmt.Errorf("AEAD.DECRYPT_STRING failed: Decrypted plaintext is not a valid UTF-8 string. To decrypt to BYTES, use AEAD.DECRYPT_BYTES")
+	}
 	return value.StringValue(string(out)), nil
 }
 
@@ -595,6 +620,9 @@ func BindDeterministicDecryptString(args ...value.Value) (value.Value, error) {
 	}
 	if out == nil {
 		return nil, nil
+	}
+	if !utf8.Valid(out) {
+		return nil, fmt.Errorf("DETERMINISTIC_DECRYPT_STRING failed: Decrypted plaintext is not a valid UTF-8 string. To decrypt to BYTES, use DETERMINISTIC_DECRYPT_BYTES")
 	}
 	return value.StringValue(string(out)), nil
 }
