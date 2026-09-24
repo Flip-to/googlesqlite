@@ -2024,6 +2024,16 @@ func (c *Catalog) DeleteFunctionSpec(ctx context.Context, conn *Conn, name strin
 	return nil
 }
 
+// tableHasPrimaryKey reports whether the table the analyzer resolved
+// was declared with a PRIMARY KEY.
+func (c *Catalog) tableHasPrimaryKey(table googlesql.TableNode) bool {
+	name := c.StorageNameForTable(table)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	spec, ok := c.tableMap[name]
+	return ok && len(spec.PrimaryKey) > 0
+}
+
 func (c *Catalog) hasTableSpec(name string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

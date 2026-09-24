@@ -2422,12 +2422,11 @@ func (a *Analyzer) newDMLStmtAction(ctx context.Context, query string, args []dr
 	// target InsertColumnList types so sparse Go maps expand to match
 	// the declared STRUCT field order. See reshapeInsertArgs.
 	args = reshapeInsertArgs(args, node)
-	if insert, ok := node.(*googlesql.ResolvedInsertStmt); ok {
+	if insert, ok := node.(*googlesql.ResolvedInsertStmt); ok && !a.catalog.tableHasPrimaryKey(m1(m1(insert.TableScan()).Table())) {
 		// INSERT OR IGNORE / REPLACE / UPDATE resolve conflicts on the
-		// primary key. googlesqlite tables never carry an enforced
-		// primary key (BigQuery primary keys are NOT ENFORCED), so every
-		// such insert fails the way GoogleSQL prescribes for a table
-		// without one (compliance dml_insert.test).
+		// primary key, so on a table without one they fail the way
+		// GoogleSQL prescribes (compliance dml_insert.test,
+		// dml_value_table.test).
 		switch mode, _ := insert.InsertMode(); mode {
 		case googlesql.ResolvedInsertStmtEnums_InsertModeOrIgnore:
 			return nil, fmt.Errorf("INSERT OR IGNORE is not allowed because the table does not have a primary key")
