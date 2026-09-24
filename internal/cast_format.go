@@ -82,7 +82,16 @@ func bindCastFormat(args ...value.Value) (value.Value, error) {
 				}
 				t = t.In(loc)
 			}
-			s, err := formatDateTimeElements(t, rawFormat)
+			typeName := "TIMESTAMP"
+			switch v.(type) {
+			case value.DateValue:
+				typeName = "DATE"
+			case value.DatetimeValue:
+				typeName = "DATETIME"
+			case value.TimeValue:
+				typeName = "TIME"
+			}
+			s, err := formatDateTimeElements(t, rawFormat, typeName)
 			if err != nil {
 				return fail(err)
 			}

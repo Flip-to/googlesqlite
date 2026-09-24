@@ -1,9 +1,9 @@
 package helper
 
 import (
-	"strings"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/goccy/googlesqlite/internal/value"
 )
@@ -24,14 +24,25 @@ type Aggregator struct {
 	distinctNil bool
 	// having buffers rows while a HAVING MAX / HAVING MIN modifier is
 	// in effect; only rows at the extreme key reach step, at Done.
-	having      []havingRow
-	step        func([]value.Value, *Option) error
-	done        func() (value.Value, error)
+	having []havingRow
+	step   func([]value.Value, *Option) error
+	done   func() (value.Value, error)
+	// deferred holds the first deferred error seen in an argument
+	// (see value.DeferredError); the aggregate then yields it as its
+	// result instead of raising.
+	deferred error
 }
 
 func (a *Aggregator) Step(stepArgs ...any) error {
+	if a.deferred != nil {
+		return nil
+	}
 	values, err := value.ConvertArgs(stepArgs...)
 	if err != nil {
+		if value.IsDeferredError(err) {
+			a.deferred = err
+			return nil
+		}
 		return err
 	}
 	values, opt := ParseOptions(values...)
@@ -108,6 +119,9 @@ func splitCollationPacked(s string) (key, orig string) {
 }
 
 func (a *Aggregator) Done() (any, error) {
+	if a.deferred != nil {
+		return value.EncodeDeferredError(a.deferred), nil
+	}
 	if err := a.replayHaving(); err != nil {
 		return nil, err
 	}

@@ -205,14 +205,15 @@ func TestCHR(t *testing.T) {
 	if s, _ := got.ToString(); s != "A" {
 		t.Fatalf("CHR(65): got %q, want \"A\"", s)
 	}
-	// CHR(0) -> '' per the BQ docs (the null code point produces an
-	// empty STRING).
+	// CHR(0) is the NUL character: real BigQuery returns a 1-character
+	// string (TO_HEX(CAST(CHR(0) AS BYTES)) = '00'), as does
+	// strings.test strings_function_chr, although the docs say ''.
 	got, err = strfn.BindChr(value.IntValue(0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s, _ := got.ToString(); s != "" {
-		t.Fatalf("CHR(0): got %q, want \"\"", s)
+	if s, _ := got.ToString(); s != "\x00" {
+		t.Fatalf("CHR(0): got %q, want %q", s, "\x00")
 	}
 }
 

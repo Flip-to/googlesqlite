@@ -102,8 +102,10 @@ func BindRangeIntersect(args ...value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Non-overlapping inputs are an error (range-functions.md,
+	// RANGE_INTERSECT); SAFE.RANGE_INTERSECT turns it into NULL.
 	if ov, ok := overlap.(value.BoolValue); !ok || !bool(ov) {
-		return nil, nil
+		return nil, fmt.Errorf("Provided RANGE inputs do not overlap. Please check RANGE_OVERLAPS before calling RANGE_INTERSECT") //nolint:staticcheck // BigQuery's error text
 	}
 	start := maxBound(a.Start, b.Start, true)
 	end := minBound(a.End, b.End, false)

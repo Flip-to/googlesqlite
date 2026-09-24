@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	googlesql "github.com/goccy/go-googlesql"
 	"github.com/goccy/go-json"
@@ -139,8 +140,16 @@ func formatInput(input string) (string, error) {
 
 func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode, isWindowFunc bool) (string, []string, error) {
 	args := []string{}
+	deferred := inDeferredErrorMode(ctx)
 	for _, a := range m1(node.ArgumentList()) {
-		arg, err := newNode(a).FormatSQL(ctx)
+		argCtx := ctx
+		if deferred {
+			// Deferral only chains through scalar calls that have a
+			// googlesqlite_deferred_ variant (formatter_deferred.go).
+			fc, ok := newNode(a).(*FunctionCallNode)
+			argCtx = withDeferredErrorMode(ctx, ok && functionCallDeferrable(fc.node.ResolvedFunctionCallBase))
+		}
+		arg, err := newNode(a).FormatSQL(argCtx)
 		if err != nil {
 			return "", nil, err
 		}
@@ -165,10 +174,20 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 
 	funcPrefix := "googlesqlite"
 	if m1(node.ErrorMode()) == googlesql.ResolvedFunctionCallBaseEnums_ErrorModeSafeErrorMode {
-		if !existsNormalFuncForSafe {
+		safeAggregate := (!isWindowFunc && existsAggregateFunc) || (isWindowFunc && existsWindowFunc)
+		if !existsNormalFuncForSafe && !safeAggregate {
 			return "", nil, fmt.Errorf("SAFE is not supported for function %s", funcName)
 		}
 		funcPrefix = "googlesqlite_safe"
+	} else if inSafeEvalMode(ctx) && functionCallDeferrable(node) {
+		// IFERROR / ISERROR / NULLIFERROR sub-context: an error becomes
+		// a deferred-error marker the enclosing handler detects, so a
+		// genuine NULL is not mistaken for an error (iserror.test,
+		// nested_iserror_absorbs_errors).
+		funcPrefix = "googlesqlite_deferred"
+	} else if inSafeEvalMode(ctx) && isDeferredSpecialForm(node) {
+		// IF / CASE / IFNULL / ERROR / nested IFERROR keep their
+		// special lowering (lazy branches) inside the sub-context.
 	} else if inSafeEvalMode(ctx) && existsNormalFuncForSafe {
 		// IFERROR / ISERROR / NULLIFERROR sub-context: route through the
 		// safe variant so a runtime failure folds to NULL instead of
@@ -176,6 +195,8 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 		// stay on the raising form — callers that hit them inside an
 		// error-handling expression need to use SAFE.<func> explicitly.
 		funcPrefix = "googlesqlite_safe"
+	} else if deferred && !isWindowFunc && functionCallDeferrable(node) {
+		funcPrefix = "googlesqlite_deferred"
 	}
 
 	if strings.HasPrefix(funcName, "$") {
@@ -253,7 +274,7 @@ func (n *ColumnRefNode) FormatSQL(ctx context.Context) (string, error) {
 		delete(columnMap, colName)
 		return ref, nil
 	}
-	return fmt.Sprintf("`%s`", colName), nil
+	return wrapDeferredAggColumn(ctx, colName, fmt.Sprintf("`%s`", colName)), nil
 }
 
 func (n *SystemVariableNode) FormatSQL(ctx context.Context) (string, error) {
@@ -377,6 +398,10 @@ func (n *FunctionCallNode) formatSQL(ctx context.Context) (string, error) {
 		return n.formatEnumValueDescriptorProto(ctx, args)
 	case "googlesqlite_iferror", "googlesqlite_iserror", "googlesqlite_nulliferror":
 		return n.formatErrorHandling(ctx, funcName, args)
+	case "googlesqlite_safe_iferror", "googlesqlite_safe_iserror", "googlesqlite_safe_nulliferror":
+		// SAFE. adds nothing to functions that already absorb errors
+		// (iserror.test, safe_mode).
+		return n.formatErrorHandling(ctx, strings.Replace(funcName, "_safe_", "_", 1), args)
 	case "googlesqlite_error", "googlesqlite_safe_error":
 		return n.formatErrorBuiltin(ctx, funcName, args)
 	case "googlesqlite_ifnull":
@@ -594,11 +619,11 @@ func (n *FunctionCallNode) formatErrorHandling(ctx context.Context, funcName str
 		if len(args) < 2 {
 			return "", fmt.Errorf("IFERROR: needs catch_expression")
 		}
-		return fmt.Sprintf("CASE WHEN (%s) IS NULL THEN %s ELSE (%s) END", safeX, args[1], safeX), nil
+		return fmt.Sprintf("CASE WHEN googlesqlite_is_deferred_error(%s) THEN %s ELSE (%s) END", safeX, args[1], safeX), nil
 	case "googlesqlite_iserror":
-		return fmt.Sprintf("((%s) IS NULL)", safeX), nil
+		return fmt.Sprintf("googlesqlite_is_deferred_error(%s)", safeX), nil
 	case "googlesqlite_nulliferror":
-		return fmt.Sprintf("(%s)", safeX), nil
+		return fmt.Sprintf("googlesqlite_deferred_to_null(%s)", safeX), nil
 	}
 	return safeX, nil
 }
@@ -610,7 +635,11 @@ func (n *FunctionCallNode) formatErrorHandling(ctx context.Context, funcName str
 // raises.
 func (n *FunctionCallNode) formatErrorBuiltin(ctx context.Context, funcName string, args []string) (string, error) {
 	if inSafeEvalMode(ctx) {
-		return "NULL", nil
+		msg := "NULL"
+		if len(args) > 0 {
+			msg = args[0]
+		}
+		return fmt.Sprintf("googlesqlite_make_deferred_error(%s)", msg), nil
 	}
 	// Fall through to the default emission below.
 	funcMap := funcMapFromContext(ctx)
@@ -671,7 +700,11 @@ func (n *AggregateFunctionCallNode) formatSQL(ctx context.Context) (string, erro
 	if sql, ok, err := tryFormatMeasureAGG(ctx, n.node); ok || err != nil {
 		return sql, err
 	}
-	funcName, args, err := getFuncNameAndArgs(ctx, n.node.ResolvedFunctionCallBase, false)
+	argCtx := ctx
+	if aggregateCallDeferrable(ctx, n) {
+		argCtx = withDeferredErrorMode(ctx, true)
+	}
+	funcName, args, err := getFuncNameAndArgs(argCtx, n.node.ResolvedFunctionCallBase, false)
 	if err != nil {
 		return "", err
 	}
@@ -1084,13 +1117,26 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 	// Collect the user-supplied value arguments (without our window
 	// option markers).
 	var valueArgs []string
-	for _, a := range m1(n.node.ResolvedFunctionCallBase.ArgumentList()) {
+	envelopeBools := boolContainerConstructors[rawFuncName(n.node.ResolvedFunctionCallBase)]
+	navName := rawFuncName(n.node.ResolvedFunctionCallBase)
+	for i, a := range m1(n.node.ResolvedFunctionCallBase.ArgumentList()) {
 		arg, err := newNode(a).FormatSQL(ctx)
 		if err != nil {
 			return "", err
 		}
+		if i == 1 && (navName == "lag" || navName == "lead") {
+			// SQLite's lag/lead accept a negative offset; GoogleSQL
+			// requires a constant non-negative one
+			// (match_recognize_navigation_functions_in_define.test).
+			if off, err := strconv.ParseInt(strings.Trim(arg, "() "), 10, 64); err == nil && off < 0 {
+				return "", fmt.Errorf("The offset to the function %s must not be negative", strings.ToUpper(navName)) //nolint:staticcheck // BigQuery's error text
+			}
+		}
 		for _, w := range wrapArg {
 			arg = w(arg)
+		}
+		if envelopeBools {
+			arg = envelopeBoolSQL(a, m1(a.Type()), arg)
 		}
 		valueArgs = append(valueArgs, arg)
 	}
@@ -1105,7 +1151,9 @@ func (n *AnalyticFunctionCallNode) formatNative(ctx context.Context, sqliteName 
 		case googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierRespectNulls:
 			// no marker needed
 		default:
-			valueArgs = append(valueArgs, "googlesqlite_ignore_nulls()")
+			if n.ignoresNullsByDefault() {
+				valueArgs = append(valueArgs, "googlesqlite_ignore_nulls()")
+			}
 		}
 	}
 	call := fmt.Sprintf("%s(%s)", sqliteName, strings.Join(valueArgs, ","))
@@ -1262,8 +1310,8 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 			return "", err
 		}
 		return fmt.Sprintf(
-			"googlesqlite_cast(%s, '%s', '%s', %t)",
-			lit, encodedStrType, encodedToType, m1(n.node.ReturnNullOnError()),
+			"%s(%s, '%s', '%s', %t)",
+			castFuncName(ctx, "cast"), lit, encodedStrType, encodedToType, m1(n.node.ReturnNullOnError()),
 		), nil
 	}
 	expr, err := newNode(m1(n.node.Expr())).FormatSQL(ctx)
@@ -1286,13 +1334,13 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 			timeZoneSQL = ", " + tzSQL
 		}
 		return fmt.Sprintf(
-			"googlesqlite_cast_format(%s, %s, '%s', '%s', %t%s)",
-			expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), timeZoneSQL,
+			"%s(%s, %s, '%s', '%s', %t%s)",
+			castFuncName(ctx, "cast_format"), expr, formatSQL, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()), timeZoneSQL,
 		), nil
 	}
 	castSQL := fmt.Sprintf(
-		"googlesqlite_cast(%s, '%s', '%s', %t)",
-		expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
+		"%s(%s, '%s', '%s', %t)",
+		castFuncName(ctx, "cast"), expr, encodedFromType, encodedToType, m1(n.node.ReturnNullOnError()),
 	)
 	// STRING(L) / BYTES(L) targets (possibly inside ARRAY / STRUCT)
 	// reject values longer than L; SAFE_CAST turns that into NULL.
@@ -1301,7 +1349,7 @@ func (n *CastNode) FormatSQL(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fn := "googlesqlite_check_type_parameters"
+		fn := castFuncName(ctx, "check_type_parameters")
 		if m1(n.node.ReturnNullOnError()) {
 			fn = "googlesqlite_safe_check_type_parameters"
 		}
@@ -1329,7 +1377,7 @@ func (n *MakeStructNode) FormatSQL(ctx context.Context) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		args = append(args, field)
+		args = append(args, envelopeBoolSQL(fields[i], m1(fields[i].Type()), field))
 	}
 	return fmt.Sprintf("googlesqlite_make_struct(%s)", strings.Join(args, ",")), nil
 }
@@ -1681,7 +1729,7 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 			// COUNT(*) probe. Re-evaluates the inner sub-select twice
 			// — acceptable in error-handling expressions.
 			return fmt.Sprintf(
-				"(SELECT CASE WHEN (SELECT COUNT(*) FROM (%s)) = 1 THEN (%s) ELSE NULL END)",
+				"(SELECT CASE WHEN (SELECT COUNT(*) FROM (%s)) <= 1 THEN (%s) ELSE googlesqlite_make_deferred_error('Scalar subquery returned more than one row') END)",
 				sql, sql,
 			), nil
 		}
@@ -1706,7 +1754,8 @@ func (n *SubqueryExprNode) FormatSQL(ctx context.Context) (string, error) {
 			return "", fmt.Errorf("failed to find computed column names for array subquery")
 		}
 		colName := uniqueColumnName(ctx, subCols[0])
-		return fmt.Sprintf("(SELECT googlesqlite_array(`%s`) FROM (%s))", colName, sql), nil
+		elem := envelopeBoolSQL(nil, m1(subCols[0].Type()), fmt.Sprintf("`%s`", colName))
+		return fmt.Sprintf("(SELECT googlesqlite_array(%s) FROM (%s))", elem, sql), nil
 	case googlesql.ResolvedSubqueryExprEnums_SubqueryTypeExists:
 		return fmt.Sprintf("EXISTS (%s)", sql), nil
 	case googlesql.ResolvedSubqueryExprEnums_SubqueryTypeIn:
@@ -1900,6 +1949,32 @@ func (n *ArrayScanNode) FormatSQL(ctx context.Context) (string, error) {
 
 var tokensAfterFromClause = [...]string{"WHERE", "GROUP BY", "HAVING", "QUALIFY", "WINDOW", "ORDER BY", "COLLATE"}
 var removeExpressions = regexp.MustCompile(`\(.+?\)`)
+
+// completeScanQuery turns a scan fragment into a complete SELECT when
+// the scan is consumed directly as a query body. Standard syntax always
+// puts a ProjectScan on top, but pipe operators leave other scans as
+// the outermost one: pipe WHERE yields a FilterScan rendered as
+// "<input> WHERE <filter>", a pipe JOIN yields a bare JoinScan, and a
+// bare `FROM t` yields a parenthesized TableScan. allowWith reports
+// whether a leading WITH clause is acceptable in the caller's position
+// (SQLite rejects `WITH a AS (...) WITH b AS (...) SELECT ...`, which
+// consecutive pipe WITH operators would otherwise produce).
+func completeScanQuery(scan googlesql.ResolvedNode, input string, allowWith bool) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if _, isFilter := scan.(*googlesql.ResolvedFilterScan); !isFilter {
+		if strings.HasPrefix(trimmed, "SELECT") || (allowWith && strings.HasPrefix(trimmed, "WITH")) {
+			return input, nil
+		}
+	}
+	if strings.HasPrefix(trimmed, "WITH") {
+		return fmt.Sprintf("SELECT * FROM (%s)", input), nil
+	}
+	from, err := formatInput(input)
+	if err != nil {
+		return "", err
+	}
+	return "SELECT * " + from, nil
+}
 
 func (n *FilterScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
@@ -2562,7 +2637,7 @@ func (n *LimitOffsetScanNode) FormatSQL(ctx context.Context) (string, error) {
 		} else {
 			columns = append(
 				columns,
-				fmt.Sprintf("`%s`", colName),
+				projectColumnSQL(ctx, colName),
 			)
 		}
 	}
@@ -2623,7 +2698,15 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
-	input, err := newNode(m1(n.node.InputScan())).FormatSQL(ctx)
+	return formatAnalyticScan(ctx, m1(n.node.InputScan()), m1(n.node.FunctionGroupList()), m1(n.node.ColumnList()))
+}
+
+// formatAnalyticScan formats an analytic scan over inputScan that
+// computes every function in groups and projects columnList. It backs
+// both ResolvedAnalyticScan and the analytic stage of
+// ResolvedMatchRecognizeScan (PREV / NEXT in DEFINE).
+func formatAnalyticScan(ctx context.Context, inputScan googlesql.ResolvedScanNode, groups []*googlesql.ResolvedAnalyticFunctionGroup, columnList []*googlesql.ResolvedColumn) (string, error) {
+	input, err := newNode(inputScan).FormatSQL(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -2635,7 +2718,7 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 	ctx, emulationUsed := withAnalyticEmulationFlag(ctx)
 	orderColumnNames := analyticOrderColumnNamesFromContext(ctx)
 	var scanOrderBy []*analyticOrderBy
-	for _, group := range m1(n.node.FunctionGroupList()) {
+	for _, group := range groups {
 		scanOrderBy = []*analyticOrderBy{}
 
 		if m1(group.PartitionBy()) != nil {
@@ -2703,7 +2786,7 @@ func (n *AnalyticScanNode) FormatSQL(ctx context.Context) (string, error) {
 	}
 	columns := []string{}
 	columnMap := columnRefMap(ctx)
-	for _, col := range m1(n.node.ColumnList()) {
+	for _, col := range columnList {
 		colName := uniqueColumnName(ctx, col)
 		if ref, exists := columnMap[colName]; exists {
 			columns = append(columns, ref)
@@ -2809,6 +2892,7 @@ func (n *ProjectScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if n.node == nil {
 		return "", nil
 	}
+	ctx = withDeferredAggColumns(ctx, m1(n.node.InputScan()))
 	for _, col := range m1(n.node.ExprList()) {
 		// assign expr to columnRefMap
 		if _, err := newNode(col).FormatSQL(ctx); err != nil {
@@ -2829,7 +2913,7 @@ func (n *ProjectScanNode) FormatSQL(ctx context.Context) (string, error) {
 		} else {
 			columns = append(
 				columns,
-				fmt.Sprintf("`%s`", colName),
+				projectColumnSQL(ctx, colName),
 			)
 		}
 	}
@@ -2838,7 +2922,44 @@ func (n *ProjectScanNode) FormatSQL(ctx context.Context) (string, error) {
 		return "", err
 	}
 	formattedColumns := strings.Join(columns, ",")
+	if containsNonDeterministicCall(formattedColumns) {
+		// SQLite's query flattener substitutes a subquery's result
+		// expressions into every reference in the outer query, so
+		// `SELECT r = r FROM (SELECT RAND() AS r)` would call RAND()
+		// twice. A subquery with an OFFSET is never flattened (nor
+		// has predicates pushed into it), which keeps each
+		// non-deterministic value computed once per row.
+		return fmt.Sprintf("SELECT * FROM (SELECT %s %s) LIMIT -1 OFFSET 0", formattedColumns, formattedInput), nil
+	}
 	return fmt.Sprintf("SELECT %s %s", formattedColumns, formattedInput), nil
+}
+
+var (
+	nonDeterministicCallsOnce sync.Once
+	nonDeterministicCalls     []string
+)
+
+// containsNonDeterministicCall reports whether formatted SQL calls a
+// runtime function registered as non-deterministic (RAND,
+// GENERATE_UUID, KEYS.NEW_KEYSET, ...).
+func containsNonDeterministicCall(sql string) bool {
+	nonDeterministicCallsOnce.Do(func() {
+		for _, info := range normalFuncs {
+			if info.NonDeterministic {
+				nonDeterministicCalls = append(nonDeterministicCalls,
+					"googlesqlite_"+info.Name+"(", "googlesqlite_safe_"+info.Name+"(")
+			}
+		}
+	})
+	if !strings.Contains(sql, "googlesqlite_") {
+		return false
+	}
+	for _, name := range nonDeterministicCalls {
+		if strings.Contains(sql, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *TVFScanNode) FormatSQL(ctx context.Context) (string, error) {
@@ -2974,6 +3095,10 @@ func (n *QueryStmtNode) FormatSQL(ctx context.Context) (string, error) {
 		return "", nil
 	}
 	input, err := newNode(m1(n.node.Query())).FormatSQL(ctx)
+	if err != nil {
+		return "", err
+	}
+	input, err = completeScanQuery(m1(n.node.Query()), input, true)
 	if err != nil {
 		return "", err
 	}
@@ -3186,6 +3311,10 @@ func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	query, err = completeScanQuery(m1(n.node.Query()), query, false)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf(
 		"%s %s %s",
 		keyword,
@@ -3231,9 +3360,21 @@ func (n *WithEntryNode) FormatSQL(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if subKind != googlesql.ResolvedNodeKindResolvedRecursiveScan {
+		if subquery, err = completeScanQuery(sub, subquery, true); err != nil {
+			return "", err
+		}
+	}
 	tableToColumnList := tableNameToColumnListMap(ctx)
 	tableToColumnList[queryName] = m1(sub.MutableColumnList())
 	hint := cteMaterializeHint(ctx, queryName, subKind)
+	if hint == "" && subKind != googlesql.ResolvedNodeKindResolvedRecursiveScan && subtreeCallsNonDeterministic(sub) {
+		// WITH has exactly-once evaluation semantics; without
+		// MATERIALIZED SQLite may inline the body and evaluate a
+		// volatile call once per reference
+		// (aead.test encrypt_with_clause).
+		hint = " MATERIALIZED"
+	}
 	if subKind == googlesql.ResolvedNodeKindResolvedRecursiveScan {
 		// SQLite needs an explicit column list on the recursive CTE
 		// so both UNION branches map their projected columns by
@@ -3249,6 +3390,46 @@ func (n *WithEntryNode) FormatSQL(ctx context.Context) (string, error) {
 		return fmt.Sprintf("`%s`(%s) AS%s ( %s )", queryName, strings.Join(cols, ","), hint, subquery), nil
 	}
 	return fmt.Sprintf("`%s` AS%s ( %s )", queryName, hint, subquery), nil
+}
+
+var (
+	nonDeterministicFuncNamesOnce sync.Once
+	nonDeterministicFuncNames     map[string]struct{}
+)
+
+// subtreeCallsNonDeterministic reports whether the subtree calls a
+// scalar function registered as NonDeterministic.
+func subtreeCallsNonDeterministic(node googlesql.ResolvedNode) bool {
+	nonDeterministicFuncNamesOnce.Do(func() {
+		nonDeterministicFuncNames = map[string]struct{}{}
+		for _, f := range normalFuncs {
+			if f.NonDeterministic {
+				nonDeterministicFuncNames[f.Name] = struct{}{}
+			}
+		}
+	})
+	var walk func(googlesql.ResolvedNode) bool
+	walk = func(node googlesql.ResolvedNode) bool {
+		if node == nil {
+			return false
+		}
+		if call, ok := node.(*googlesql.ResolvedFunctionCall); ok {
+			if fn, err := call.Function(); err == nil && fn != nil {
+				name, _ := fn.FullName(false)
+				if _, ok := nonDeterministicFuncNames[strings.ReplaceAll(name, ".", "_")]; ok {
+					return true
+				}
+			}
+		}
+		children, _ := node.GetChildNodes()
+		for _, c := range children {
+			if walk(c) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(node)
 }
 
 // cteMaterializeHint returns either " MATERIALIZED" (with a leading
@@ -3666,6 +3847,15 @@ func (n *AnalyticFunctionCallNode) needsGoRangeFrame(orderColumns []*analyticOrd
 
 // goRangeInner returns the registered Go window aggregate that
 // googlesqlite_window_range evaluates over each RANGE frame.
+// ignoresNullsByDefault reports whether the analytic function drops
+// NULL inputs when no null-handling modifier is written. ARRAY_AGG
+// keeps NULL elements by default (aggregate_functions.md ARRAY_AGG;
+// compliance analytic_array_aggregation.test array_agg_with_null_*),
+// matching the plain aggregate path.
+func (n *AnalyticFunctionCallNode) ignoresNullsByDefault() bool {
+	return rawFuncName(n.node.ResolvedFunctionCallBase) != "array_agg"
+}
+
 func (n *AnalyticFunctionCallNode) goRangeInner(rawName string) (string, bool) {
 	if m1(n.node.Distinct()) {
 		if custom, ok := distinctAwareNativeWindowFuncs[rawName]; ok {
@@ -3746,8 +3936,14 @@ func (n *AnalyticFunctionCallNode) formatGoRange(ctx context.Context, inner stri
 	if m1(n.node.Distinct()) {
 		args = append(args, "googlesqlite_distinct()")
 	}
-	if m1(n.node.NullHandlingModifier()) != googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierRespectNulls {
+	switch m1(n.node.NullHandlingModifier()) {
+	case googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierRespectNulls:
+	case googlesql.ResolvedNonScalarFunctionCallBaseEnums_NullHandlingModifierIgnoreNulls:
 		args = append(args, "googlesqlite_ignore_nulls()")
+	default:
+		if n.ignoresNullsByDefault() {
+			args = append(args, "googlesqlite_ignore_nulls()")
+		}
 	}
 	var clauses []string
 	if cols := analyticPartitionColumnNamesFromContext(ctx); len(cols) > 0 {
@@ -3793,6 +3989,9 @@ func (n *AnalyticFunctionCallNode) formatInt64Sum(ctx context.Context, orderColu
 	if err != nil {
 		return "", err
 	}
+	if m1(n.node.ErrorMode()) == googlesql.ResolvedFunctionCallBaseEnums_ErrorModeSafeErrorMode {
+		return "googlesqlite_safe_int64_sum_combine(" + hi + "," + lo + ")", nil
+	}
 	return "googlesqlite_int64_sum_combine(" + hi + "," + lo + ")", nil
 }
 
@@ -3808,4 +4007,82 @@ func (n *AnalyticFunctionCallNode) isRowsRunningFrame() bool {
 	}
 	return m1(m1(frame.StartExpr()).BoundaryType()) == googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeUnboundedPreceding &&
 		m1(m1(frame.EndExpr()).BoundaryType()) == googlesql.ResolvedWindowFrameExprEnums_BoundaryTypeCurrentRow
+}
+
+// FormatSQL lowers SELECT WITH AGGREGATION_THRESHOLD (BigQuery
+// aggregation threshold analysis rule; query-syntax.md
+// "AGGREGATION_THRESHOLD clause"): the scan aggregates like a regular
+// GROUP BY and then drops every group whose number of distinct
+// privacy units is below `threshold` (default 50, per the reference).
+func (n *AggregationThresholdAggregateScanNode) FormatSQL(ctx context.Context) (string, error) {
+	if n.node == nil {
+		return "", nil
+	}
+	threshold := "50"
+	var privacyUnit string
+	for _, opt := range m1(n.node.OptionList()) {
+		name, _ := opt.Name()
+		valExpr, _ := opt.Value()
+		switch strings.ToLower(name) {
+		case "threshold":
+			v, err := newNode(valExpr).FormatSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			threshold = v
+		case "privacy_unit_column":
+			// A STRUCT-valued unit formats as googlesqlite_make_struct,
+			// whose encoded value is DISTINCT-comparable.
+			v, err := newNode(valExpr).FormatSQL(ctx)
+			if err != nil {
+				return "", err
+			}
+			privacyUnit = v
+		}
+	}
+	for _, agg := range m1(n.node.AggregateList()) {
+		if _, err := newNode(agg).FormatSQL(ctx); err != nil {
+			return "", err
+		}
+	}
+	input, err := newNode(m1(n.node.InputScan())).FormatSQL(ctx)
+	if err != nil {
+		return "", err
+	}
+	groupByColumns := []string{}
+	for _, col := range m1(n.node.GroupByList()) {
+		if _, err := newNode(col).FormatSQL(ctx); err != nil {
+			return "", err
+		}
+		colName := uniqueColumnName(ctx, m1(col.Column()))
+		groupByColumns = append(groupByColumns, fmt.Sprintf("`%s`", colName))
+	}
+	columns := []string{}
+	columnMap := columnRefMap(ctx)
+	for _, col := range m1(n.node.ColumnList()) {
+		colName := uniqueColumnName(ctx, col)
+		if ref, exists := columnMap[colName]; exists {
+			columns = append(columns, ref)
+			delete(columnMap, colName)
+		} else {
+			columns = append(columns, fmt.Sprintf("`%s`", colName))
+		}
+	}
+	formattedColumns := strings.Join(columns, ",")
+	var tail string
+	if len(groupByColumns) > 0 {
+		tail = "GROUP BY " + strings.Join(groupByColumns, ",")
+	}
+	if privacyUnit != "" {
+		tail += fmt.Sprintf(" HAVING COUNT(DISTINCT %s) >= %s", privacyUnit, threshold)
+	}
+	switch getInputPattern(input) {
+	case InputKeep:
+		return fmt.Sprintf("SELECT %s %s %s", formattedColumns, input, tail), nil
+	case InputNeedsWrap:
+		return fmt.Sprintf("SELECT %s FROM (%s) %s", formattedColumns, input, tail), nil
+	case InputNeedsFrom:
+		return fmt.Sprintf("SELECT %s FROM %s %s", formattedColumns, input, tail), nil
+	}
+	return "", fmt.Errorf("aggregation threshold scan: unexpected input pattern: %s", input)
 }

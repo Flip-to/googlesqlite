@@ -230,6 +230,11 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureDifferentialPrivacy,
 	googlesql.LanguageFeatureFeatureDifferentialPrivacyReportFunctions,
 	googlesql.LanguageFeatureFeatureDifferentialPrivacyThresholding,
+	// SELECT WITH AGGREGATION_THRESHOLD (BigQuery aggregation
+	// threshold analysis rules). The formatter lowers the resulting
+	// ResolvedAggregationThresholdAggregateScan directly (see
+	// AggregationThresholdAggregateScanNode).
+	googlesql.LanguageFeatureFeatureAggregationThreshold,
 	// BigQuery AEAD encryption family (KEYS.* / AEAD.* /
 	// DETERMINISTIC_*). The catalog-side registration uses the
 	// same flag; the analyzer's resolver also gates the
@@ -265,6 +270,12 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// flags. REGEXP_EXTRACT_GROUPS' Pipe-syntax upstream Example
 	// exercises this path.
 	googlesql.LanguageFeatureFeaturePipes,
+	// Adjacent string literals concatenate ('abc' '123' = 'abc123'),
+	// as in BigQuery (strings.test, string_literal_concat).
+	googlesql.LanguageFeatureFeatureLiteralConcatenation,
+	// LCASE / UCASE aliases of LOWER / UPPER (strings.test,
+	// strings_function_lcase; bytes.test, function_lcase).
+	googlesql.LanguageFeatureFeatureAliasesForStringAndDateFunctions,
 	// `|> IF ... ELSEIF ... ELSE ...` and `|> ASSERT ...` pipe
 	// operators. The Debug ERROR / IFERROR upstream Examples
 	// exercise the pipe-IF cascade; without these toggles the
@@ -284,6 +295,14 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// STRUCT positional accessors `s[OFFSET(i)]` / `s[ORDINAL(n)]`
 	// for the compliance fixtures under types/struct.
 	googlesql.LanguageFeatureFeatureV14StructPositionalAccessor,
+	// MATCH_RECOGNIZE row pattern recognition (standard and pipe
+	// syntax). The ResolvedMatchRecognizeScan is lowered by
+	// internal/match_recognize.go.
+	googlesql.LanguageFeatureFeatureMatchRecognize,
+	// `|> WITH name AS (...)` pipe operator (pipe_operators.test).
+	googlesql.LanguageFeatureFeaturePipeWith,
+	// PIVOT ... IN (<named constant>) (pivot.test).
+	googlesql.LanguageFeatureFeatureAnalysisConstantPivotColumn,
 }
 
 // supportedStatementKinds lists the ResolvedStatement kinds the
@@ -355,6 +374,9 @@ func newAnalyzerOptions() (*googlesql.AnalyzerOptions, error) {
 	// Enable QUALIFY without WHERE
 	// https://github.com/google/googlesql/issues/124
 	if err := langOpt.EnableReservableKeyword("QUALIFY", true); err != nil {
+		return nil, err
+	}
+	if err := langOpt.EnableReservableKeyword("MATCH_RECOGNIZE", true); err != nil {
 		return nil, err
 	}
 	opt, optErr := googlesql.NewAnalyzerOptions2()
@@ -1421,6 +1443,29 @@ var sqlRewritePipelinePreScriptVars = []sqlRewriteStep{
 	{"typeNameAliases", applyTypeNameAliases},
 	{"naiveTimestampUTC", applyNaiveTimestampUTC},
 	{"ingestionPartitionRewrite", applyIngestionPartitionRewrite},
+	{"signedNaNCast", applySignedNaNCast},
+}
+
+var signedNaNCastRe = regexp.MustCompile(`(?i)\bCAST\s*\(\s*(["'])([+-])nan(["'])\s+AS\s+(DOUBLE|FLOAT64|FLOAT)\s*\)`)
+
+// applySignedNaNCast rewrites CAST("-NAN" AS FLOAT64) (and "+NAN") to
+// CAST("NAN" AS FLOAT64). The analyzer folds the literal cast and
+// rejects a signed NaN, while BigQuery accepts it and yields NaN; the
+// sign of a NaN is not observable in GoogleSQL, so dropping it is
+// exact (compliance groupby_queries.test).
+func applySignedNaNCast(query string) string {
+	i := strings.IndexByte(query, 'N')
+	j := strings.IndexByte(query, 'n')
+	if i < 0 && j < 0 {
+		return query
+	}
+	return signedNaNCastRe.ReplaceAllStringFunc(query, func(m string) string {
+		sub := signedNaNCastRe.FindStringSubmatch(m)
+		if sub[1] != sub[3] {
+			return m
+		}
+		return "CAST(" + sub[1] + "NAN" + sub[1] + " AS " + sub[4] + ")"
+	})
 }
 
 // sqlRewritePipelinePostScriptVars holds the uniform-signature rewrites
@@ -2011,7 +2056,41 @@ func sqlTypeName(t googlesql.Googlesql_TypeNode) (string, error) {
 	return named.TypeName(googlesql.ProductModeProductExternal)
 }
 
+// checkUnsupportedHints rejects unqualified hints (`@{ name=value }`)
+// anywhere in a resolved statement. Unqualified hints address this
+// engine, which implements none, so each one is unsupported; hints
+// qualified with another engine's name (`@{ other.name=value }`) are
+// ignored, as GoogleSQL prescribes (compliance hints.test).
+func checkUnsupportedHints(node googlesql.ResolvedNode) error {
+	if node == nil {
+		return nil
+	}
+	if h, ok := node.(interface {
+		HintList() ([]*googlesql.ResolvedOption, error)
+	}); ok {
+		hints, _ := h.HintList()
+		for _, hint := range hints {
+			if q, _ := hint.Qualifier(); q == "" {
+				name, _ := hint.Name()
+				return fmt.Errorf("Unsupported hint: %s", name)
+			}
+		}
+	}
+	children, _ := node.GetChildNodes()
+	for _, c := range children {
+		if err := checkUnsupportedHints(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *Analyzer) newStmtAction(ctx context.Context, query string, args []driver.NamedValue, node googlesql.ResolvedStatementNode) (StmtAction, error) {
+	if strings.Contains(query, "@{") {
+		if err := checkUnsupportedHints(node); err != nil {
+			return nil, err
+		}
+	}
 	kind, _ := node.NodeKind()
 	switch kind {
 	case googlesql.ResolvedNodeKindResolvedCreateTableStmt:
@@ -2361,6 +2440,24 @@ func (a *Analyzer) newDMLStmtAction(ctx context.Context, query string, args []dr
 	// target InsertColumnList types so sparse Go maps expand to match
 	// the declared STRUCT field order. See reshapeInsertArgs.
 	args = reshapeInsertArgs(args, node)
+	if insert, ok := node.(*googlesql.ResolvedInsertStmt); ok && !a.catalog.tableHasPrimaryKey(m1(m1(insert.TableScan()).Table())) {
+		// INSERT OR IGNORE / REPLACE / UPDATE resolve conflicts on the
+		// primary key, so on a table without one they fail the way
+		// GoogleSQL prescribes (compliance dml_insert.test,
+		// dml_value_table.test).
+		switch mode, _ := insert.InsertMode(); mode {
+		case googlesql.ResolvedInsertStmtEnums_InsertModeOrIgnore:
+			return nil, fmt.Errorf("INSERT OR IGNORE is not allowed because the table does not have a primary key")
+		case googlesql.ResolvedInsertStmtEnums_InsertModeOrReplace:
+			return nil, fmt.Errorf("INSERT OR REPLACE is not allowed because the table does not have a primary key")
+		case googlesql.ResolvedInsertStmtEnums_InsertModeOrUpdate:
+			return nil, fmt.Errorf("INSERT OR UPDATE is not allowed because the table does not have a primary key")
+		}
+	}
+	assertRows, err := dmlAssertRowsModified(node)
+	if err != nil {
+		return nil, err
+	}
 	formattedQuery, params, err := collectFormatParams(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to format query %s: %w", query, err)
@@ -2378,7 +2475,42 @@ func (a *Analyzer) newDMLStmtAction(ctx context.Context, query string, args []dr
 		args:           queryArgs,
 		colTypes:       insertColumnTypes(node),
 		formattedQuery: formattedQuery,
+		assertRows:     assertRows,
 	}, nil
+}
+
+// dmlAssertRowsModified returns the row count required by a DML
+// statement's `ASSERT_ROWS_MODIFIED n` clause, or nil when the
+// statement has none.
+func dmlAssertRowsModified(node googlesql.ResolvedNode) (*int64, error) {
+	var assert *googlesql.ResolvedAssertRowsModified
+	switch n := node.(type) {
+	case *googlesql.ResolvedInsertStmt:
+		assert, _ = n.AssertRowsModified()
+	case *googlesql.ResolvedUpdateStmt:
+		assert, _ = n.AssertRowsModified()
+	case *googlesql.ResolvedDeleteStmt:
+		assert, _ = n.AssertRowsModified()
+	}
+	if assert == nil {
+		return nil, nil
+	}
+	lit, ok := m1(assert.Rows()).(*googlesql.ResolvedLiteral)
+	if !ok {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED supports only a literal row count")
+	}
+	v, err := lit.Value()
+	if err != nil || v == nil {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED: failed to read row count")
+	}
+	if isNull, _ := v.IsNull(); isNull {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED expected a non-NULL row count")
+	}
+	n, err := v.ToInt64()
+	if err != nil {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED: %w", err)
+	}
+	return &n, nil
 }
 
 // insertColumnTypes returns the per-position destination column types
@@ -2555,6 +2687,34 @@ func mergeSingleKeyStructArray(av *value.ArrayValue) (*value.StructValue, bool) 
 	return merged, true
 }
 
+// flattenStructValueTable expands a top-level value table of STRUCT
+// (`SELECT AS STRUCT ...`) into one result column per struct field,
+// which is how BigQuery returns such a query's rows.
+func flattenStructValueTable(node *googlesql.ResolvedQueryStmt, outputColumns []*ColumnSpec, formattedQuery string) ([]*ColumnSpec, string) {
+	if !m1(node.IsValueTable()) || len(outputColumns) != 1 {
+		return outputColumns, formattedQuery
+	}
+	st, err := m1(m1(node.OutputColumnList())[0].Column()).Type()
+	if err != nil || st == nil {
+		return outputColumns, formattedQuery
+	}
+	structType, err := st.AsStruct()
+	if err != nil || structType == nil {
+		return outputColumns, formattedQuery
+	}
+	fields, err := structType.Fields()
+	if err != nil || len(fields) == 0 {
+		return outputColumns, formattedQuery
+	}
+	cols := make([]*ColumnSpec, 0, len(fields))
+	exprs := make([]string, 0, len(fields))
+	for i, f := range fields {
+		cols = append(cols, &ColumnSpec{Name: f.Name, Type: newType(f.Type_)})
+		exprs = append(exprs, fmt.Sprintf("googlesqlite_get_struct_field(`%s`, %d) AS `$field%d`", outputColumns[0].Name, i, i))
+	}
+	return cols, fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(exprs, ","), formattedQuery)
+}
+
 func (a *Analyzer) newQueryStmtAction(ctx context.Context, query string, args []driver.NamedValue, node *googlesql.ResolvedQueryStmt) (*QueryStmtAction, error) {
 	outputColumns := []*ColumnSpec{}
 	for _, col := range m1(node.OutputColumnList()) {
@@ -2573,6 +2733,7 @@ func (a *Analyzer) newQueryStmtAction(ctx context.Context, query string, args []
 	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "GRAPH ") {
 		fmt.Fprintf(debugStream(), "[googlesqlite][graph] in : %s\n[googlesqlite][graph] out: %s\n", query, formattedQuery)
 	}
+	outputColumns, formattedQuery = flattenStructValueTable(node, outputColumns, formattedQuery)
 	queryArgs, err := getArgsFromParams(args, params)
 	if err != nil {
 		return nil, err

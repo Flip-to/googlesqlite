@@ -579,7 +579,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "is_inf", BindFunc: helper.Scalar1(mathfn.IS_INF)},
 	{Name: "is_nan", BindFunc: helper.Scalar1(mathfn.IS_NAN)},
 	{Name: "ieee_divide", BindFunc: helper.Scalar2(mathfn.IEEE_DIVIDE)},
-	{Name: "rand", BindFunc: mathfn.BindRand},
+	{Name: "rand", NonDeterministic: true, BindFunc: mathfn.BindRand},
 	{Name: "sqrt", BindFunc: helper.Scalar1(mathfn.SQRT)},
 	{Name: "pow", BindFunc: helper.Scalar2(mathfn.POW)},
 	{Name: "power", BindFunc: helper.Scalar2(mathfn.POW)},
@@ -647,6 +647,8 @@ var normalFuncs = []*funcInfo{
 	{Name: "distinct", BindFunc: bindDistinct},
 	{Name: "ignore_nulls", BindFunc: bindIgnoreNulls},
 	{Name: "having", BindFunc: bindHaving},
+	{Name: "order_by", BindFunc: bindOrderBy},
+	{Name: "limit", BindFunc: bindLimit},
 
 	// window option funcs
 	{Name: "window_rowid", BindFunc: bindWindowRowID},
@@ -679,7 +681,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "iferror", BindFunc: longtail.BindIfError},
 	{Name: "iserror", BindFunc: longtail.BindIsError},
 	{Name: "nulliferror", BindFunc: longtail.BindNullIfError},
-	{Name: "regexp_match", BindFunc: longtail.BindRegexpMatch},
+	{Name: "regexp_match", BindFunc: str.BytesAsLatin1(longtail.BindRegexpMatch)},
 	{Name: "regexp_extract_groups", BindFunc: longtail.BindRegexpExtractGroups},
 	{Name: "split_substr", BindFunc: longtail.BindSplitSubstr},
 	// `collate` is registered earlier from internal/functions/string

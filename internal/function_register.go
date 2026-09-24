@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-json"
 	sqlite3 "github.com/ncruces/go-sqlite3"
 
+	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/functions/hll"
 	"github.com/goccy/googlesqlite/internal/functions/window"
 	"github.com/goccy/googlesqlite/internal/sqlitex"
@@ -64,6 +65,10 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		}
 		windowFuncMap["string_agg"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_string_agg", Func: window.NewStringAggWindowNative()},
+		}
+		// MATCH_RECOGNIZE row pattern matcher; see match_recognize.go.
+		windowFuncMap["match_recognize"] = []*nameAndFunc{
+			{Name: "googlesqlite_match_recognize", Func: newMatchRecognizeWindow},
 		}
 		windowFuncMap["countif"] = []*nameAndFunc{
 			{Name: "googlesqlite_window_countif", Func: window.NewCountifWindowNative()},
@@ -227,18 +232,68 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 	// final total is range-checked, so intermediate overflow in a
 	// running sum is not an error (analytic_sum.test,
 	// analytic_sum_int64_overflow_3).
-	if err := sqlitex.RegisterFunc(conn, "googlesqlite_int64_sum_combine", func(hi, lo any) (any, error) {
-		h, ok1 := hi.(int64)
-		l, ok2 := lo.(int64)
-		if !ok1 || !ok2 {
+	// The googlesqlite_safe_ variant backs SAFE.SUM(x) OVER (...): an
+	// overflowing total yields NULL instead of an error
+	// (safe_function.test, safe_analytic_agg_func).
+	for _, safe := range []bool{false, true} {
+		name := "googlesqlite_int64_sum_combine"
+		if safe {
+			name = "googlesqlite_safe_int64_sum_combine"
+		}
+		if err := sqlitex.RegisterFunc(conn, name, func(hi, lo any) (any, error) {
+			h, ok1 := hi.(int64)
+			l, ok2 := lo.(int64)
+			if !ok1 || !ok2 {
+				return nil, nil
+			}
+			h += l >> 32
+			l &= 0xffffffff
+			if h > math.MaxInt32 || h < math.MinInt32 {
+				if safe {
+					return nil, nil
+				}
+				return nil, fmt.Errorf("int64 overflow: SUM result exceeds INT64 range")
+			}
+			return h<<32 | l, nil
+		}, deterministic); err != nil {
+			return err
+		}
+	}
+	// googlesqlite_raise_deferred(x) raises the error carried by a
+	// deferred-error marker and passes any other value through;
+	// googlesqlite_deferred_to_null(x) turns the marker into NULL for
+	// IFERROR / ISERROR / NULLIFERROR (see value.DeferredError).
+	if err := sqlitex.RegisterFunc(conn, "googlesqlite_raise_deferred", func(v any) (any, error) {
+		if de, ok := value.AsDeferredError(v); ok {
+			return nil, de
+		}
+		return v, nil
+	}, deterministic); err != nil {
+		return err
+	}
+	if err := sqlitex.RegisterFunc(conn, "googlesqlite_deferred_to_null", func(v any) (any, error) {
+		if _, ok := value.AsDeferredError(v); ok {
 			return nil, nil
 		}
-		h += l >> 32
-		l &= 0xffffffff
-		if h > math.MaxInt32 || h < math.MinInt32 {
-			return nil, fmt.Errorf("int64 overflow: SUM result exceeds INT64 range")
+		return v, nil
+	}, deterministic); err != nil {
+		return err
+	}
+	if err := sqlitex.RegisterFunc(conn, "googlesqlite_is_deferred_error", func(v any) (any, error) {
+		_, ok := value.AsDeferredError(v)
+		return ok, nil
+	}, deterministic); err != nil {
+		return err
+	}
+	// ERROR(msg) inside IFERROR / ISERROR / NULLIFERROR.
+	if err := sqlitex.RegisterFunc(conn, "googlesqlite_make_deferred_error", func(v any) (any, error) {
+		msg := "ERROR"
+		if decoded, err := value.DecodeValue(v); err == nil && decoded != nil {
+			if s, err := decoded.ToString(); err == nil {
+				msg = s
+			}
 		}
-		return h<<32 | l, nil
+		return value.EncodeDeferredError(fmt.Errorf("%s", msg)), nil
 	}, deterministic); err != nil {
 		return err
 	}
@@ -417,19 +472,111 @@ func setupNormalFuncMap(info *funcInfo) {
 			return EncodeValue(ret)
 		},
 		NonDeterministic: info.NonDeterministic,
+	}, &nameAndFunc{
+		// Deferred variant for aggregate arguments: an error becomes a
+		// deferred-error marker that the aggregate carries to the point
+		// where its value is used (see value.DeferredError).
+		Name: fmt.Sprintf("googlesqlite_deferred_%s", info.Name),
+		Func: func(args ...any) (any, error) {
+			for _, a := range args {
+				if _, ok := value.AsDeferredError(a); ok {
+					return a, nil
+				}
+			}
+			values, err := value.ConvertArgs(args...)
+			if err != nil {
+				return value.EncodeDeferredError(err), nil
+			}
+			ret, err := info.BindFunc(values...)
+			if err != nil {
+				return value.EncodeDeferredError(err), nil
+			}
+			return EncodeValue(ret)
+		},
+		NonDeterministic: info.NonDeterministic,
 	})
 }
 
 func setupAggregateFuncMap(info *aggregateFuncInfo) {
+	bind := info.BindFunc()
 	aggregateFuncMap[info.Name] = append(aggregateFuncMap[info.Name], &nameAndFunc{
 		Name: fmt.Sprintf("googlesqlite_%s", info.Name),
-		Func: info.BindFunc(),
+		Func: bind,
+	}, &nameAndFunc{
+		// SAFE.<aggregate>(...) turns an error raised while
+		// accumulating or finishing into NULL
+		// (safe_function.test, safe_agg_func_group_by).
+		Name: fmt.Sprintf("googlesqlite_safe_%s", info.Name),
+		Func: func() *safeAggregator { return &safeAggregator{inner: bind()} },
 	})
 }
 
+// safeAggregator wraps an aggregate so that any error becomes a NULL
+// result for the group.
+type safeAggregator struct {
+	inner  *helper.Aggregator
+	failed bool
+}
+
+func (a *safeAggregator) Step(args ...any) error {
+	if a.failed {
+		return nil
+	}
+	if err := a.inner.Step(args...); err != nil {
+		a.failed = true
+	}
+	return nil
+}
+
+func (a *safeAggregator) Done() (any, error) {
+	if a.failed {
+		return nil, nil
+	}
+	v, err := a.inner.Done()
+	if err != nil {
+		return nil, nil
+	}
+	if _, ok := value.AsDeferredError(v); ok {
+		return nil, nil
+	}
+	return v, nil
+}
+
 func setupWindowFuncMap(info *windowFuncInfo) {
+	bind := info.BindFunc()
 	windowFuncMap[info.Name] = append(windowFuncMap[info.Name], &nameAndFunc{
 		Name: fmt.Sprintf("googlesqlite_window_%s", info.Name),
-		Func: info.BindFunc(),
+		Func: bind,
+	}, &nameAndFunc{
+		Name: fmt.Sprintf("googlesqlite_safe_window_%s", info.Name),
+		Func: func() *safeWindowAggregator { return &safeWindowAggregator{inner: bind()} },
 	})
+}
+
+// safeWindowAggregator is the SAFE.<aggregate>(...) OVER (...) analogue
+// of safeAggregator.
+type safeWindowAggregator struct {
+	inner  *window.WindowAggregator
+	failed bool
+}
+
+func (a *safeWindowAggregator) Step(args ...any) error {
+	if a.failed {
+		return nil
+	}
+	if err := a.inner.Step(args...); err != nil {
+		a.failed = true
+	}
+	return nil
+}
+
+func (a *safeWindowAggregator) Done() (any, error) {
+	if a.failed {
+		return nil, nil
+	}
+	v, err := a.inner.Done()
+	if err != nil {
+		return nil, nil
+	}
+	return v, nil
 }

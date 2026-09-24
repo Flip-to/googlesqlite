@@ -1,17 +1,14 @@
 package numeric
 
 import (
-	"fmt"
-	"math/big"
-
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
 func PARSE_BIGNUMERIC(numeric string) (value.Value, error) {
-	r := new(big.Rat)
-	if _, ok := r.SetString(numeric); !ok {
-		return nil, fmt.Errorf("unexpected numeric literal: %s", numeric)
+	r, err := parseNumericString(numeric, 38, true)
+	if err != nil {
+		return nil, err
 	}
 	return &value.NumericValue{Rat: r, IsBigNumeric: true}, nil
 }

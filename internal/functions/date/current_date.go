@@ -16,6 +16,12 @@ func CURRENT_DATE(zone string) (value.Value, error) {
 }
 
 func BindCurrentDate(args ...value.Value) (value.Value, error) {
+	// A NULL time zone gives NULL (date.test, current_date_with_null_timezone).
+	for _, a := range args {
+		if a == nil {
+			return nil, nil
+		}
+	}
 	if len(args) == 0 {
 		return CURRENT_DATE("")
 	}

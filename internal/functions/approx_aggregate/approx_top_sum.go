@@ -17,6 +17,9 @@ type APPROX_TOP_SUM struct {
 }
 
 func (f *APPROX_TOP_SUM) Step(v, weight value.Value, num int64, opt *helper.Option) error {
+	if num > maxApproxTopNumber {
+		return fmt.Errorf("The second argument to APPROX_TOP_SUM function cannot be greater than %d", maxApproxTopNumber) //nolint:staticcheck // BigQuery's error text
+	}
 	f.once.Do(func() {
 		f.valueMap = map[value.Value]*value.StructValue{}
 		f.num = num
@@ -39,6 +42,14 @@ func (f *APPROX_TOP_SUM) Step(v, weight value.Value, num int64, opt *helper.Opti
 			if val.Values[1] == nil {
 				sum = weight
 			} else {
+				if a, ok := val.Values[1].(value.IntValue); ok {
+					if b, ok := weight.(value.IntValue); ok {
+						r := a + b
+						if (b > 0 && r < a) || (b < 0 && r > a) {
+							return fmt.Errorf("int64 overflow: %d + %d", int64(a), int64(b))
+						}
+					}
+				}
 				added, err := val.Values[1].Add(weight)
 				if err != nil {
 					return err
@@ -65,9 +76,6 @@ func (f *APPROX_TOP_SUM) Done() (value.Value, error) {
 	if len(f.valueMap) == 0 {
 		return nil, nil
 	}
-	if int64(len(f.valueMap)) < f.num {
-		return nil, fmt.Errorf("APPROX_TOP_SUM: required number is larger than number of input values")
-	}
 	values := make([]*value.StructValue, 0, len(f.valueMap))
 	for _, v := range f.valueMap {
 		values = append(values, v)
@@ -83,7 +91,10 @@ func (f *APPROX_TOP_SUM) Done() (value.Value, error) {
 		return cond
 	})
 	ret := &value.ArrayValue{}
-	for _, v := range values[:f.num] {
+	// Fewer distinct values than requested returns all of them
+	// (approx_aggregation.test approx_top_*_big_count_small_*_input).
+	n := min(f.num, int64(len(values)))
+	for _, v := range values[:n] {
 		ret.Values = append(ret.Values, v)
 	}
 	return ret, nil

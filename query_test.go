@@ -3236,7 +3236,7 @@ FROM Items`,
 			}},
 		},
 		{
-			name:        "array_agg with struct",
+			name:  "array_agg with struct",
 			query: `SELECT b, ARRAY_AGG(a) FROM UNNEST([STRUCT(1 AS a, 2 AS b), STRUCT(NULL AS a, 2 AS b)]) GROUP BY b`,
 			expectedRows: [][]any{{
 				int64(2), []any{int64(1), nil},
@@ -3559,9 +3559,11 @@ SELECT LOGICAL_OR(x) AS logical_or FROM toks`,
 			expectedRows: [][]any{{nil}},
 		},
 		{
-			name:        "safe sum",
-			query:       `SELECT SAFE.SUM(x) AS sum FROM UNNEST([1, 2, 3, 4, 5, 4, 3, 2, 1]) AS x`,
-			expectedErr: "SAFE is not supported for function SUM",
+			// SAFE.SUM is supported (compliance safe_function.test,
+			// safe_agg_func_no_group_by; verified against BigQuery).
+			name:         "safe sum",
+			query:        `SELECT SAFE.SUM(x) AS sum FROM UNNEST([1, 2, 3, 4, 5, 4, 3, 2, 1]) AS x`,
+			expectedRows: [][]any{{int64(25)}},
 		},
 		{
 			name:         "approx_count_distinct",
@@ -5557,7 +5559,8 @@ SELECT characters, CHARACTER_LENGTH(characters) FROM example`,
 		{
 			name:         "chr",
 			query:        `SELECT CHR(65), CHR(255), CHR(513), CHR(1024), CHR(97), CHR(0xF9B5), CHR(0), CHR(NULL)`,
-			expectedRows: [][]any{{"A", "ÿ", "ȁ", "Ѐ", "a", "例", "", nil}},
+			// CHR(0) is the NUL character in BigQuery (strings.test strings_function_chr).
+			expectedRows: [][]any{{"A", "ÿ", "ȁ", "Ѐ", "a", "例", "\x00", nil}},
 		},
 		{
 			name:         "code_points_to_bytes",
@@ -5567,7 +5570,8 @@ SELECT characters, CHARACTER_LENGTH(characters) FROM example`,
 		{
 			name:         "code_points_to_string",
 			query:        `SELECT CODE_POINTS_TO_STRING([65, 255, 513, 1024]), CODE_POINTS_TO_STRING([97, 0, 0xF9B5]), CODE_POINTS_TO_STRING([65, 255, NULL, 1024]), CODE_POINTS_TO_STRING(NULL)`,
-			expectedRows: [][]any{{"AÿȁЀ", "a例", nil, nil}},
+			// Code point 0 is kept as NUL, as in BigQuery.
+			expectedRows: [][]any{{"AÿȁЀ", "a\x00例", nil, nil}},
 		},
 		// TODO: currently collate function is unsupported.
 		// {
@@ -7464,9 +7468,13 @@ SELECT
 			expectedRows: [][]any{{"123.45", "12340000000000000000000000000", "1.012345679"}},
 		},
 		{
-			name:         "parse_bignumeric",
-			query:        `SELECT PARSE_BIGNUMERIC("123.45"), PARSE_BIGNUMERIC("123.456E37"), PARSE_BIGNUMERIC("1.123456789012345678901234567890123456789")`,
-			expectedRows: [][]any{{"123.45", "1234560000000000000000000000000000000000", "1.12345678901234567890123456789012345679"}},
+			name: "parse_bignumeric",
+			// 123.456E37 exceeds the BIGNUMERIC range, which is an error
+			// (conversion_functions.md PARSE_BIGNUMERIC; compliance
+			// safe_function.test, safe_parse_bignumeric; verified against
+			// BigQuery), so SAFE. yields NULL.
+			query:        `SELECT PARSE_BIGNUMERIC("123.45"), SAFE.PARSE_BIGNUMERIC("123.456E37"), PARSE_BIGNUMERIC("1.123456789012345678901234567890123456789")`,
+			expectedRows: [][]any{{"123.45", nil, "1.12345678901234567890123456789012345679"}},
 		},
 		{
 			name:         "cast numeric and bignumeric to string",

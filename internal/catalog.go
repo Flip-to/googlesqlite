@@ -174,6 +174,8 @@ func newSimpleCatalog(name string) *googlesql.SimpleCatalog {
 			// with collation support on.
 			googlesql.LanguageFeatureFeatureAnnotationFramework,
 			googlesql.LanguageFeatureFeatureCollationSupport,
+			// LCASE / UCASE aliases (strings.test, strings_function_lcase).
+			googlesql.LanguageFeatureFeatureAliasesForStringAndDateFunctions,
 		} {
 			_ = opts.EnableLanguageFeature(f)
 		}
@@ -186,7 +188,7 @@ func newSimpleCatalog(name string) *googlesql.SimpleCatalog {
 		if bf == nil {
 			bf = &googlesql.BuiltinFunctionOptions{LanguageOptions: opts}
 		}
-		if err := catalog.AddGoogleSQLFunctions2(bf); err != nil {
+		if err := catalog.AddBuiltinFunctionsAndTypes(bf); err != nil {
 			_ = catalog.AddGoogleSQLFunctions()
 		}
 	} else {
@@ -2022,6 +2024,16 @@ func (c *Catalog) DeleteFunctionSpec(ctx context.Context, conn *Conn, name strin
 		return err
 	}
 	return nil
+}
+
+// tableHasPrimaryKey reports whether the table the analyzer resolved
+// was declared with a PRIMARY KEY.
+func (c *Catalog) tableHasPrimaryKey(table googlesql.TableNode) bool {
+	name := c.StorageNameForTable(table)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	spec, ok := c.tableMap[name]
+	return ok && len(spec.PrimaryKey) > 0
 }
 
 func (c *Catalog) hasTableSpec(name string) bool {

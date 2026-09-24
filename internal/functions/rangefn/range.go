@@ -39,8 +39,17 @@ func elementHeader(start, end value.Value) value.ValueType {
 
 // RANGE constructs a RANGE value from start and end bounds.
 func RANGE(start, end value.Value) (value.Value, error) {
-	if start == nil && end == nil {
-		return nil, fmt.Errorf("RANGE: at least one of start or end must be non-NULL")
+	// Both bounds may be NULL (an unbounded range); two non-NULL bounds
+	// must satisfy start < end (range-functions.md, RANGE;
+	// range_constructors.test).
+	if start != nil && end != nil {
+		lt, err := start.LT(end)
+		if err != nil {
+			return nil, err
+		}
+		if !lt {
+			return nil, fmt.Errorf("Range start element must be smaller than range end element") //nolint:staticcheck // BigQuery's error text
+		}
 	}
 	return &value.RangeValue{
 		Start:      start,

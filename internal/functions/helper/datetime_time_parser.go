@@ -416,6 +416,14 @@ var postProcessorPatternMap = map[rune]*TimeParserPostProcessor{
 		ShouldPostProcessResult: ampmShouldPostProcessResult,
 		PostProcessResult:       ampmPostProcessor,
 	},
+	'W': {
+		ShouldPostProcessResult: func(map[rune][2]int) bool { return true },
+		PostProcessResult:       weekOfYearPostProcessor(time.Monday),
+	},
+	'U': {
+		ShouldPostProcessResult: func(map[rune][2]int) bool { return true },
+		PostProcessResult:       weekOfYearPostProcessor(time.Sunday),
+	},
 }
 
 func createStaticTextParser(static string) ParseFunction {
@@ -1059,8 +1067,42 @@ func tabFormatter(t *time.Time) ([]rune, error) {
 	return []rune("\t"), nil
 }
 
+// weekOfYearParser reads the %U / %W week number (up to two digits,
+// 0-53). The date is resolved after the whole input is parsed, once the
+// year is known (weekOfYearPostProcessor).
 func weekOfYearParser(text []rune, t *time.Time) (int, error) {
-	return 0, fmt.Errorf("unimplemented week of year matcher")
+	n := 0
+	for n < len(text) && n < 2 && text[n] >= '0' && text[n] <= '9' {
+		n++
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("week of year not found")
+	}
+	week, _ := strconv.Atoi(string(text[:n]))
+	if week > 53 {
+		return 0, fmt.Errorf("week of year %d out of range", week)
+	}
+	return n, nil
+}
+
+// weekOfYearPostProcessor moves t to the first day of the given week:
+// week 1 starts on the year's first Monday (%W) or Sunday (%U) and
+// days before it are week 0 (date.test, weekofyear_case3:
+// PARSE_DATE('%W%y', '092') is 2002-03-04).
+func weekOfYearPostProcessor(firstDay time.Weekday) func([]rune, *time.Time) {
+	return func(text []rune, t *time.Time) {
+		week, err := strconv.Atoi(string(text))
+		if err != nil {
+			return
+		}
+		jan1 := time.Date(t.Year(), time.January, 1, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), t.Location())
+		offset := (int(firstDay) - int(jan1.Weekday()) + 7) % 7
+		d := jan1.AddDate(0, 0, offset+(week-1)*7)
+		if d.Before(jan1) {
+			d = jan1
+		}
+		*t = d
+	}
 }
 
 func weekOfYearFormatter(t *time.Time) ([]rune, error) {

@@ -30,8 +30,40 @@ func textCase(elem, s string) string {
 	return strings.ToLower(s)
 }
 
+// castFormatTimeElements are the time-part elements (not valid for DATE).
+var castFormatTimeElements = map[string]bool{
+	"HH": true, "HH12": true, "HH24": true, "MI": true, "SS": true, "SSSSS": true,
+	"AM": true, "PM": true, "A.M.": true, "P.M.": true,
+	"FF1": true, "FF2": true, "FF3": true, "FF4": true, "FF5": true,
+	"FF6": true, "FF7": true, "FF8": true, "FF9": true,
+}
+
+// checkCastFormatElement rejects an element the source type lacks:
+// time parts for DATE, date parts for TIME, and TZH / TZM for anything
+// but TIMESTAMP (format-elements.md; cast_format_validation.test,
+// cast_date_to_string_format_invalid_literal_hh).
+func checkCastFormatElement(typeName, elem string) error {
+	up := strings.ToUpper(elem)
+	isTZ := up == "TZH" || up == "TZM"
+	isTime := castFormatTimeElements[up]
+	var bad bool
+	switch typeName {
+	case "DATE":
+		bad = isTime || isTZ
+	case "DATETIME":
+		bad = isTZ
+	case "TIME":
+		bad = isTZ || !isTime
+	}
+	if bad {
+		return fmt.Errorf("%s does not support '%s'", typeName, up)
+	}
+	return nil
+}
+
 // formatDateTimeElements renders t using CAST ... FORMAT elements.
-func formatDateTimeElements(t time.Time, format string) (string, error) {
+// typeName is the source type (DATE, DATETIME, TIME or TIMESTAMP).
+func formatDateTimeElements(t time.Time, format, typeName string) (string, error) {
 	var out strings.Builder
 	for i := 0; i < len(format); {
 		c := format[i]
@@ -58,6 +90,9 @@ func formatDateTimeElements(t time.Time, format string) (string, error) {
 		}
 		if elem == "" {
 			return "", fmt.Errorf("CAST: invalid format element at %q", format[i:])
+		}
+		if err := checkCastFormatElement(typeName, elem); err != nil {
+			return "", err
 		}
 		i += len(elem)
 		hour12 := t.Hour() % 12

@@ -365,8 +365,33 @@ var jsonValueConstructors = map[string]bool{
 	"json_strip_nulls":  true,
 }
 
+// boolContainerConstructors collect their arguments into an ARRAY
+// value (or, for FORMAT, render them by type); a BOOL argument must
+// arrive as BOOL rather than the INTEGER SQLite hands over, or the
+// element type is lost.
+var boolContainerConstructors = map[string]bool{
+	"$make_array": true,
+	"array_agg":   true,
+	"format":      true,
+}
+
+// envelopeBoolSQL wraps sql in googlesqlite_bool_envelope when t is
+// BOOL, so a column value keeps its BOOL type once it is stored inside
+// an ARRAY, STRUCT or JSON value. Literals need it too: a BOOL literal
+// reaches SQLite as the integer 1/0 (JSON_OBJECT('b', true) printed
+// {"b":1}).
+func envelopeBoolSQL(_ googlesql.ResolvedExprNode, t googlesql.Googlesql_TypeNode, sql string) string {
+	if t == nil {
+		return sql
+	}
+	if isBool, _ := t.IsBool(); !isBool {
+		return sql
+	}
+	return fmt.Sprintf("googlesqlite_bool_envelope(%s)", sql)
+}
+
 func envelopeJSONBoolArgs(node *ResolvedBaseFunctionCallNode, rawName string, args []string) []string {
-	if !jsonValueConstructors[rawName] {
+	if !jsonValueConstructors[rawName] && !boolContainerConstructors[rawName] {
 		return args
 	}
 	argNodes := m1(node.ArgumentList())
@@ -379,11 +404,11 @@ func envelopeJSONBoolArgs(node *ResolvedBaseFunctionCallNode, rawName string, ar
 		if err != nil || t == nil {
 			continue
 		}
-		if isBool, _ := t.IsBool(); isBool {
+		if w := envelopeBoolSQL(a, t, args[i]); w != args[i] {
 			if out == nil {
 				out = append([]string(nil), args...)
 			}
-			out[i] = fmt.Sprintf("googlesqlite_bool_envelope(%s)", args[i])
+			out[i] = w
 		}
 	}
 	if out == nil {

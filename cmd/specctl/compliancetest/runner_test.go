@@ -195,7 +195,7 @@ func TestParamsAndSubstitution(t *testing.T) {
 		t.Fatalf("params = %+v", ps)
 	}
 	got := SubstituteParams(`SELECT @lmt, '@lmt', @@sys, @LMT`, ps)
-	if want := `SELECT (2), '@lmt', @@sys, (2)`; got != want {
+	if want := `SELECT 2, '@lmt', @@sys, 2`; got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }

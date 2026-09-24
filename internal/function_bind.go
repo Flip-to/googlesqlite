@@ -46,7 +46,19 @@ type windowFuncInfo struct {
 // NULL argument and return it unchanged, so they use Scalar1KeepNull
 // (arity check only, no NULL short-circuit).
 var bindBool = helper.Scalar1KeepNull(func(v value.Value) (value.Value, error) {
-	return v, nil
+	jv, ok := v.(value.JsonValue)
+	if !ok {
+		return v, nil
+	}
+	// BOOL(json_expr): only a JSON boolean converts; anything else,
+	// including JSON null, is an error (json_functions.md, BOOL).
+	switch strings.TrimSpace(string(jv)) {
+	case "true":
+		return value.BoolValue(true), nil
+	case "false":
+		return value.BoolValue(false), nil
+	}
+	return nil, fmt.Errorf("The provided JSON input is not a boolean")
 })
 
 var bindInt64 = helper.Scalar1KeepNull(func(v value.Value) (value.Value, error) {
@@ -151,6 +163,32 @@ func bindIgnoreNulls(args ...value.Value) (value.Value, error) {
 		return nil, fmt.Errorf("IGNORE_NULLS: invalid number of arguments: got %d, want 0", len(args))
 	}
 	return helper.IGNORE_NULLS()
+}
+
+// bindOrderBy and bindLimit build the ORDER BY / LIMIT aggregate
+// option markers. Most aggregates reach SQLite after the analyzer's
+// ORDER BY / LIMIT rewrite, but MATCH_RECOGNIZE measures are not
+// rewritten, so their aggregates carry the markers directly.
+func bindOrderBy(args ...value.Value) (value.Value, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("ORDER_BY: invalid number of arguments: got %d, want 2", len(args))
+	}
+	isAsc, err := args[1].ToBool()
+	if err != nil {
+		return nil, err
+	}
+	return helper.ORDER_BY(args[0], isAsc)
+}
+
+func bindLimit(args ...value.Value) (value.Value, error) {
+	if len(args) != 1 || args[0] == nil {
+		return nil, fmt.Errorf("LIMIT: invalid argument")
+	}
+	n, err := args[0].ToInt64()
+	if err != nil {
+		return nil, err
+	}
+	return helper.LIMIT(n)
 }
 
 var bindWindowRowID = helper.Scalar1(func(v value.Value) (value.Value, error) {
