@@ -57,6 +57,66 @@ func getSharedAnalyzerOptions() (*googlesql.AnalyzerOptions, error) {
 	return sharedAnalyzerOpt, sharedAnalyzerOptErr
 }
 
+// sharedParserOptions returns the parser options every statement is
+// parsed with, built once from the shared analyzer options' language
+// options.
+//
+// They deliberately carry no arena or IdStringPool. A ParserOptions with
+// its own arena makes every parse allocate its AST into that one
+// long-lived arena, which is only released with the options: that is
+// what AnalyzerOptions::GetParserOptions returns (the copy shares an
+// arena), and calling it per statement also leaked the copy itself,
+// since the bridge hands the by-value result back without a finalizer.
+// Without arenas the parser creates fresh ones per statement and the
+// ParserOutput owns them, so an AST's memory goes away with its output.
+// Together this leaked a few KiB of wasm memory per statement, which a
+// long-lived process (the BigQuery emulator) never got back.
+var (
+	sharedParserOptsOnce sync.Once
+	sharedParserOpts     *googlesql.ParserOptions
+	sharedParserOptsErr  error
+)
+
+func sharedParserOptions(opt *googlesql.AnalyzerOptions) (*googlesql.ParserOptions, error) {
+	sharedParserOptsOnce.Do(func() {
+		lang, err := opt.Language()
+		if err != nil {
+			sharedParserOptsErr = err
+			return
+		}
+		sharedParserOpts, sharedParserOptsErr = googlesql.NewParserOptions2(nil, nil, lang)
+	})
+	return sharedParserOpts, sharedParserOptsErr
+}
+
+// analyzerGCInterval is how many statement analyses may run between
+// forced garbage collections (see collectAnalyzerGarbage).
+const analyzerGCInterval = 1024
+
+// analyzedSinceGC counts analyses since the last forced collection. It
+// is only touched under wasmAnalyzeMu.
+var analyzedSinceGC int
+
+// collectAnalyzerGarbage keeps the wasm heap from ratcheting up under a
+// sustained stream of statements. Each analysis leaves wasm-side objects
+// (the parser and analyzer outputs with their ASTs) that go-googlesql
+// frees only from Go finalizers, i.e. after a GC cycle. Their Go handles
+// are tiny, so they add almost no Go allocation pressure, while the wasm
+// linear memory they occupy is a Go-heap byte slice that raises the next
+// GC target every time it grows; GC then runs less often and more
+// garbage piles up before it does. Forcing a collection every
+// analyzerGCInterval statements lets the finalizers return that memory
+// to the wasm allocator before it has to grow. Same approach as
+// Catalog.releaseRetiredCatalogs. Callers hold wasmAnalyzeMu.
+func collectAnalyzerGarbage() {
+	analyzedSinceGC++
+	if analyzedSinceGC < analyzerGCInterval {
+		return
+	}
+	analyzedSinceGC = 0
+	runtime.GC()
+}
+
 func NewAnalyzer(catalog *Catalog) (*Analyzer, error) {
 	opt, err := getSharedAnalyzerOptions()
 	if err != nil {
@@ -1135,7 +1195,7 @@ func timestampHasTZ(s string) bool {
 var (
 	// A bare date such as `2020-01-01` ends in `-01`, which is not an
 	// offset: an offset only follows a time of day.
-	dateOnlyRe = regexp.MustCompile(`^\s*\d{4}-\d{1,2}-\d{1,2}\s*$`)
+	dateOnlyRe      = regexp.MustCompile(`^\s*\d{4}-\d{1,2}-\d{1,2}\s*$`)
 	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*(?:>\s*)?['"]`)
 	// Match `[+-]HH`, `[+-]HHMM`, or `[+-]HH:MM` at the tail.
 	tzOffsetTail = regexp.MustCompile(`[+-]\d{2}(?::?\d{2})?\s*$`)
@@ -1248,7 +1308,7 @@ func (a *Analyzer) parseScript(query string) (*parsedScript, error) {
 	if loc == nil {
 		return nil, fmt.Errorf("failed to create parse resume location for %q: %w", query, locErr)
 	}
-	parserOpts, err := a.opt.GetParserOptions()
+	parserOpts, err := sharedParserOptions(a.opt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get parser options: %w", err)
 	}
@@ -1663,6 +1723,7 @@ func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode 
 			defer func() { _ = a.opt.SetFoldLiteralCast(true) }()
 		}
 	}
+	collectAnalyzerGarbage()
 	out, err := googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
 	if err != nil && strings.Contains(err.Error(), pivotCollationUnsupported) {
 		if retry, rquery, rerr := a.analyzeWithFoldedCollate(stmt, query); rerr == nil {

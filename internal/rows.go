@@ -24,6 +24,7 @@ type Rows struct {
 	conn    *Conn
 	columns []*ColumnSpec
 	actions []StmtAction
+	onClose func()
 }
 
 func (r *Rows) ChangedCatalog() *ChangedCatalog {
@@ -32,6 +33,11 @@ func (r *Rows) ChangedCatalog() *ChangedCatalog {
 
 func (r *Rows) SetActions(actions []StmtAction) {
 	r.actions = actions
+}
+
+// SetOnClose registers fn to run once when the rows are closed.
+func (r *Rows) SetOnClose(fn func()) {
+	r.onClose = fn
 }
 
 func (r *Rows) Columns() []string {
@@ -49,6 +55,10 @@ func (r *Rows) ColumnTypeDatabaseTypeName(i int) string {
 
 func (r *Rows) Close() (e error) {
 	defer func() {
+		if r.onClose != nil {
+			r.onClose()
+			r.onClose = nil
+		}
 		eg := new(ErrorGroup)
 		eg.Add(e)
 		for _, action := range r.actions {

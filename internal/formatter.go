@@ -216,9 +216,11 @@ func getFuncNameAndArgs(ctx context.Context, node *ResolvedBaseFunctionCallNode,
 		}
 	} else if existsCurrentTimeFunc {
 		if currentTime != nil {
+			// The frozen instant goes first: the binders read
+			// (unixNano) or (unixNano, zone).
 			args = append(
-				args,
-				fmt.Sprint(currentTime.UnixNano()),
+				[]string{fmt.Sprint(currentTime.UnixNano())},
+				args...,
 			)
 		}
 		funcName = fmt.Sprintf("%s_%s", funcPrefix, funcName)
