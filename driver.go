@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	googlesql "github.com/goccy/go-googlesql"
 	sqlite3 "github.com/ncruces/go-sqlite3"
@@ -335,6 +336,8 @@ type Conn struct {
 	systemVars     map[string]string
 	scriptVars     map[string]string
 	materializeCTE bool
+	// clock freezes the current time per statement on this connection.
+	clock *internal.StatementClock
 
 	// dead is set when an operation on this Conn observes that the
 	// inner *sql.Conn has been closed (sql.ErrConnDone). database/sql
@@ -409,7 +412,18 @@ func newConn(db *sql.DB, catalog *internal.Catalog) (*Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create analyzer: %w", err)
 	}
+	var clock *internal.StatementClock
+	if err := conn.Raw(func(dc any) error {
+		if sc, ok := dc.(sqlitedriver.Conn); ok {
+			clock = internal.TakeStatementClock(sc.Raw())
+		}
+		return nil
+	}); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("failed to get sqlite3 connection: %w", err)
+	}
 	return &Conn{
+		clock:          clock,
 		conn:           conn,
 		analyzer:       analyzer,
 		catalog:        catalog,
@@ -494,6 +508,7 @@ func (c *Conn) PrepareContext(ctx context.Context, query string) (s driver.Stmt,
 }
 
 func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (r driver.Result, e error) {
+	defer c.startStatementClock()()
 	defer func() { e = c.translateConnDone(e) }()
 	defer recoverPanicAsError(&e)
 	conn := internal.NewConnWithOptions(c.conn, nil, c.systemVars, c.scriptVars, c.materializeCTE)
@@ -530,6 +545,15 @@ func (c *Conn) ExecContext(ctx context.Context, query string, args []driver.Name
 }
 
 func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (r driver.Rows, e error) {
+	// The rows are read after QueryContext returns, so the clock stays
+	// frozen until they are closed (see the deferred function below).
+	endClock := c.startStatementClock()
+	clockHandedOff := false
+	defer func() {
+		if !clockHandedOff {
+			endClock()
+		}
+	}()
 	defer func() { e = c.translateConnDone(e) }()
 	defer recoverPanicAsError(&e)
 	conn := internal.NewConnWithOptions(c.conn, nil, c.systemVars, c.scriptVars, c.materializeCTE)
@@ -562,6 +586,8 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 			// so cleanup action should be executed in the Close() process of Rows.
 			// For that, let Rows have a reference to actions ( and connection ).
 			rows.SetActions(actions)
+			rows.SetOnClose(endClock)
+			clockHandedOff = true
 		}
 	}()
 	for _, actionFunc := range actionFuncs {
@@ -693,4 +719,12 @@ func (c *Conn) execTxEnd(command string) error {
 	}
 	_, err := c.conn.ExecContext(context.Background(), query)
 	return err
+}
+
+// startStatementClock freezes CURRENT_TIMESTAMP and friends for the
+// statement that is about to run on this connection (see
+// internal.StatementClock) and returns the function that releases it.
+func (c *Conn) startStatementClock() func() {
+	token := c.clock.Start(time.Now())
+	return func() { c.clock.End(token) }
 }

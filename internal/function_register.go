@@ -425,13 +425,21 @@ func RegisterFunctions(conn *sqlite3.Conn) error {
 		return fmt.Errorf("failed to register collate function: %w", err)
 	}
 
+	clock := newStatementClock(conn)
+	clockNames := clockFuncNames()
 	for _, values := range normalFuncMap {
 		for _, v := range values {
 			flags := deterministic
 			if v.NonDeterministic {
 				flags = sqlitex.FunctionFlags{}
 			}
-			if err := sqlitex.RegisterFunc(conn, v.Name, v.Func, flags); err != nil {
+			fn := v.Func
+			if _, ok := clockNames[v.Name]; ok {
+				if f, ok := v.Func.(func(...any) (any, error)); ok {
+					fn = withStatementClock(clock, f)
+				}
+			}
+			if err := sqlitex.RegisterFunc(conn, v.Name, fn, flags); err != nil {
 				return fmt.Errorf("failed to register function %s: %w", v.Name, err)
 			}
 		}
