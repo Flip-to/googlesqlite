@@ -51,6 +51,22 @@ func BindArrayAgg() func() *helper.Aggregator {
 	}
 }
 
+// BindArrayAggNullable is ARRAY_AGG for an intermediate result (inside
+// a subquery expression): NULL inputs are kept as NULL elements.
+func BindArrayAggNullable() func() *helper.Aggregator {
+	return func() *helper.Aggregator {
+		fn := &ARRAY_AGG{}
+		return helper.NewAggregator(
+			func(args []value.Value, opt *helper.Option) error {
+				return fn.Step(args[0], opt)
+			},
+			func() (value.Value, error) {
+				return fn.Done()
+			},
+		)
+	}
+}
+
 func BindArrayConcatAgg() func() *helper.Aggregator {
 	return func() *helper.Aggregator {
 		fn := &ARRAY_CONCAT_AGG{}
@@ -266,9 +282,9 @@ func BindStringAgg() func() *helper.Aggregator {
 		return helper.NewAggregator(
 			func(args []value.Value, opt *helper.Option) error {
 				if len(args) == 1 {
-					return fn.Step(args[0], "", opt)
+					return fn.Step(args[0], ",", opt)
 				}
-				delim, err := args[1].ToString()
+				delim, err := value.RawText(args[1])
 				if err != nil {
 					return err
 				}

@@ -3,6 +3,8 @@ dialect: googlesql
 cases:
   - desc: subtract interval
     sql: SELECT CAST(DATETIME_SUB(DATETIME "2024-03-15T12:00:00", INTERVAL 1 HOUR) AS STRING)
+    # CAST(DATETIME AS STRING) uses a space separator
+    # (googlesql compliance/testdata/cast_function.test).
     expected:
       rows:
-        - ["2024-03-15T11:00:00"]
+        - ["2024-03-15 11:00:00"]

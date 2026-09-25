@@ -1,314 +1,186 @@
 package window
 
 import (
-	"math"
-
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
-// Native, frame-driven implementations of the statistical window
-// aggregators. Each one mirrors the predecessor's semantics but runs
-// incrementally: Step appends to a sliding buffer, Inverse pops the
-// oldest entry, Done computes the result over the active frame.
-// Because these aggregators are non-trivial to update via running
-// sums (e.g. STDDEV needs running sum and sum-of-squares simultaneously
-// with a numerically stable variant), we keep the buffer-and-recompute
-// shape — still O(frame_size) per Done() vs the predecessor's
-// O(N²) full rescan.
+// Native, frame-driven statistical window aggregators. Step appends
+// the row to a buffer, Inverse drops the oldest row, and Done computes
+// the result over the frame with the same moments code as the plain
+// aggregates (helper.MomentSeries / helper.MomentPairs), so NULL, NaN,
+// infinities, NUMERIC precision and minimum row counts behave the same
+// in both.
 
-// floatWindow is a shared base for single-input numeric statistical
-// windows. The captured Distinct / IgnoreNulls flags match the
-// predecessor's parsing of the option markers.
-type floatWindow struct {
-	values      []float64
-	hasValue    []bool // parallel to values; tracks NULL inputs
+type statWindow struct {
+	rows        [][]value.Value // one entry per frame row: its inputs
 	distinct    bool
 	ignoreNulls bool
 	once        bool
 }
 
-func (f *floatWindow) absorbOpts(values []value.Value) (filtered []value.Value, _ error) {
+func (w *statWindow) step(args ...any) error {
+	values, err := value.ConvertArgs(args...)
+	if err != nil {
+		return err
+	}
 	values, opt := helper.ParseOptions(values...)
 	values, _ = parseWindowOptions(values...)
-	if !f.once {
-		f.distinct = opt.Distinct
-		f.ignoreNulls = opt.IgnoreNulls
-		f.once = true
+	if !w.once {
+		w.distinct = opt.Distinct
+		w.ignoreNulls = opt.IgnoreNulls
+		w.once = true
 	}
-	return values, nil
-}
-
-func (f *floatWindow) appendStep(stepArgs ...any) error {
-	values, err := value.ConvertArgs(stepArgs...)
-	if err != nil {
-		return err
-	}
-	values, err = f.absorbOpts(values)
-	if err != nil {
-		return err
-	}
-	if len(values) == 0 || values[0] == nil {
-		f.values = append(f.values, 0)
-		f.hasValue = append(f.hasValue, false)
-		return nil
-	}
-	v, err := values[0].ToFloat64()
-	if err != nil {
-		return err
-	}
-	f.values = append(f.values, v)
-	f.hasValue = append(f.hasValue, true)
+	w.rows = append(w.rows, values)
 	return nil
 }
 
-func (f *floatWindow) popFront() {
-	if len(f.values) == 0 {
-		return
+func (w *statWindow) popFront() {
+	if len(w.rows) > 0 {
+		w.rows = w.rows[1:]
 	}
-	f.values = f.values[1:]
-	f.hasValue = f.hasValue[1:]
 }
 
-// activeValues returns the non-null float64 entries in the current
-// frame, applying DISTINCT when requested.
-func (f *floatWindow) activeValues() []float64 {
-	if !f.distinct {
-		out := make([]float64, 0, len(f.values))
-		for i, v := range f.values {
-			if !f.hasValue[i] {
+// active returns the frame rows whose inputs are all non-NULL, with
+// DISTINCT applied to the first input when requested.
+func (w *statWindow) active(n int) ([][]value.Value, error) {
+	seen := map[string]struct{}{}
+	var out [][]value.Value
+	for _, r := range w.rows {
+		if len(r) < n {
+			continue
+		}
+		null := false
+		for _, v := range r[:n] {
+			if v == nil {
+				null = true
+			}
+		}
+		if null {
+			continue
+		}
+		if w.distinct {
+			key, err := value.DistinctKey(r[0])
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			out = append(out, v)
+			seen[key] = struct{}{}
 		}
-		return out
+		out = append(out, r[:n])
 	}
-	seen := map[float64]struct{}{}
-	out := make([]float64, 0, len(f.values))
-	for i, v := range f.values {
-		if !f.hasValue[i] {
-			continue
-		}
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
+	return out, nil
 }
 
-// --- single-arg statistical windows ---------------------------------
-
-type stddevPopWindow struct{ floatWindow }
-
-func NewStddevPopWindowNative() func() any        { return func() any { return &stddevPopWindow{} } }
-func (a *stddevPopWindow) Step(args ...any) error { return a.appendStep(args...) }
-func (a *stddevPopWindow) Inverse(_ ...any) error { a.popFront(); return nil }
-func (a *stddevPopWindow) Done() (any, error) {
-	xs := a.activeValues()
-	if len(xs) < 1 {
-		return nil, nil
-	}
-	mean := mean(xs)
-	var ss float64
-	for _, x := range xs {
-		d := x - mean
-		ss += d * d
-	}
-	return math.Sqrt(ss / float64(len(xs))), nil
-}
-
-type stddevSampWindow struct{ floatWindow }
-
-func NewStddevSampWindowNative() func() any        { return func() any { return &stddevSampWindow{} } }
-func (a *stddevSampWindow) Step(args ...any) error { return a.appendStep(args...) }
-func (a *stddevSampWindow) Inverse(_ ...any) error { a.popFront(); return nil }
-func (a *stddevSampWindow) Done() (any, error) {
-	xs := a.activeValues()
-	if len(xs) < 2 {
-		return nil, nil
-	}
-	mean := mean(xs)
-	var ss float64
-	for _, x := range xs {
-		d := x - mean
-		ss += d * d
-	}
-	return math.Sqrt(ss / float64(len(xs)-1)), nil
-}
-
-type varPopWindow struct{ floatWindow }
-
-func NewVarPopWindowNative() func() any        { return func() any { return &varPopWindow{} } }
-func (a *varPopWindow) Step(args ...any) error { return a.appendStep(args...) }
-func (a *varPopWindow) Inverse(_ ...any) error { a.popFront(); return nil }
-func (a *varPopWindow) Done() (any, error) {
-	xs := a.activeValues()
-	if len(xs) < 1 {
-		return nil, nil
-	}
-	mean := mean(xs)
-	var ss float64
-	for _, x := range xs {
-		d := x - mean
-		ss += d * d
-	}
-	return ss / float64(len(xs)), nil
-}
-
-type varSampWindow struct{ floatWindow }
-
-func NewVarSampWindowNative() func() any        { return func() any { return &varSampWindow{} } }
-func (a *varSampWindow) Step(args ...any) error { return a.appendStep(args...) }
-func (a *varSampWindow) Inverse(_ ...any) error { a.popFront(); return nil }
-func (a *varSampWindow) Done() (any, error) {
-	xs := a.activeValues()
-	if len(xs) < 2 {
-		return nil, nil
-	}
-	mean := mean(xs)
-	var ss float64
-	for _, x := range xs {
-		d := x - mean
-		ss += d * d
-	}
-	return ss / float64(len(xs)-1), nil
-}
-
-// --- two-arg statistical windows (CORR, COVAR_*) -------------------
-
-// pairWindow is the analogue of floatWindow for functions that take
-// two numeric arguments. NULLs in either coordinate cause the pair
-// to be skipped (matches BigQuery semantics).
-type pairWindow struct {
-	xs, ys      []float64
-	has         []bool
-	once        bool
-	ignoreNulls bool
-	distinct    bool
-}
-
-func (p *pairWindow) appendStep(stepArgs ...any) error {
-	values, err := value.ConvertArgs(stepArgs...)
+func (w *statWindow) series() (*helper.MomentSeries, error) {
+	rows, err := w.active(1)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	values, opt := helper.ParseOptions(values...)
-	values, _ = parseWindowOptions(values...)
-	if !p.once {
-		p.ignoreNulls = opt.IgnoreNulls
-		p.distinct = opt.Distinct
-		p.once = true
-	}
-	if len(values) < 2 || values[0] == nil || values[1] == nil {
-		p.xs = append(p.xs, 0)
-		p.ys = append(p.ys, 0)
-		p.has = append(p.has, false)
-		return nil
-	}
-	xv, err := values[0].ToFloat64()
-	if err != nil {
-		return err
-	}
-	yv, err := values[1].ToFloat64()
-	if err != nil {
-		return err
-	}
-	p.xs = append(p.xs, xv)
-	p.ys = append(p.ys, yv)
-	p.has = append(p.has, true)
-	return nil
-}
-
-func (p *pairWindow) popFront() {
-	if len(p.xs) == 0 {
-		return
-	}
-	p.xs = p.xs[1:]
-	p.ys = p.ys[1:]
-	p.has = p.has[1:]
-}
-
-func (p *pairWindow) activePairs() (xs, ys []float64) {
-	xs = make([]float64, 0, len(p.xs))
-	ys = make([]float64, 0, len(p.ys))
-	for i := range p.xs {
-		if !p.has[i] {
-			continue
+	var s helper.MomentSeries
+	for _, r := range rows {
+		if err := s.Add(r[0]); err != nil {
+			return nil, err
 		}
-		xs = append(xs, p.xs[i])
-		ys = append(ys, p.ys[i])
 	}
-	return xs, ys
+	return &s, nil
 }
 
-type corrWindow struct{ pairWindow }
+func (w *statWindow) pairs() (*helper.MomentPairs, error) {
+	rows, err := w.active(2)
+	if err != nil {
+		return nil, err
+	}
+	var p helper.MomentPairs
+	for _, r := range rows {
+		// CORR(y, x) and COVAR_*(y, x): the argument order does not
+		// matter for the result.
+		if err := p.Add(r[0], r[1]); err != nil {
+			return nil, err
+		}
+	}
+	return &p, nil
+}
 
-func NewCorrWindowNative() func() any        { return func() any { return &corrWindow{} } }
-func (a *corrWindow) Step(args ...any) error { return a.appendStep(args...) }
-func (a *corrWindow) Inverse(_ ...any) error { a.popFront(); return nil }
-func (a *corrWindow) Done() (any, error) {
-	xs, ys := a.activePairs()
-	if len(xs) < 2 {
+func encodeStat(v value.Value) (any, error) {
+	if v == nil {
 		return nil, nil
 	}
-	mx, my := mean(xs), mean(ys)
-	var sxy, sxx, syy float64
-	for i := range xs {
-		dx := xs[i] - mx
-		dy := ys[i] - my
-		sxy += dx * dy
-		sxx += dx * dx
-		syy += dy * dy
-	}
-	denom := math.Sqrt(sxx * syy)
-	if denom == 0 {
-		return nil, nil
-	}
-	return sxy / denom, nil
+	return value.EncodeValue(v)
 }
 
-type covarPopWindow struct{ pairWindow }
-
-func NewCovarPopWindowNative() func() any        { return func() any { return &covarPopWindow{} } }
-func (a *covarPopWindow) Step(args ...any) error { return a.appendStep(args...) }
-func (a *covarPopWindow) Inverse(_ ...any) error { a.popFront(); return nil }
-func (a *covarPopWindow) Done() (any, error) {
-	xs, ys := a.activePairs()
-	if len(xs) < 1 {
-		return nil, nil
-	}
-	mx, my := mean(xs), mean(ys)
-	var sxy float64
-	for i := range xs {
-		sxy += (xs[i] - mx) * (ys[i] - my)
-	}
-	return sxy / float64(len(xs)), nil
+type varianceWindow struct {
+	statWindow
+	ddof int
+	sqrt bool
 }
 
-type covarSampWindow struct{ pairWindow }
-
-func NewCovarSampWindowNative() func() any        { return func() any { return &covarSampWindow{} } }
-func (a *covarSampWindow) Step(args ...any) error { return a.appendStep(args...) }
-func (a *covarSampWindow) Inverse(_ ...any) error { a.popFront(); return nil }
-func (a *covarSampWindow) Done() (any, error) {
-	xs, ys := a.activePairs()
-	if len(xs) < 2 {
-		return nil, nil
+func (a *varianceWindow) Step(args ...any) error { return a.step(args...) }
+func (a *varianceWindow) Inverse(_ ...any) error { a.popFront(); return nil }
+func (a *varianceWindow) Done() (any, error) {
+	s, err := a.series()
+	if err != nil {
+		return nil, err
 	}
-	mx, my := mean(xs), mean(ys)
-	var sxy float64
-	for i := range xs {
-		sxy += (xs[i] - mx) * (ys[i] - my)
-	}
-	return sxy / float64(len(xs)-1), nil
+	return encodeStat(s.Variance(a.ddof, a.sqrt))
 }
 
-func mean(xs []float64) float64 {
-	var s float64
-	for _, v := range xs {
-		s += v
-	}
-	return s / float64(len(xs))
+func NewStddevPopWindowNative() func() any {
+	return func() any { return &varianceWindow{ddof: 0, sqrt: true} }
 }
+
+func NewStddevSampWindowNative() func() any {
+	return func() any { return &varianceWindow{ddof: 1, sqrt: true} }
+}
+
+func NewVarPopWindowNative() func() any {
+	return func() any { return &varianceWindow{ddof: 0} }
+}
+
+func NewVarSampWindowNative() func() any {
+	return func() any { return &varianceWindow{ddof: 1} }
+}
+
+type covarianceWindow struct {
+	statWindow
+	ddof int
+	corr bool
+}
+
+func (a *covarianceWindow) Step(args ...any) error { return a.step(args...) }
+func (a *covarianceWindow) Inverse(_ ...any) error { a.popFront(); return nil }
+func (a *covarianceWindow) Done() (any, error) {
+	p, err := a.pairs()
+	if err != nil {
+		return nil, err
+	}
+	if a.corr {
+		return encodeStat(p.Correlation())
+	}
+	return encodeStat(p.Covariance(a.ddof))
+}
+
+func NewCorrWindowNative() func() any {
+	return func() any { return &covarianceWindow{corr: true} }
+}
+
+func NewCovarPopWindowNative() func() any {
+	return func() any { return &covarianceWindow{ddof: 0} }
+}
+
+func NewCovarSampWindowNative() func() any {
+	return func() any { return &covarianceWindow{ddof: 1} }
+}
+
+// Names used by the package's unit tests.
+type (
+	stddevPopWindow  = varianceWindow
+	stddevSampWindow = varianceWindow
+	varPopWindow     = varianceWindow
+	varSampWindow    = varianceWindow
+	corrWindow       = covarianceWindow
+	covarPopWindow   = covarianceWindow
+	covarSampWindow  = covarianceWindow
+)

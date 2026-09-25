@@ -2,7 +2,7 @@ package json
 
 import (
 	"fmt"
-	"reflect"
+	"strings"
 
 	"github.com/goccy/go-json"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
@@ -10,29 +10,40 @@ import (
 )
 
 func JSON_VALUE(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}
 	if p.UsedSingleQuotePathSelector() {
 		return nil, fmt.Errorf("JSON_VALUE: doesn't use single quote path selector")
 	}
-	var values []any
-	if err := p.Unmarshal([]byte(v), &values); err != nil {
-		return nil, err
-	}
-	if len(values) == 0 {
+	// Invalid JSON input gives NULL, as BigQuery does for STRING input.
+	if !json.Valid([]byte(v)) {
 		return nil, nil
 	}
-	val := values[0]
-	if !reflect.ValueOf(val).IsValid() {
+	extracted, err := p.Extract([]byte(v))
+	if err != nil || len(extracted) == 0 {
 		return nil, nil
 	}
-	switch reflect.ValueOf(val).Type().Kind() {
-	case reflect.Map, reflect.Slice:
+	return scalarFromRawJSON(extracted[0])
+}
+
+// scalarFromRawJSON converts a JSON scalar to JSON_VALUE's STRING result,
+// keeping a number's original text (JSON_VALUE('{"a": 1.0}', '$.a') is
+// '1.0', not '1'). Objects, arrays and null give NULL.
+func scalarFromRawJSON(raw json.RawMessage) (value.Value, error) {
+	text := strings.TrimSpace(string(raw))
+	switch {
+	case text == "" || text == "null" || text[0] == '{' || text[0] == '[':
 		return nil, nil
+	case text[0] == '"':
+		var s string
+		if err := json.Unmarshal([]byte(text), &s); err != nil {
+			return nil, err
+		}
+		return value.StringValue(s), nil
 	}
-	return value.StringValue(fmt.Sprint(val)), nil
+	return value.StringValue(text), nil
 }
 
 var BindJsonValue = helper.Scalar2(func(a, b value.Value) (value.Value, error) {

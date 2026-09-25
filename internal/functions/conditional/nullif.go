@@ -9,11 +9,12 @@ func NULLIF(expr, exprToMatch value.Value) (value.Value, error) {
 	if expr == nil {
 		return nil, nil
 	}
-	cond, err := expr.EQ(exprToMatch)
+	// A NULL comparison is not a match, so NULLIF('a', NULL) is 'a'.
+	eq, err := value.SQLEquals(expr, exprToMatch)
 	if err != nil {
 		return nil, err
 	}
-	if cond {
+	if eq != nil && *eq {
 		return nil, nil
 	}
 	return expr, nil

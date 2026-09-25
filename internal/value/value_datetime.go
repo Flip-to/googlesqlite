@@ -13,16 +13,7 @@ type DatetimeValue time.Time
 func (d DatetimeValue) Add(v Value) (Value, error) {
 	src := time.Time(d)
 	if vv, ok := v.(*IntervalValue); ok {
-		return DatetimeValue(time.Date(
-			src.Year()+int(vv.Years),
-			time.Month(int(src.Month())+int(vv.Months)),
-			src.Day()+int(vv.Days),
-			src.Hour()+int(vv.Hours),
-			src.Minute()+int(vv.Minutes),
-			src.Second()+int(vv.Seconds),
-			src.Nanosecond()+int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return DatetimeValue(addInterval(src, vv, 1)), nil
 	}
 	return nil, fmt.Errorf("failed to use add operator for datetime and %T type", v)
 }
@@ -30,16 +21,7 @@ func (d DatetimeValue) Add(v Value) (Value, error) {
 func (d DatetimeValue) Sub(v Value) (Value, error) {
 	src := time.Time(d)
 	if vv, ok := v.(*IntervalValue); ok {
-		return DatetimeValue(time.Date(
-			src.Year()-int(vv.Years),
-			time.Month(int(src.Month())-int(vv.Months)),
-			src.Day()-int(vv.Days),
-			src.Hour()-int(vv.Hours),
-			src.Minute()-int(vv.Minutes),
-			src.Second()-int(vv.Seconds),
-			src.Nanosecond()-int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return DatetimeValue(addInterval(src, vv, -1)), nil
 	}
 	dst, err := v.ToTime()
 	if err != nil {
@@ -141,9 +123,15 @@ func (d DatetimeValue) ToRat() (*big.Rat, error) {
 	return nil, fmt.Errorf("failed to convert *big.Rat from datetime %v", d)
 }
 
+// SQLString is the canonical text for CAST(DATETIME AS STRING): a
+// space separator and fractional seconds without trailing zeros.
+func (d DatetimeValue) SQLString() string {
+	return time.Time(d).Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(d))
+}
+
 func (d DatetimeValue) Format(verb rune) string {
 	// FORMAT separates date and time with a space, unlike datetimeFormat.
-	printable := time.Time(d).Format("2006-01-02 15:04:05.999999")
+	printable := time.Time(d).Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(d))
 	switch verb {
 	case 't':
 		return printable

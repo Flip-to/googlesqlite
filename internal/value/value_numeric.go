@@ -201,3 +201,20 @@ func (nv *NumericValue) Format(verb rune) string {
 func (nv *NumericValue) Interface() any {
 	return nv.String()
 }
+
+var (
+	// NUMERIC holds 38 digits with scale 9: |x| < 10^29.
+	numericLimit = new(big.Rat).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(29), nil))
+	// BIGNUMERIC is a 256-bit value with scale 38.
+	bigNumericMax, _ = new(big.Rat).SetString("578960446186580977117854925043439539266.34992332820282019728792003956564819967")
+	bigNumericMin, _ = new(big.Rat).SetString("-578960446186580977117854925043439539266.34992332820282019728792003956564819968")
+)
+
+// CheckNumericRange reports whether r fits NUMERIC (or BIGNUMERIC).
+func CheckNumericRange(r *big.Rat, isBigNumeric bool) bool {
+	if isBigNumeric {
+		return r.Cmp(bigNumericMin) >= 0 && r.Cmp(bigNumericMax) <= 0
+	}
+	abs := new(big.Rat).Abs(r)
+	return abs.Cmp(numericLimit) < 0
+}

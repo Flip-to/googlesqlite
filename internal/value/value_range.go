@@ -60,20 +60,67 @@ func (r *RangeValue) EQ(other Value) (bool, error) {
 	return true, nil
 }
 
-func (r *RangeValue) GT(Value) (bool, error) {
-	return false, fmt.Errorf("unsupported gt operator for range value")
+// compare orders ranges by start, then end. An unbounded start sorts
+// before every bounded start and an unbounded end after every bounded
+// end, as in GoogleSQL's RANGE ordering.
+func (r *RangeValue) compare(other Value) (int, error) {
+	rr, ok := other.(*RangeValue)
+	if !ok {
+		return 0, fmt.Errorf("RANGE comparison: other side is %T", other)
+	}
+	c, err := compareBound(r.Start, rr.Start, -1)
+	if err != nil || c != 0 {
+		return c, err
+	}
+	return compareBound(r.End, rr.End, 1)
 }
 
-func (r *RangeValue) GTE(Value) (bool, error) {
-	return false, fmt.Errorf("unsupported gte operator for range value")
+// compareBound compares two range bounds; unboundedSign is where a
+// nil (unbounded) bound sorts: -1 before everything, 1 after.
+func compareBound(a, b Value, unboundedSign int) (int, error) {
+	switch {
+	case a == nil && b == nil:
+		return 0, nil
+	case a == nil:
+		return unboundedSign, nil
+	case b == nil:
+		return -unboundedSign, nil
+	}
+	lt, err := a.LT(b)
+	if err != nil {
+		return 0, err
+	}
+	if lt {
+		return -1, nil
+	}
+	gt, err := a.GT(b)
+	if err != nil {
+		return 0, err
+	}
+	if gt {
+		return 1, nil
+	}
+	return 0, nil
 }
 
-func (r *RangeValue) LT(Value) (bool, error) {
-	return false, fmt.Errorf("unsupported lt operator for range value")
+func (r *RangeValue) GT(v Value) (bool, error) {
+	c, err := r.compare(v)
+	return c > 0, err
 }
 
-func (r *RangeValue) LTE(Value) (bool, error) {
-	return false, fmt.Errorf("unsupported lte operator for range value")
+func (r *RangeValue) GTE(v Value) (bool, error) {
+	c, err := r.compare(v)
+	return c >= 0, err
+}
+
+func (r *RangeValue) LT(v Value) (bool, error) {
+	c, err := r.compare(v)
+	return c < 0, err
+}
+
+func (r *RangeValue) LTE(v Value) (bool, error) {
+	c, err := r.compare(v)
+	return c <= 0, err
 }
 
 func (r *RangeValue) ToInt64() (int64, error) {
@@ -114,9 +161,13 @@ func (r *RangeValue) ToString() (string, error) {
 func rangeBoundDisplay(v Value) (string, error) {
 	switch x := v.(type) {
 	case DatetimeValue:
-		return time.Time(x).Format("2006-01-02 15:04:05.999999"), nil
+		return time.Time(x).Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(x)), nil
 	case TimestampValue:
-		return time.Time(x).UTC().Format("2006-01-02 15:04:05.000000") + "+00", nil
+		// BigQuery prints a TIMESTAMP bound like TIMESTAMP text: no
+		// fraction when it is zero, otherwise groups of three digits
+		// ("[2022-10-01 21:53:27+00, 2022-10-01 23:00:00.500+00)").
+		t := time.Time(x).UTC()
+		return t.Format("2006-01-02 15:04:05") + fractionInGroups(t) + "+00", nil
 	}
 	return v.ToString()
 }

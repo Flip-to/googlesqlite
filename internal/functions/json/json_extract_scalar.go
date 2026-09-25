@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/goccy/go-json"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
 func JSON_EXTRACT_SCALAR(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -22,6 +21,9 @@ func JSON_EXTRACT_SCALAR(v, path string) (value.Value, error) {
 		return nil, nil
 	}
 	val := values[0]
+	if val == nil {
+		return nil, nil
+	}
 	switch reflect.ValueOf(val).Type().Kind() {
 	case reflect.Map, reflect.Slice:
 		return nil, nil

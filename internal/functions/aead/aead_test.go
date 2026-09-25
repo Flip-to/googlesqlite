@@ -1,6 +1,7 @@
 package aead
 
 import (
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -20,6 +21,15 @@ func newKeyset(t *testing.T) value.Value {
 	return got
 }
 
+func newDeterministicKeyset(t *testing.T) value.Value {
+	t.Helper()
+	got, err := BindKeysNewKeyset(value.StringValue("DETERMINISTIC_AEAD_AES_SIV_CMAC_256"))
+	if err != nil {
+		t.Fatalf("BindKeysNewKeyset: %v", err)
+	}
+	return got
+}
+
 // --- BindKeysNewKeyset ---
 
 func TestBindKeysNewKeyset(t *testing.T) {
@@ -31,8 +41,8 @@ func TestBindKeysNewKeyset(t *testing.T) {
 	if len(b) == 0 {
 		t.Fatalf("expected keyset bytes")
 	}
-	if !strings.Contains(string(b), "AEAD_AES_GCM_256") {
-		t.Fatalf("keyset missing algorithm marker: %s", string(b))
+	if !strings.Contains(string(b), "type.googleapis.com/google.crypto.tink.AesGcmKey") {
+		t.Fatalf("keyset missing AesGcmKey type URL: %q", string(b))
 	}
 }
 
@@ -98,16 +108,17 @@ func TestBindKeysKeysetJsonRoundtrip(t *testing.T) {
 		t.Fatalf("BindKeysKeysetToJson: %v", err)
 	}
 	s, _ := jsonForm.ToString()
-	if !strings.Contains(s, "AEAD_AES_GCM_256") {
-		t.Fatalf("JSON form missing algorithm: %s", s)
+	if !strings.Contains(s, `"typeUrl":"type.googleapis.com/google.crypto.tink.AesGcmKey"`) {
+		t.Fatalf("JSON form missing AesGcmKey type URL: %s", s)
 	}
 	roundtrip, err := BindKeysKeysetFromJson(jsonForm)
 	if err != nil {
 		t.Fatalf("BindKeysKeysetFromJson: %v", err)
 	}
 	rtBytes, _ := roundtrip.ToBytes()
-	if string(rtBytes) != s {
-		t.Fatalf("FROM_JSON did not round-trip: got %s want %s", string(rtBytes), s)
+	orig, _ := ks.ToBytes()
+	if string(rtBytes) != string(orig) {
+		t.Fatalf("FROM_JSON did not round-trip: got %x want %x", rtBytes, orig)
 	}
 }
 
@@ -138,7 +149,7 @@ func TestBindKeysAddKeyFromRawBytes(t *testing.T) {
 	}
 	got, err := BindKeysAddKeyFromRawBytes(
 		ks,
-		value.StringValue("AEAD_AES_GCM_256"),
+		value.StringValue("AES_GCM"),
 		value.BytesValue(raw),
 	)
 	if err != nil {
@@ -152,18 +163,33 @@ func TestBindKeysAddKeyFromRawBytes(t *testing.T) {
 }
 
 func TestBindKeysAddKeyFromRawBytesEmptyKeyset(t *testing.T) {
-	// Empty keyset + add → 1 key
+	// An empty keyset is invalid (compliance keys.test, safe_functions).
 	raw := make([]byte, 32)
-	got, err := BindKeysAddKeyFromRawBytes(
+	if _, err := BindKeysAddKeyFromRawBytes(
 		value.BytesValue([]byte{}),
-		value.StringValue("AEAD_AES_GCM_256"),
+		value.StringValue("AES_GCM"),
 		value.BytesValue(raw),
-	)
-	if err != nil {
-		t.Fatalf("BindKeysAddKeyFromRawBytes empty: %v", err)
+	); err == nil {
+		t.Fatalf("expected an error for an empty keyset")
 	}
-	if got == nil {
-		t.Fatalf("expected non-nil keyset")
+}
+
+func TestAESSIVRFC5297Vector(t *testing.T) {
+	// RFC 5297 Appendix A.1 (deterministic authenticated encryption).
+	key, _ := hex.DecodeString("fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff")
+	ad, _ := hex.DecodeString("101112131415161718191a1b1c1d1e1f2021222324252627")
+	pt, _ := hex.DecodeString("112233445566778899aabbccddee")
+	want := "85632d07c6e8f37f950acd320a2ecc9340c02b9690c4dc04daef7f6afe5c"
+	got, err := sivEncrypt(key, pt, ad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(got) != want {
+		t.Fatalf("AES-SIV = %x, want %s", got, want)
+	}
+	back, err := sivDecrypt(key, got, ad)
+	if err != nil || hex.EncodeToString(back) != hex.EncodeToString(pt) {
+		t.Fatalf("AES-SIV decrypt = %x, %v", back, err)
 	}
 }
 
@@ -290,7 +316,7 @@ func TestBindAeadDecryptShortCiphertext(t *testing.T) {
 // --- BindDeterministicEncrypt / BindDeterministicDecrypt* ---
 
 func TestBindDeterministicEncryptIsStable(t *testing.T) {
-	ks := newKeyset(t)
+	ks := newDeterministicKeyset(t)
 	plaintext := value.StringValue("payload")
 	aad := value.StringValue("aad")
 
@@ -320,7 +346,7 @@ func TestBindDeterministicEncryptIsStable(t *testing.T) {
 }
 
 func TestBindDeterministicDecryptBytes(t *testing.T) {
-	ks := newKeyset(t)
+	ks := newDeterministicKeyset(t)
 	plaintext := value.BytesValue([]byte{9, 8, 7})
 	aad := value.BytesValue([]byte("aad"))
 

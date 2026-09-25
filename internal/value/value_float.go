@@ -43,7 +43,14 @@ func (fv FloatValue) Div(v Value) (Value, error) {
 	if v2 == 0 {
 		return nil, fmt.Errorf("zero divided error ( %f / 0 )", fv)
 	}
-	return FloatValue(float64(fv) / v2), nil
+	x := float64(fv) / v2
+	if math.IsInf(x, 0) && !math.IsInf(float64(fv), 0) && !math.IsInf(v2, 0) {
+		// Finite operands whose quotient overflows are an error, not
+		// +/-inf (compliance arithmetic_functions.test
+		// arithmetic_functions_14).
+		return nil, fmt.Errorf("double overflow: %g / %g", float64(fv), v2)
+	}
+	return FloatValue(x), nil
 }
 
 func (fv FloatValue) EQ(v Value) (bool, error) {
@@ -176,4 +183,10 @@ func (fv FloatValue) Format(verb rune) string {
 
 func (fv FloatValue) Interface() any {
 	return float64(fv)
+}
+
+// IsNaN reports whether v is a FLOAT64 NaN.
+func IsNaN(v Value) bool {
+	f, ok := v.(FloatValue)
+	return ok && f != f
 }

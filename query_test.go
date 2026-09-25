@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"fmt"
 	"math"
 	"os"
 	"reflect"
@@ -3219,9 +3220,13 @@ FROM Items`,
 			}},
 		},
 		{
-			name:        "array_agg with nulls",
-			query:       `SELECT ARRAY_AGG(x) AS array_agg FROM UNNEST([NULL, 1, -2, 3, -2, 1, NULL]) AS x`,
-			expectedErr: "ARRAY_AGG: input value must be not null",
+			// ARRAY_AGG keeps NULL inputs (GoogleSQL compliance
+			// array_aggregation.test, array_agg_with_nulls).
+			name:  "array_agg with nulls",
+			query: `SELECT ARRAY_AGG(x) AS array_agg FROM UNNEST([NULL, 1, -2, 3, -2, 1, NULL]) AS x`,
+			expectedRows: [][]any{{
+				[]any{nil, int64(1), int64(-2), int64(3), int64(-2), int64(1), nil},
+			}},
 		},
 		{
 			name:  "array_agg with null in order by",
@@ -3231,9 +3236,11 @@ FROM Items`,
 			}},
 		},
 		{
-			name:        "array_agg with struct",
-			query:       `SELECT b, ARRAY_AGG(a) FROM UNNEST([STRUCT(1 AS a, 2 AS b), STRUCT(NULL AS a, 2 AS b)]) GROUP BY b`,
-			expectedErr: "ARRAY_AGG: input value must be not null",
+			name:  "array_agg with struct",
+			query: `SELECT b, ARRAY_AGG(a) FROM UNNEST([STRUCT(1 AS a, 2 AS b), STRUCT(NULL AS a, 2 AS b)]) GROUP BY b`,
+			expectedRows: [][]any{{
+				int64(2), []any{int64(1), nil},
+			}},
 		},
 		{
 			name:  "array_agg with ignore nulls",
@@ -3552,9 +3559,11 @@ SELECT LOGICAL_OR(x) AS logical_or FROM toks`,
 			expectedRows: [][]any{{nil}},
 		},
 		{
-			name:        "safe sum",
-			query:       `SELECT SAFE.SUM(x) AS sum FROM UNNEST([1, 2, 3, 4, 5, 4, 3, 2, 1]) AS x`,
-			expectedErr: "SAFE is not supported for function SUM",
+			// SAFE.SUM is supported (compliance safe_function.test,
+			// safe_agg_func_no_group_by; verified against BigQuery).
+			name:         "safe sum",
+			query:        `SELECT SAFE.SUM(x) AS sum FROM UNNEST([1, 2, 3, 4, 5, 4, 3, 2, 1]) AS x`,
+			expectedRows: [][]any{{int64(25)}},
 		},
 		{
 			name:         "approx_count_distinct",
@@ -3683,10 +3692,12 @@ FROM
       ('BR', 'customer_id_3', 'invoice_id_31'),
       ('UA', 'customer_id_2', 'invoice_id_24')])
 GROUP BY country`,
+			// Driver sketches are go-hll bytes behind a 0xff 'G' <type>
+			// tag ("/0cE" = STRING); see internal/functions/hll/zetasketch.go.
 			expectedRows: [][]any{
-				{"BR", "Eu9/P61VrRgkBrk="},
-				{"CZ", "Eu9/TliDjbmhVEA="},
-				{"UA", "Eu9/Ol8Q5++jVjNOWIONuaFUQA=="},
+				{"BR", "/0cEEu9/P61VrRgkBrk="},
+				{"CZ", "/0cEEu9/TliDjbmhVEA="},
+				{"UA", "/0cEEu9/Ol8Q5++jVjNOWIONuaFUQA=="},
 			},
 		},
 		{
@@ -3731,7 +3742,7 @@ FROM
           ('UA', 'customer_id_2', 'invoice_id_24')])
     GROUP BY country
   )`,
-			expectedRows: [][]any{{"Eu9/Ol8Q5++jVjM/rVWtGCQGuU5Yg425oVRA"}},
+			expectedRows: [][]any{{"/0cEEu9/Ol8Q5++jVjM/rVWtGCQGuU5Yg425oVRA"}},
 		},
 		{
 			name: "hll_count.extract",
@@ -5550,7 +5561,8 @@ SELECT characters, CHARACTER_LENGTH(characters) FROM example`,
 		{
 			name:         "chr",
 			query:        `SELECT CHR(65), CHR(255), CHR(513), CHR(1024), CHR(97), CHR(0xF9B5), CHR(0), CHR(NULL)`,
-			expectedRows: [][]any{{"A", "ÿ", "ȁ", "Ѐ", "a", "例", "", nil}},
+			// CHR(0) is the NUL character in BigQuery (strings.test strings_function_chr).
+			expectedRows: [][]any{{"A", "ÿ", "ȁ", "Ѐ", "a", "例", "\x00", nil}},
 		},
 		{
 			name:         "code_points_to_bytes",
@@ -5560,7 +5572,8 @@ SELECT characters, CHARACTER_LENGTH(characters) FROM example`,
 		{
 			name:         "code_points_to_string",
 			query:        `SELECT CODE_POINTS_TO_STRING([65, 255, 513, 1024]), CODE_POINTS_TO_STRING([97, 0, 0xF9B5]), CODE_POINTS_TO_STRING([65, 255, NULL, 1024]), CODE_POINTS_TO_STRING(NULL)`,
-			expectedRows: [][]any{{"AÿȁЀ", "a例", nil, nil}},
+			// Code point 0 is kept as NUL, as in BigQuery.
+			expectedRows: [][]any{{"AÿȁЀ", "a\x00例", nil, nil}},
 		},
 		// TODO: currently collate function is unsupported.
 		// {
@@ -6201,8 +6214,10 @@ WITH examples AS (
 				{"abc", int64(5), `"abc  "`},
 				{"abc", int64(2), `"ab"`},
 				{"例子", int64(4), `"例子  "`},
-				{nil, int64(2), nil},
-				{"abc", nil, nil},
+				// FORMAT('%T', NULL) is "NULL" in BigQuery
+				// (flipto-dbt emulator_differential_results.md S6).
+				{nil, int64(2), "NULL"},
+				{"abc", nil, "NULL"},
 			},
 		},
 		{
@@ -6215,7 +6230,7 @@ WITH examples AS (
 			expectedRows: [][]any{
 				{"abc", int64(8), "def", `"abcdefde"`},
 				{"abc", int64(5), "-", `"abc--"`},
-				{"abc", int64(5), nil, nil},
+				{"abc", int64(5), nil, "NULL"}, // FORMAT('%T', NULL), S6
 				{"例子", int64(5), "中文", `"例子中文中"`},
 			},
 		},
@@ -7057,7 +7072,8 @@ SELECT date, EXTRACT(ISOYEAR FROM date), EXTRACT(YEAR FROM date), EXTRACT(MONTH 
 			name:  "current_time",
 			query: `SELECT CURRENT_TIME()`,
 			expectedRows: [][]any{
-				{now.Format("15:04:05.999999")},
+				// TIME text prints the fraction in groups of three digits.
+				{now.Format("15:04:05") + fractionInGroupsOf3(now.Truncate(time.Microsecond))},
 			},
 		},
 		{
@@ -7454,9 +7470,13 @@ SELECT
 			expectedRows: [][]any{{"123.45", "12340000000000000000000000000", "1.012345679"}},
 		},
 		{
-			name:         "parse_bignumeric",
-			query:        `SELECT PARSE_BIGNUMERIC("123.45"), PARSE_BIGNUMERIC("123.456E37"), PARSE_BIGNUMERIC("1.123456789012345678901234567890123456789")`,
-			expectedRows: [][]any{{"123.45", "1234560000000000000000000000000000000000", "1.12345678901234567890123456789012345679"}},
+			name: "parse_bignumeric",
+			// 123.456E37 exceeds the BIGNUMERIC range, which is an error
+			// (conversion_functions.md PARSE_BIGNUMERIC; compliance
+			// safe_function.test, safe_parse_bignumeric; verified against
+			// BigQuery), so SAFE. yields NULL.
+			query:        `SELECT PARSE_BIGNUMERIC("123.45"), SAFE.PARSE_BIGNUMERIC("123.456E37"), PARSE_BIGNUMERIC("1.123456789012345678901234567890123456789")`,
+			expectedRows: [][]any{{"123.45", nil, "1.12345678901234567890123456789012345679"}},
 		},
 		{
 			name:         "cast numeric and bignumeric to string",
@@ -7616,7 +7636,9 @@ SELECT
   JSON_EXTRACT('{"a":null}', "$.b"),
   JSON_EXTRACT(JSON '{"a":null}', "$.a"),
   JSON_EXTRACT(JSON '{"a":null}', "$.b")`,
-			expectedRows: [][]any{{nil, nil, nil, nil}},
+			// A JSON input keeps a matched null as JSON 'null'; only a
+			// missing path is SQL NULL (json_functions.md JSON_EXTRACT).
+			expectedRows: [][]any{{nil, nil, "null", nil}},
 		},
 		{
 			name:         "json_query",
@@ -7680,7 +7702,9 @@ SELECT
   JSON_QUERY('{"a":null}', "$.b"),
   JSON_QUERY(JSON '{"a":null}', "$.a"),
   JSON_QUERY(JSON '{"a":null}', "$.b")`,
-			expectedRows: [][]any{{nil, nil, nil, nil}},
+			// json_functions.md JSON_QUERY: a JSON input keeps a matched
+			// null as JSON 'null'.
+			expectedRows: [][]any{{nil, nil, "null", nil}},
 		},
 		{
 			name:         "json_extract_scalar with number",
@@ -8125,7 +8149,7 @@ FROM (
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01"`},
 				{`b"0123456789@ABCDE"`},
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x00\x02\x80"`},
-				{nil},
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
 			},
 		},
 		{
@@ -8261,9 +8285,9 @@ FROM (
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01"`},
 				{`b"0123456789@ABCDE"`},
 				{`b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x00\x02\x80"`},
-				{nil},
-				{nil},
-				{nil},
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
+				{"NULL"}, // FORMAT("%T", NULL); flipto-dbt S6
 			},
 		},
 
@@ -8416,4 +8440,19 @@ func createTimestampFormatFromTime(t time.Time) string {
 // test data reads symmetrically with createTimestampFormatFromTime.
 func createTimestampFormatFromString(v string) string {
 	return v
+}
+
+// fractionInGroupsOf3 mirrors how BigQuery prints fractional seconds:
+// omitted when zero, else padded to 3, 6 or 9 digits.
+func fractionInGroupsOf3(t time.Time) string {
+	ns := t.Nanosecond()
+	switch {
+	case ns == 0:
+		return ""
+	case ns%1000000 == 0:
+		return fmt.Sprintf(".%03d", ns/1000000)
+	case ns%1000 == 0:
+		return fmt.Sprintf(".%06d", ns/1000)
+	}
+	return fmt.Sprintf(".%09d", ns)
 }

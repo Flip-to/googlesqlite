@@ -3,7 +3,8 @@ package string
 import (
 	"bytes"
 	"fmt"
-	"strings"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
@@ -16,7 +17,9 @@ func UPPER(v value.Value) (value.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return value.StringValue(strings.ToUpper(s)), nil
+		// Full Unicode case mapping: UPPER('ß') is 'SS', which
+		// strings.ToUpper (simple one-to-one mapping) leaves as 'ß'.
+		return value.StringValue(cases.Upper(language.Und).String(s)), nil
 	case value.BytesValue:
 		b, err := v.ToBytes()
 		if err != nil {

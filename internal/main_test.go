@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	googlesql "github.com/goccy/go-googlesql"
+
+	"github.com/goccy/googlesqlite/internal/zoneinfo"
 )
 
 // TestMain initialises the go-googlesql wasm runtime exactly once for
@@ -19,6 +21,7 @@ import (
 // GOOGLESQLITE_WASM_COMPILATION_MODE / GOOGLESQLITE_WASM_CACHE_DIR
 // knobs no longer apply.
 func TestMain(m *testing.M) {
+	_ = zoneinfo.Prepare("GOOGLESQLITE_WASM_EMBEDDED_ZONEINFO")
 	if err := googlesql.Init(); err != nil {
 		fmt.Fprintf(os.Stderr, "wasm init failed: %v\n", err)
 		os.Exit(1)

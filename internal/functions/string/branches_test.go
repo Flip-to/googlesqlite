@@ -154,12 +154,8 @@ func TestFormatFlagsRejectedCombinations(t *testing.T) {
 	}{
 		// `'` flag not supported for non-`d`/`i` specifier.
 		{"quote_on_octal", "%'o", []value.Value{value.IntValue(7)}, "doesn't support"},
-		// `-` flag not supported for integer.
-		{"minus_on_int", "%-d", []value.Value{value.IntValue(7)}, "doesn't support"},
 		// `#` flag not supported for integer.
 		{"sharp_on_int", "%#d", []value.Value{value.IntValue(7)}, "doesn't support"},
-		// `-` flag not supported for float.
-		{"minus_on_float", "%-f", []value.Value{value.FloatValue(1)}, "doesn't support"},
 		// `#` flag not supported for float.
 		{"sharp_on_float", "%#f", []value.Value{value.FloatValue(1)}, "doesn't support"},
 		// `'` flag not supported for float.

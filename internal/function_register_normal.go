@@ -4,6 +4,7 @@ import (
 	"github.com/goccy/googlesqlite/internal/functions/aead"
 	arrfn "github.com/goccy/googlesqlite/internal/functions/array"
 	"github.com/goccy/googlesqlite/internal/functions/bit"
+	collfn "github.com/goccy/googlesqlite/internal/functions/collation"
 	"github.com/goccy/googlesqlite/internal/functions/conditional"
 	"github.com/goccy/googlesqlite/internal/functions/date"
 	"github.com/goccy/googlesqlite/internal/functions/datetime"
@@ -178,6 +179,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "nullif", BindFunc: conditional.BindNullIf},
 	{Name: "length", BindFunc: str.BindLength},
 	{Name: "cast", BindFunc: bindCast},
+	{Name: "cast_format", BindFunc: bindCastFormat},
 
 	// interval functions
 	{Name: "interval", BindFunc: interval.BindInterval},
@@ -307,6 +309,29 @@ var normalFuncs = []*funcInfo{
 	{Name: "code_points_to_bytes", BindFunc: str.BindCodePointsToBytes},
 	{Name: "code_points_to_string", BindFunc: str.BindCodePointsToString},
 	{Name: "collate", BindFunc: str.BindCollate},
+	{Name: "check_type_parameters", BindFunc: longtail.BindCheckTypeParameters},
+	// Collation-aware lowerings emitted by the formatter for calls
+	// whose resolved collation_list is non-binary.
+	{Name: "bool_envelope", BindFunc: func(args ...value.Value) (value.Value, error) {
+		if len(args) != 1 || args[0] == nil {
+			return nil, nil
+		}
+		b, err := args[0].ToBool()
+		if err != nil {
+			return nil, err
+		}
+		return value.EnvelopedBool{BoolValue: value.BoolValue(b)}, nil
+	}},
+	{Name: "collation_key", BindFunc: collfn.KEY},
+	{Name: "collation_pack", BindFunc: collfn.PACK},
+	{Name: "collation_unpack", BindFunc: collfn.UNPACK},
+	{Name: "collate_replace", BindFunc: collfn.REPLACE},
+	{Name: "collate_split", BindFunc: collfn.SPLIT},
+	{Name: "collate_strpos", BindFunc: collfn.STRPOS},
+	{Name: "collate_instr", BindFunc: collfn.INSTR},
+	{Name: "collate_starts_with", BindFunc: collfn.STARTS_WITH},
+	{Name: "collate_ends_with", BindFunc: collfn.ENDS_WITH},
+	{Name: "collate_like", BindFunc: collfn.LIKE},
 	{Name: "concat", BindFunc: str.BindConcat},
 	{Name: "contains_substr", BindFunc: str.BindContainsSubstr},
 	{Name: "edit_distance", BindFunc: str.BindEditDistance},
@@ -324,11 +349,11 @@ var normalFuncs = []*funcInfo{
 	{Name: "ltrim", BindFunc: str.BindLtrim},
 	{Name: "normalize", BindFunc: str.BindNormalize},
 	{Name: "normalize_and_casefold", BindFunc: str.BindNormalizeAndCasefold},
-	{Name: "regexp_contains", BindFunc: str.BindRegexpContains},
-	{Name: "regexp_extract", BindFunc: str.BindRegexpExtract},
-	{Name: "regexp_extract_all", BindFunc: str.BindRegexpExtractAll},
-	{Name: "regexp_instr", BindFunc: str.BindRegexpInstr},
-	{Name: "regexp_replace", BindFunc: helper.Scalar3(str.REGEXP_REPLACE)},
+	{Name: "regexp_contains", BindFunc: str.BytesAsLatin1(str.BindRegexpContains)},
+	{Name: "regexp_extract", BindFunc: str.BytesAsLatin1(str.BindRegexpExtract)},
+	{Name: "regexp_extract_all", BindFunc: str.BytesAsLatin1(str.BindRegexpExtractAll)},
+	{Name: "regexp_instr", BindFunc: str.BytesAsLatin1(str.BindRegexpInstr)},
+	{Name: "regexp_replace", BindFunc: str.BytesAsLatin1(helper.Scalar3(str.REGEXP_REPLACE))},
 	{Name: "replace", BindFunc: helper.Scalar3(str.REPLACE)},
 	{Name: "repeat", BindFunc: str.BindRepeat},
 	{Name: "reverse", BindFunc: helper.Scalar1(str.REVERSE)},
@@ -377,6 +402,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "json_keys", BindFunc: jsonfn.BindJsonKeys},
 	{Name: "json_array", BindFunc: jsonfn.JSON_ARRAY},
 	{Name: "json_object", BindFunc: jsonfn.JSON_OBJECT},
+	{Name: "json_object_arrays", BindFunc: jsonfn.JSON_OBJECT_ARRAYS},
 	{Name: "json_contains", BindFunc: jsonfn.JSON_CONTAINS},
 	{Name: "json_flatten", BindFunc: jsonfn.JSON_FLATTEN},
 	{Name: "json_path_exists", BindFunc: jsonfn.JSON_PATH_EXISTS},
@@ -553,7 +579,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "is_inf", BindFunc: helper.Scalar1(mathfn.IS_INF)},
 	{Name: "is_nan", BindFunc: helper.Scalar1(mathfn.IS_NAN)},
 	{Name: "ieee_divide", BindFunc: helper.Scalar2(mathfn.IEEE_DIVIDE)},
-	{Name: "rand", BindFunc: mathfn.BindRand},
+	{Name: "rand", NonDeterministic: true, BindFunc: mathfn.BindRand},
 	{Name: "sqrt", BindFunc: helper.Scalar1(mathfn.SQRT)},
 	{Name: "pow", BindFunc: helper.Scalar2(mathfn.POW)},
 	{Name: "power", BindFunc: helper.Scalar2(mathfn.POW)},
@@ -567,6 +593,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "safe_divide", BindFunc: helper.Scalar2(mathfn.SAFE_DIVIDE)},
 	{Name: "safe_multiply", BindFunc: helper.Scalar2(mathfn.SAFE_MULTIPLY)},
 	{Name: "safe_negate", BindFunc: helper.Scalar1(mathfn.SAFE_NEGATE)},
+	{Name: "unary_minus", BindFunc: helper.Scalar1(mathfn.UNARY_MINUS)},
 	{Name: "safe_add", BindFunc: helper.Scalar2(mathfn.SAFE_ADD)},
 	{Name: "safe_subtract", BindFunc: helper.Scalar2(mathfn.SAFE_SUBTRACT)},
 	{Name: "mod", BindFunc: helper.Scalar2(mathfn.MOD)},
@@ -619,6 +646,9 @@ var normalFuncs = []*funcInfo{
 	// aggregate option funcs
 	{Name: "distinct", BindFunc: bindDistinct},
 	{Name: "ignore_nulls", BindFunc: bindIgnoreNulls},
+	{Name: "having", BindFunc: bindHaving},
+	{Name: "order_by", BindFunc: bindOrderBy},
+	{Name: "limit", BindFunc: bindLimit},
 
 	// window option funcs
 	{Name: "window_rowid", BindFunc: bindWindowRowID},
@@ -651,7 +681,7 @@ var normalFuncs = []*funcInfo{
 	{Name: "iferror", BindFunc: longtail.BindIfError},
 	{Name: "iserror", BindFunc: longtail.BindIsError},
 	{Name: "nulliferror", BindFunc: longtail.BindNullIfError},
-	{Name: "regexp_match", BindFunc: longtail.BindRegexpMatch},
+	{Name: "regexp_match", BindFunc: str.BytesAsLatin1(longtail.BindRegexpMatch)},
 	{Name: "regexp_extract_groups", BindFunc: longtail.BindRegexpExtractGroups},
 	{Name: "split_substr", BindFunc: longtail.BindSplitSubstr},
 	// `collate` is registered earlier from internal/functions/string

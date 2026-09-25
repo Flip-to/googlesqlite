@@ -32,16 +32,7 @@ func (t TimestampValue) AddValueWithPart(v int64, part string) (Value, error) {
 func (t TimestampValue) Add(v Value) (Value, error) {
 	src := time.Time(t)
 	if vv, ok := v.(*IntervalValue); ok {
-		return TimestampValue(time.Date(
-			src.Year()+int(vv.Years),
-			time.Month(int(src.Month())+int(vv.Months)),
-			src.Day()+int(vv.Days),
-			src.Hour()+int(vv.Hours),
-			src.Minute()+int(vv.Minutes),
-			src.Second()+int(vv.Seconds),
-			src.Nanosecond()+int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return TimestampValue(addInterval(src, vv, 1)), nil
 	}
 	return nil, fmt.Errorf("failed to use add operator for timestamp and %T type", v)
 }
@@ -49,16 +40,7 @@ func (t TimestampValue) Add(v Value) (Value, error) {
 func (t TimestampValue) Sub(v Value) (Value, error) {
 	src := time.Time(t)
 	if vv, ok := v.(*IntervalValue); ok {
-		return TimestampValue(time.Date(
-			src.Year()-int(vv.Years),
-			time.Month(int(src.Month())-int(vv.Months)),
-			src.Day()-int(vv.Days),
-			src.Hour()-int(vv.Hours),
-			src.Minute()-int(vv.Minutes),
-			src.Second()-int(vv.Seconds),
-			src.Nanosecond()-int(vv.SubSecondNanos),
-			src.Location(),
-		)), nil
+		return TimestampValue(addInterval(src, vv, -1)), nil
 	}
 	dst, err := v.ToTime()
 	if err != nil {
@@ -160,9 +142,15 @@ func (t TimestampValue) ToRat() (*big.Rat, error) {
 	return nil, fmt.Errorf("failed to convert *big.Rat from timestamp %v", t)
 }
 
+// SQLString is the canonical text BigQuery gives for CAST(ts AS STRING)
+// and FORMAT %t in the default (UTC) time zone: a space separator,
+// fractional seconds without trailing zeros, and a +00 offset.
+func (t TimestampValue) SQLString() string {
+	return time.Time(t).UTC().Format("2006-01-02 15:04:05") + fractionInGroups(time.Time(t)) + "+00"
+}
+
 func (t TimestampValue) Format(verb rune) string {
-	const timestampPrintableFormat = "2006-01-02 15:04:05"
-	formatted := time.Time(t).UTC().Format(timestampPrintableFormat) + "+00"
+	formatted := t.SQLString()
 	switch verb {
 	case 't':
 		return formatted

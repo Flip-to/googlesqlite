@@ -1,6 +1,8 @@
 package json
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 
 	"github.com/goccy/googlesqlite/internal/value"
@@ -12,11 +14,23 @@ func TO_JSON_STRING(v value.Value, prettyPrint bool) (value.Value, error) {
 		// literal rather than SQL NULL.
 		return value.StringValue("null"), nil
 	}
-	s, err := value.EncodeJSON(v)
+	s, err := value.EncodeJSONString(v)
 	if err != nil {
 		return nil, err
 	}
-	return value.StringValue(s), nil
+	// JSON values keep their input text (PARSE_JSON('{"a": 1}')), so
+	// normalise the whole document: compact, or indented with two spaces
+	// when pretty_print is true (json_functions.md TO_JSON_STRING).
+	var buf bytes.Buffer
+	if prettyPrint {
+		err = json.Indent(&buf, []byte(s), "", "  ")
+	} else {
+		err = json.Compact(&buf, []byte(s))
+	}
+	if err != nil {
+		return value.StringValue(s), nil
+	}
+	return value.StringValue(buf.String()), nil
 }
 
 func BindToJsonString(args ...value.Value) (value.Value, error) {

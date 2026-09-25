@@ -32,12 +32,8 @@ func IEEE_DIVIDE(x, y value.Value) (value.Value, error) {
 		if math.IsInf(y64, 0) || math.IsInf(y64, -1) {
 			return value.FloatValue(math.NaN()), nil
 		}
-	} else if y64 == 0 {
-		if x64 > 0 {
-			return value.FloatValue(math.Inf(1)), nil
-		} else if x64 < 0 {
-			return value.FloatValue(math.Inf(-1)), nil
-		}
 	}
+	// Go float division follows IEEE 754, including the sign of a zero
+	// divisor: 1 / -0.0 is -inf (math_functions.test math_abs_zero).
 	return value.FloatValue(x64 / y64), nil
 }

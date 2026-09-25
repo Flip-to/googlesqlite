@@ -15,9 +15,6 @@ func CODE_POINTS_TO_STRING(v *value.ArrayValue) (value.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		if i64 == 0 {
-			continue
-		}
 		r, err := helper.SafeInt32(i64)
 		if err != nil {
 			return nil, err

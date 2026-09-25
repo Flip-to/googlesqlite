@@ -19,6 +19,9 @@ func REGEXP_EXTRACT(val value.Value, expr string, position, occurrence int64) (v
 	if err != nil {
 		return nil, err
 	}
+	if re.NumSubexp() > 1 {
+		return nil, fmt.Errorf("REGEXP_EXTRACT: regular expressions passed into extraction functions must not have more than 1 capturing group")
+	}
 	posInt, err := helper.SafeInt(position)
 	if err != nil {
 		return nil, err
@@ -34,15 +37,23 @@ func REGEXP_EXTRACT(val value.Value, expr string, position, occurrence int64) (v
 		if err != nil {
 			return nil, err
 		}
-		if pos >= len([]rune(v)) {
+		runes := []rune(v)
+		if pos >= len(runes) {
 			return nil, nil
 		}
-		matches := re.FindAllStringSubmatch(v[pos:], occ)
+		rest := string(runes[pos:])
+		matches := re.FindAllStringSubmatchIndex(rest, occ)
 		if len(matches) < occ {
 			return nil, nil
 		}
-		match := matches[occ-1]
-		return value.StringValue(match[len(match)-1]), nil
+		m := matches[occ-1]
+		// The capture group's span, or the whole match without groups.
+		start, end := m[len(m)-2], m[len(m)-1]
+		if start < 0 {
+			// An optional group that did not participate is NULL, not ''.
+			return nil, nil
+		}
+		return value.StringValue(rest[start:end]), nil
 	case value.BytesValue:
 		v, err := val.ToBytes()
 		if err != nil {

@@ -9,6 +9,7 @@ import (
 
 func ARRAY_TO_STRING(arr *value.ArrayValue, delim string, nullText ...string) (value.Value, error) {
 	var elems []string
+	isBytes := false
 	for _, v := range arr.Values {
 		if v == nil {
 			if len(nullText) == 0 {
@@ -16,9 +17,16 @@ func ARRAY_TO_STRING(arr *value.ArrayValue, delim string, nullText ...string) (v
 			} else {
 				elems = append(elems, nullText[0])
 			}
+		} else if b, ok := v.(value.BytesValue); ok {
+			// ARRAY<BYTES> joins raw bytes and returns BYTES.
+			isBytes = true
+			elems = append(elems, string(b))
 		} else {
 			elems = append(elems, v.Format('t'))
 		}
+	}
+	if isBytes {
+		return value.BytesValue(strings.Join(elems, delim)), nil
 	}
 	return value.StringValue(strings.Join(elems, delim)), nil
 }
@@ -38,12 +46,12 @@ func BindArrayToString(args ...value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	delim, err := args[1].ToString()
+	delim, err := value.RawText(args[1])
 	if err != nil {
 		return nil, err
 	}
 	if len(args) == 3 {
-		nullText, err := args[2].ToString()
+		nullText, err := value.RawText(args[2])
 		if err != nil {
 			return nil, err
 		}

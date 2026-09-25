@@ -7,8 +7,11 @@ import (
 )
 
 func GENERATE_TIMESTAMP_ARRAY(start, end value.Value, step int64, part string) (value.Value, error) {
-	if start == nil || end == nil || step == 0 {
+	if start == nil || end == nil {
 		return nil, nil
+	}
+	if step == 0 {
+		return nil, fmt.Errorf("sequence step cannot be 0")
 	}
 	isLT, err := start.LTE(end)
 	if err != nil {
@@ -25,6 +28,11 @@ func GENERATE_TIMESTAMP_ARRAY(start, end value.Value, step int64, part string) (
 	}
 	cur := start
 	for {
+		// Bound the result so a huge range errors instead of
+		// exhausting memory.
+		if len(arr.Values) >= 10_000_000 {
+			return nil, fmt.Errorf("result exceeds 10000000 elements")
+		}
 		arr.Values = append(arr.Values, cur)
 		after, err := cur.(value.TimestampValue).AddValueWithPart(step, part)
 		if err != nil {

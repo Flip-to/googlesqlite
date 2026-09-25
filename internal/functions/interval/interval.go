@@ -2,37 +2,54 @@ package interval
 
 import (
 	"fmt"
+	"math/big"
 
-	"github.com/goccy/googlesqlite/internal/functions/helper"
-	"github.com/goccy/googlesqlite/internal/intervalvalue"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
+// INTERVAL builds `INTERVAL v part`, failing when the value is outside
+// the INTERVAL range.
 func INTERVAL(v int64, part string) (value.Value, error) {
-	v32, err := helper.SafeInt32(v)
-	if err != nil {
-		return nil, err
-	}
+	var months, days, nanos int64
+	var nanoUnit int64
 	switch part {
 	case "YEAR":
-		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Years: v32}}, nil
+		months = 12
+	case "QUARTER":
+		months = 3
 	case "MONTH":
-		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Months: v32}}, nil
+		months = 1
+	case "WEEK":
+		days = 7
 	case "DAY":
-		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Days: v32}}, nil
+		days = 1
 	case "HOUR":
-		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Hours: v32}}, nil
+		nanoUnit = 3600 * 1e9
 	case "MINUTE":
-		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Minutes: v32}}, nil
+		nanoUnit = 60 * 1e9
 	case "SECOND":
-		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Seconds: v32}}, nil
+		nanoUnit = 1e9
+	case "MILLISECOND":
+		nanoUnit = 1e6
+	case "MICROSECOND":
+		nanoUnit = 1e3
 	case "NANOSECOND":
-		return &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{SubSecondNanos: v32}}, nil
+		nanoUnit = 1
+	default:
+		return nil, fmt.Errorf("unexpected interval part: %s", part)
 	}
-	return nil, fmt.Errorf("unexpected interval part: %s", part)
+	nanos = nanoUnit
+	n := big.NewInt(v)
+	return value.NewIntervalFromParts(
+		new(big.Int).Mul(n, big.NewInt(months)),
+		new(big.Int).Mul(n, big.NewInt(days)),
+		new(big.Int).Mul(n, big.NewInt(nanos)))
 }
 
 func BindInterval(args ...value.Value) (value.Value, error) {
+	if args[0] == nil || args[1] == nil {
+		return nil, nil
+	}
 	v, err := args[0].ToInt64()
 	if err != nil {
 		return nil, err

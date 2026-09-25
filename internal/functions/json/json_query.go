@@ -3,6 +3,7 @@ package json
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/goccy/go-json"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
@@ -10,12 +11,16 @@ import (
 )
 
 func JSON_QUERY(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}
 	if p.UsedSingleQuotePathSelector() {
 		return nil, fmt.Errorf("JSON_QUERY: doesn't use single quote path selector")
+	}
+	// Invalid JSON input gives NULL, as BigQuery does for STRING input.
+	if !json.Valid([]byte(v)) {
+		return nil, nil
 	}
 	extracted, err := p.Extract([]byte(v))
 	if err != nil {
@@ -44,5 +49,27 @@ var BindJsonQuery = helper.Scalar2(func(a, b value.Value) (value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	return JSON_QUERY(v, path)
+	out, err := JSON_QUERY(v, path)
+	if err != nil || out != nil {
+		return out, err
+	}
+	// For JSON input a matched JSON null is JSON 'null', not SQL NULL
+	// (json_functions.md JSON_QUERY); STRING input maps it to NULL.
+	if _, isJSON := a.(value.JsonValue); isJSON && jsonPathMatchesNull(v, path) {
+		return value.JsonValue("null"), nil
+	}
+	return nil, nil
 })
+
+// jsonPathMatchesNull reports whether path selects a JSON null in v.
+func jsonPathMatchesNull(v, path string) bool {
+	p, err := createPath(path)
+	if err != nil {
+		return false
+	}
+	extracted, err := p.Extract([]byte(v))
+	if err != nil || len(extracted) == 0 {
+		return false
+	}
+	return strings.TrimSpace(string(extracted[0])) == "null"
+}

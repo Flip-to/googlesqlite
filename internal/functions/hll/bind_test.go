@@ -84,13 +84,14 @@ func TestHllInit_ProducesSketch(t *testing.T) {
 		t.Errorf("EXTRACT cardinality = %d; expected >= 1", n)
 	}
 
-	// EXTRACT(NULL) -> NULL.
+	// EXTRACT(NULL) -> 0, as in BigQuery (flipto-dbt
+	// emulator_differential_results.md S34).
 	got, err = BindHllCountExtract(nil)
 	if err != nil {
 		t.Fatalf("EXTRACT NULL: %v", err)
 	}
-	if got != nil {
-		t.Errorf("EXTRACT(NULL) = %v; want nil", got)
+	if n, ok := got.(value.IntValue); !ok || n != 0 {
+		t.Errorf("EXTRACT(NULL) = %v; want 0", got)
 	}
 }
 

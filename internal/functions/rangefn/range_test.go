@@ -47,9 +47,27 @@ func TestBindRangeUnboundedEnd(t *testing.T) {
 	}
 }
 
+// Both bounds NULL is the fully unbounded range, not an error
+// (range_constructors.test, range_of_dates_constructor_function_null_start_and_end).
 func TestBindRangeBothNull(t *testing.T) {
-	if _, err := BindRange(nil, nil); err == nil {
-		t.Fatalf("both bounds NULL should error")
+	got, err := BindRange(nil, nil)
+	if err != nil {
+		t.Fatalf("BindRange(NULL, NULL): %v", err)
+	}
+	r := got.(*value.RangeValue)
+	if r.Start != nil || r.End != nil {
+		t.Fatalf("want unbounded start and end")
+	}
+}
+
+// A start bound that is not smaller than the end bound is an error
+// (range_constructors.test, range_of_dates_constructor_function_start_equals_end).
+func TestBindRangeStartNotLessThanEnd(t *testing.T) {
+	if _, err := BindRange(mkDate(2024, 1, 1), mkDate(2024, 1, 1)); err == nil {
+		t.Fatalf("start == end should error")
+	}
+	if _, err := BindRange(mkDate(2024, 1, 2), mkDate(2024, 1, 1)); err == nil {
+		t.Fatalf("start > end should error")
 	}
 }
 
@@ -283,9 +301,10 @@ func TestBindRangeIntersect(t *testing.T) {
 func TestBindRangeIntersectDisjoint(t *testing.T) {
 	a := &value.RangeValue{Start: mkDate(2024, 1, 1), End: mkDate(2024, 3, 1), ElemHeader: value.DateValueType}
 	b := &value.RangeValue{Start: mkDate(2024, 6, 1), End: mkDate(2024, 12, 1), ElemHeader: value.DateValueType}
-	got, _ := BindRangeIntersect(a, b)
-	if got != nil {
-		t.Fatalf("disjoint ranges should yield NULL, got %v", got)
+	// Disjoint ranges are an error (range-functions.md, RANGE_INTERSECT;
+	// range_functions.test, range_intersect_throws_error_when_range_of_dates_do_not_overlap).
+	if got, err := BindRangeIntersect(a, b); err == nil {
+		t.Fatalf("disjoint ranges should error, got %v", got)
 	}
 }
 

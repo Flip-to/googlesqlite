@@ -12,6 +12,7 @@ type (
 	analyzerKey                     struct{}
 	namePathKey                     struct{}
 	columnRefMapKey                 struct{}
+	columnIDSubstitutionKey         struct{}
 	funcMapKey                      struct{}
 	tvfMapKey                       struct{}
 	systemVarsKey                   struct{}
@@ -72,6 +73,18 @@ func namePathFromContext(ctx context.Context) *NamePath {
 
 func withNamePath(ctx context.Context, namePath *NamePath) context.Context {
 	return context.WithValue(ctx, namePathKey{}, namePath)
+}
+
+// withColumnIDSubstitution makes every ColumnRef to one of the given
+// column IDs format as the mapped SQL. Unlike the column ref map, the
+// entries are not consumed, so a column may be referenced many times.
+func withColumnIDSubstitution(ctx context.Context, m map[int32]string) context.Context {
+	return context.WithValue(ctx, columnIDSubstitutionKey{}, m)
+}
+
+func columnIDSubstitution(ctx context.Context) map[int32]string {
+	m, _ := ctx.Value(columnIDSubstitutionKey{}).(map[int32]string)
+	return m
 }
 
 func withColumnRefMap(ctx context.Context, m map[string]string) context.Context {
@@ -170,6 +183,9 @@ type analyticOrderBy struct {
 	column    string
 	isAsc     bool
 	nullOrder nullOrderMode
+	// isFloat marks a DOUBLE / FLOAT key, which needs an extra sort
+	// key so NaN orders right after NULL (see floatOrderClassKey).
+	isFloat bool
 }
 
 type analyticOrderColumnNames struct {
@@ -382,4 +398,34 @@ func CurrentTime(ctx context.Context) *time.Time {
 		return nil
 	}
 	return value.(*time.Time)
+}
+
+type sourceQueryKey struct{}
+
+// withSourceQuery records the exact text handed to the analyzer so that
+// formatters can recover a literal's source image from its parse
+// location.
+func withSourceQuery(ctx context.Context, query string) context.Context {
+	return context.WithValue(ctx, sourceQueryKey{}, query)
+}
+
+func sourceQueryFromContext(ctx context.Context) (string, bool) {
+	q, ok := ctx.Value(sourceQueryKey{}).(string)
+	return q, ok
+}
+
+type nestedArrayAggKey struct{}
+
+// withNestedArrayAgg marks that the expressions being formatted sit
+// inside a subquery expression, so an ARRAY_AGG result there is an
+// intermediate value. BigQuery only rejects NULL array elements when
+// the array reaches the query result, so ARRAY_AGG may keep NULLs here
+// (e.g. `x LIKE ANY UNNEST((SELECT ARRAY_AGG(y) ...))`).
+func withNestedArrayAgg(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nestedArrayAggKey{}, true)
+}
+
+func inNestedArrayAgg(ctx context.Context) bool {
+	v, _ := ctx.Value(nestedArrayAggKey{}).(bool)
+	return v
 }

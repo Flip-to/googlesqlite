@@ -25,6 +25,11 @@ func SPLIT(val, delimValue value.Value) (value.Value, error) {
 			delim = delimV
 		}
 		ret := &value.ArrayValue{}
+		if v == "" {
+			// Splitting an empty STRING yields one empty element.
+			ret.Values = append(ret.Values, value.StringValue(""))
+			return ret, nil
+		}
 		for splitted := range strings.SplitSeq(v, delim) {
 			ret.Values = append(ret.Values, value.StringValue(splitted))
 		}
@@ -42,8 +47,20 @@ func SPLIT(val, delimValue value.Value) (value.Value, error) {
 			return nil, err
 		}
 		ret := &value.ArrayValue{}
-		for splitted := range bytes.SplitSeq(v, delim) {
-			ret.Values = append(ret.Values, value.BytesValue(splitted))
+		switch {
+		case len(v) == 0:
+			// Splitting empty BYTES yields one empty element.
+			ret.Values = append(ret.Values, value.BytesValue([]byte{}))
+		case len(delim) == 0:
+			// An empty delimiter splits BYTES into single bytes (not
+			// UTF-8 sequences, which bytes.Split would produce).
+			for i := range v {
+				ret.Values = append(ret.Values, value.BytesValue(v[i:i+1]))
+			}
+		default:
+			for splitted := range bytes.SplitSeq(v, delim) {
+				ret.Values = append(ret.Values, value.BytesValue(splitted))
+			}
 		}
 		return ret, nil
 	}

@@ -3,6 +3,7 @@ package helper
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/goccy/googlesqlite/internal/value"
 )
@@ -21,16 +22,44 @@ import (
 type Aggregator struct {
 	distinctMap map[string]struct{}
 	distinctNil bool
-	step        func([]value.Value, *Option) error
-	done        func() (value.Value, error)
+	// having buffers rows while a HAVING MAX / HAVING MIN modifier is
+	// in effect; only rows at the extreme key reach step, at Done.
+	having []havingRow
+	step   func([]value.Value, *Option) error
+	done   func() (value.Value, error)
+	// deferred holds the first deferred error seen in an argument
+	// (see value.DeferredError); the aggregate then yields it as its
+	// result instead of raising.
+	deferred error
 }
 
 func (a *Aggregator) Step(stepArgs ...any) error {
+	if a.deferred != nil {
+		return nil
+	}
 	values, err := value.ConvertArgs(stepArgs...)
 	if err != nil {
+		if value.IsDeferredError(err) {
+			a.deferred = err
+			return nil
+		}
 		return err
 	}
 	values, opt := ParseOptions(values...)
+	if opt.Having != nil {
+		a.having = append(a.having, havingRow{values: values, opt: opt})
+		return nil
+	}
+	return a.process(values, opt)
+}
+
+type havingRow struct {
+	values []value.Value
+	opt    *Option
+}
+
+// process applies IGNORE NULLS and DISTINCT, then steps the aggregate.
+func (a *Aggregator) process(values []value.Value, opt *Option) error {
 	if opt.IgnoreNulls {
 		// Skip the whole row. Dropping only the NULL arguments would
 		// shift the rest, so APPROX_QUANTILES(x, 4 IGNORE NULLS) saw
@@ -54,9 +83,19 @@ func (a *Aggregator) Step(stepArgs ...any) error {
 			}
 			a.distinctNil = true
 		} else {
-			key, err := values[0].ToString()
-			if err != nil {
-				return err
+			var key string
+			if sv, ok := values[0].(value.StringValue); ok && strings.HasPrefix(string(sv), collationPackPrefix) {
+				// DISTINCT over a collated argument: deduplicate on the
+				// collation key and aggregate the original string.
+				k, orig := splitCollationPacked(string(sv))
+				key = "collation:" + k
+				values = append([]value.Value{value.StringValue(orig)}, values[1:]...)
+			} else {
+				k, err := value.DistinctKey(values[0])
+				if err != nil {
+					return err
+				}
+				key = k
 			}
 			if _, exists := a.distinctMap[key]; exists {
 				return nil
@@ -67,7 +106,25 @@ func (a *Aggregator) Step(stepArgs ...any) error {
 	return a.step(values, opt)
 }
 
+// collationPackPrefix mirrors internal/functions/collation's PACK
+// envelope (the helper package cannot import it without a cycle).
+const collationPackPrefix = "\x00\x01gsqlcoll:"
+
+func splitCollationPacked(s string) (key, orig string) {
+	rest := s[len(collationPackPrefix):]
+	if i := strings.IndexByte(rest, 1); i >= 0 {
+		return rest[:i], rest[i+1:]
+	}
+	return rest, rest
+}
+
 func (a *Aggregator) Done() (any, error) {
+	if a.deferred != nil {
+		return value.EncodeDeferredError(a.deferred), nil
+	}
+	if err := a.replayHaving(); err != nil {
+		return nil, err
+	}
 	ret, err := a.done()
 	if err != nil {
 		return nil, err
@@ -130,4 +187,60 @@ func SortAggregatedValues(values []*OrderedValue, opt *Option) []*OrderedValue {
 		return false
 	})
 	return values
+}
+
+// replayHaving steps only the buffered rows whose HAVING key equals
+// the MAX (or MIN) key of the group. Per aggregate-function-calls.md
+// the extreme is MAX(having_expression) / MIN(...), which ignores
+// NULLs, and rows match by SQL equality, so NULL keys never match.
+func (a *Aggregator) replayHaving() error {
+	if len(a.having) == 0 {
+		return nil
+	}
+	rows := a.having
+	a.having = nil
+	var best value.Value
+	for _, r := range rows {
+		k := r.opt.Having.Value
+		if k == nil {
+			continue
+		}
+		if best == nil {
+			best = k
+			continue
+		}
+		var better bool
+		var err error
+		if r.opt.Having.IsMax {
+			better, err = k.GT(best)
+		} else {
+			better, err = k.LT(best)
+		}
+		if err != nil {
+			return err
+		}
+		if better {
+			best = k
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	for _, r := range rows {
+		k := r.opt.Having.Value
+		if k == nil {
+			continue
+		}
+		eq, err := k.EQ(best)
+		if err != nil {
+			return err
+		}
+		if !eq {
+			continue
+		}
+		if err := a.process(r.values, r.opt); err != nil {
+			return err
+		}
+	}
+	return nil
 }

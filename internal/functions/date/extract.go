@@ -54,8 +54,9 @@ func EXTRACT(v value.Value, part, zone string) (value.Value, error) {
 			_, week := t.ISOWeek()
 			return value.IntValue(week), nil
 		case "WEEK":
-			_, week := t.AddDate(0, 0, -int(t.Weekday())).ISOWeek()
-			return value.IntValue(week), nil
+			return value.IntValue(weekOfYear(t, time.Sunday)), nil
+		case "WEEK_SUNDAY", "WEEK_MONDAY", "WEEK_TUESDAY", "WEEK_WEDNESDAY", "WEEK_THURSDAY", "WEEK_FRIDAY", "WEEK_SATURDAY":
+			return value.IntValue(weekOfYear(t, weekStarts[part])), nil
 		case "DAY":
 			return value.IntValue(t.Day()), nil
 		case "DAYOFYEAR":
@@ -128,4 +129,22 @@ func BindExtractDate(args ...value.Value) (value.Value, error) {
 		zone = timeZone
 	}
 	return EXTRACT(args[0], "DATE", zone)
+}
+
+var weekStarts = map[string]time.Weekday{
+	"WEEK_SUNDAY":    time.Sunday,
+	"WEEK_MONDAY":    time.Monday,
+	"WEEK_TUESDAY":   time.Tuesday,
+	"WEEK_WEDNESDAY": time.Wednesday,
+	"WEEK_THURSDAY":  time.Thursday,
+	"WEEK_FRIDAY":    time.Friday,
+	"WEEK_SATURDAY":  time.Saturday,
+}
+
+// weekOfYear is EXTRACT(WEEK(<start>)): weeks begin on start, and days
+// before the year's first start day are in week 0 (date_functions.md,
+// EXTRACT). The range is [0, 53].
+func weekOfYear(t time.Time, start time.Weekday) int {
+	offset := (int(t.Weekday()) - int(start) + 7) % 7
+	return (t.YearDay() - 1 + 7 - offset) / 7
 }

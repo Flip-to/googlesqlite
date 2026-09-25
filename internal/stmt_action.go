@@ -409,6 +409,9 @@ type DMLStmtAction struct {
 	args           []any
 	colTypes       []googlesql.Googlesql_TypeNode
 	formattedQuery string
+	// assertRows is the row count required by ASSERT_ROWS_MODIFIED,
+	// or nil when the statement has no such clause.
+	assertRows *int64
 }
 
 func (a *DMLStmtAction) Prepare(ctx context.Context, conn *Conn) (driver.Stmt, error) {
@@ -420,9 +423,45 @@ func (a *DMLStmtAction) Prepare(ctx context.Context, conn *Conn) (driver.Stmt, e
 }
 
 func (a *DMLStmtAction) exec(ctx context.Context, conn *Conn) (driver.Result, error) {
+	if a.assertRows != nil {
+		return a.execAssertingRows(ctx, conn)
+	}
 	result, err := conn.ExecContext(ctx, a.formattedQuery, a.args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exec %s: %w", a.formattedQuery, err)
+	}
+	return result, nil
+}
+
+// execAssertingRows runs the statement inside a savepoint and rolls it
+// back when the number of modified rows differs from the
+// ASSERT_ROWS_MODIFIED count, so a failed assertion leaves the table
+// untouched.
+func (a *DMLStmtAction) execAssertingRows(ctx context.Context, conn *Conn) (driver.Result, error) {
+	const savepoint = "googlesqlite_assert_rows_modified"
+	if _, err := conn.ExecContext(ctx, "SAVEPOINT "+savepoint); err != nil {
+		return nil, err
+	}
+	rollback := func() {
+		_, _ = conn.ExecContext(ctx, "ROLLBACK TO "+savepoint)
+		_, _ = conn.ExecContext(ctx, "RELEASE "+savepoint)
+	}
+	result, err := conn.ExecContext(ctx, a.formattedQuery, a.args...)
+	if err != nil {
+		rollback()
+		return nil, fmt.Errorf("failed to exec %s: %w", a.formattedQuery, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		rollback()
+		return nil, err
+	}
+	if n != *a.assertRows {
+		rollback()
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED expected %d rows modified, but found %d", *a.assertRows, n)
+	}
+	if _, err := conn.ExecContext(ctx, "RELEASE "+savepoint); err != nil {
+		return nil, err
 	}
 	return result, nil
 }
@@ -507,6 +546,7 @@ func (a *QueryStmtAction) QueryContext(ctx context.Context, conn *Conn) (*Rows, 
 	}
 	rows, err := conn.QueryContext(ctx, a.formattedQuery, a.args...)
 	if err != nil {
+		fmt.Fprintf(debugStream(), "[googlesqlite][query] %s\n", a.formattedQuery)
 		return nil, fmt.Errorf("failed to query %s: %w", a.query, err)
 	}
 	if err := rows.Err(); err != nil {

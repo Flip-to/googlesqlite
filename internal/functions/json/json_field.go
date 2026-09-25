@@ -3,16 +3,12 @@ package json
 import (
 	"fmt"
 
-	"github.com/goccy/go-json"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
 func JSON_FIELD(v, fieldName string) (value.Value, error) {
-	p, err := json.CreatePath(fmt.Sprintf(`$.%q`, fieldName))
-	if err != nil {
-		return nil, err
-	}
+	p := &gsqlPath{steps: []pathStep{{name: fieldName}}}
 	extracted, err := p.Extract([]byte(v))
 	if err != nil {
 		return nil, err
@@ -27,6 +23,9 @@ var BindJsonField = helper.Scalar2(func(a, b value.Value) (value.Value, error) {
 	jsonValue, err := a.ToString()
 	if err != nil {
 		return nil, err
+	}
+	if _, ok := b.(value.StringValue); !ok {
+		return nil, fmt.Errorf("JSON field name must be STRING, got %T", b)
 	}
 	fieldName, err := b.ToString()
 	if err != nil {

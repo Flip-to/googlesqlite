@@ -15,12 +15,33 @@ func TestIntervalValue(t *testing.T) {
 
 	iv := &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Months: 2, Days: 3}}
 
-	t.Run("arithmetic and comparison unsupported", func(t *testing.T) {
-		if _, err := iv.Add(iv); err == nil {
-			t.Fatal("Add")
+	t.Run("arithmetic and comparison", func(t *testing.T) {
+		// INTERVAL compares with 30-day months and 24-hour days
+		// (data-types.md, interval type); + and - work part by part.
+		month := &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Months: 1}}
+		days30 := &value.IntervalValue{IntervalValue: &intervalvalue.IntervalValue{Days: 30}}
+		if eq, err := month.EQ(days30); err != nil || !eq {
+			t.Fatalf("1 MONTH = 30 DAY: %v %v", eq, err)
 		}
-		if _, err := iv.Sub(iv); err == nil {
-			t.Fatal("Sub")
+		if gt, err := iv.GT(month); err != nil || !gt {
+			t.Fatalf("2 MONTH 3 DAY > 1 MONTH: %v %v", gt, err)
+		}
+		if lte, err := month.LTE(iv); err != nil || !lte {
+			t.Fatalf("1 MONTH <= 2 MONTH 3 DAY: %v %v", lte, err)
+		}
+		sum, err := iv.Add(month)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s, _ := sum.ToString(); s != "0-3 3 0:0:0" {
+			t.Fatalf("Add = %q", s)
+		}
+		diff, err := month.Sub(iv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s, _ := diff.ToString(); s != "-0-1 -3 0:0:0" {
+			t.Fatalf("Sub = %q", s)
 		}
 		if _, err := iv.Mul(iv); err == nil {
 			t.Fatal("Mul")
@@ -28,20 +49,8 @@ func TestIntervalValue(t *testing.T) {
 		if _, err := iv.Div(iv); err == nil {
 			t.Fatal("Div")
 		}
-		if _, err := iv.EQ(iv); err == nil {
-			t.Fatal("EQ")
-		}
-		if _, err := iv.GT(iv); err == nil {
-			t.Fatal("GT")
-		}
-		if _, err := iv.GTE(iv); err == nil {
-			t.Fatal("GTE")
-		}
-		if _, err := iv.LT(iv); err == nil {
-			t.Fatal("LT")
-		}
-		if _, err := iv.LTE(iv); err == nil {
-			t.Fatal("LTE")
+		if _, err := iv.EQ(value.IntValue(1)); err == nil {
+			t.Fatal("EQ with INT64 should fail")
 		}
 	})
 

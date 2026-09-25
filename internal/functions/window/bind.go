@@ -156,9 +156,9 @@ func BindWindowStringAgg() func() *WindowAggregator {
 		fn := &WINDOW_STRING_AGG{}
 		return newWindowAggregator(
 			func(args []value.Value, windowOpt *WindowFuncStatus, agg *WindowFuncAggregatedStatus) error {
-				var delim string
+				delim := ","
 				if len(args) > 1 {
-					d, err := args[1].ToString()
+					d, err := value.RawText(args[1])
 					if err != nil {
 						return err
 					}

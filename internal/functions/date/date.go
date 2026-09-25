@@ -1,6 +1,7 @@
 package date
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/goccy/googlesqlite/internal/functions/helper"
@@ -33,7 +34,13 @@ func DATE(args ...value.Value) (value.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return value.DateValue(time.Time{}.AddDate(yearInt-1, monthInt-1, dayInt-1)), nil
+		// Out-of-range parts are an error, not a roll-over:
+		// DATE(2024, 13, 1) fails, so SAFE.DATE(2024, 13, 1) is NULL.
+		t := time.Date(yearInt, time.Month(monthInt), dayInt, 0, 0, 0, 0, time.UTC)
+		if yearInt < 1 || yearInt > 9999 || int(t.Month()) != monthInt || t.Day() != dayInt || t.Year() != yearInt {
+			return nil, fmt.Errorf("input calculates to invalid date: %d-%d-%d", yearInt, monthInt, dayInt)
+		}
+		return value.DateValue(t), nil
 	} else if len(args) == 2 {
 		t, err := args[0].ToTime()
 		if err != nil {

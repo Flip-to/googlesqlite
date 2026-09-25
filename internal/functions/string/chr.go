@@ -6,9 +6,6 @@ import (
 )
 
 func CHR(v int64) (value.Value, error) {
-	if v == 0 {
-		return value.StringValue(""), nil
-	}
 	r, err := helper.SafeInt32(v)
 	if err != nil {
 		return nil, err

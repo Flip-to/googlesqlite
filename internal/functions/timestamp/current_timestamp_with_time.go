@@ -7,5 +7,5 @@ import (
 )
 
 func CURRENT_TIMESTAMP_WITH_TIME(v time.Time) (value.Value, error) {
-	return value.TimestampValue(v), nil
+	return value.TimestampValue(v.Truncate(time.Microsecond)), nil
 }

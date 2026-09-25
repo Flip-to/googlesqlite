@@ -48,7 +48,7 @@ func (c *Catalog) ensureInfoSchemaForDataset(project, dataset string) error {
 // formatter can identify the scan later.
 func (c *Catalog) registerInfoSchemaView(project, dataset string, view *infoSchemaView) error {
 	storageName := fmt.Sprintf("%s.%s.INFORMATION_SCHEMA.%s", project, dataset, view.Name)
-	columns := []*googlesql.SimpleColumn{}
+	columns := []googlesql.Googlesql_ColumnNode{}
 	for _, col := range view.Columns {
 		typ, err := infoSchemaSimpleTypeForColumn(col)
 		if err != nil {

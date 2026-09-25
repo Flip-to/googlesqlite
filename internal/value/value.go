@@ -72,7 +72,32 @@ func parseTime(t string) (time.Time, error) {
 	return time.Parse("15:04:05.999999", t)
 }
 
+// parseTimestamp parses timestamp in loc. A civil time that falls in a
+// DST gap (02:30 on a spring-forward day) does not exist; BigQuery keeps
+// the offset in effect before the transition, so
+// TIMESTAMP('2024-03-10 02:30:00', 'America/New_York') is 07:30 UTC.
+// Go's ParseInLocation instead picks the other offset for such times.
 func parseTimestamp(timestamp string, loc *time.Location) (time.Time, error) {
+	t, err := parseTimestampRaw(timestamp, loc)
+	// Only zone-less input is interpreted in loc; input with its own
+	// offset parses into a different Location and is left alone.
+	if err != nil || loc == nil || loc == time.UTC || t.Location() != loc {
+		return t, err
+	}
+	wall, werr := parseTimestampRaw(timestamp, time.UTC)
+	if werr != nil || sameWallClock(wall, t) {
+		return t, nil
+	}
+	// In a gap: apply the offset from just before the transition.
+	_, before := t.Add(-2 * time.Hour).In(loc).Zone()
+	return wall.Add(-time.Duration(before) * time.Second), nil
+}
+
+func sameWallClock(a, b time.Time) bool {
+	return a.Year() == b.Year() && a.YearDay() == b.YearDay() && a.Hour() == b.Hour() && a.Minute() == b.Minute() && a.Second() == b.Second()
+}
+
+func parseTimestampRaw(timestamp string, loc *time.Location) (time.Time, error) {
 	if t, err := time.ParseInLocation("2006-01-02T15:04:05.999999999Z07:00", timestamp, loc); err == nil {
 		return t, nil
 	}
@@ -110,7 +135,9 @@ func parseTimestamp(timestamp string, loc *time.Location) (time.Time, error) {
 }
 
 func DateFromInt64Value(v int64) (time.Time, error) {
-	return time.Unix(0, 0).Add(time.Duration(v) * 24 * time.Hour), nil
+	// Build from seconds rather than a time.Duration: days * 24h
+	// overflows int64 nanoseconds outside roughly 1677..2262.
+	return time.Unix(v*86400, 0).UTC(), nil
 }
 
 func TimestampFromFloatValue(f float64) (time.Time, error) {

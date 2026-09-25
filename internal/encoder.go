@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	googlesql "github.com/goccy/go-googlesql"
 	"github.com/goccy/go-json"
@@ -95,7 +96,9 @@ func literalFromValue(v value.Value) (string, error) {
 			return "9e999", nil
 		case math.IsInf(f64, -1):
 			return "-9e999", nil
-		case !math.IsNaN(f64):
+		case !math.IsNaN(f64) && (f64 != 0 || !math.Signbit(f64)):
+			// -0.0 goes through the envelope below: SQLite does not
+			// keep the sign of a zero (flipto-dbt probe format_t-5416.15).
 			value := strconv.FormatFloat(f64, 'g', -1, 64)
 			if !strings.Contains(value, ".") && !strings.Contains(value, "e") {
 				// append x.0 suffix to keep float value context
@@ -159,7 +162,7 @@ func valueFromGoogleSQLValue(v googlesql.Value) (value.Value, error) {
 		microSecondsInSecond := int64(time.Second) / int64(time.Microsecond)
 		sec := microsec / microSecondsInSecond
 		remainder := microsec - (sec * microSecondsInSecond)
-		return timestampValueFromLiteral(time.Unix(sec, remainder*int64(time.Microsecond)))
+		return timestampValueFromLiteral(time.Unix(sec, remainder*int64(time.Microsecond)).UTC())
 	case googlesql.TypeKindTypeNumeric, googlesql.TypeKindTypeBignumeric:
 		return numericValueFromLiteral(m1(v.GetSQLLiteral()))
 	case googlesql.TypeKindTypeInterval:
@@ -265,7 +268,9 @@ func bytesValueFromLiteral(lit string) value.BytesValue {
 }
 
 func dateValueFromLiteral(days int64) value.DateValue {
-	t := time.Unix(int64(time.Duration(days)*24*(time.Hour/time.Second)), 0)
+	// A DATE is a civil date; build it in UTC so the host time zone
+	// cannot shift it to the previous or next day.
+	t := time.Unix(days*86400, 0).UTC()
 	return value.DateValue(t)
 }
 
@@ -392,11 +397,13 @@ func structValueFromLiteral(v googlesql.Value) (*value.StructValue, error) {
 	n, _ := v.NumFields()
 	for i := range n {
 		field, _ := v.Field(i)
+		// Anonymous fields keep the empty name the analyzer declared,
+		// exactly as the runtime MakeStruct path does; values stay
+		// positional in Keys/Values, so they never collapse. BigQuery
+		// renders them as "" in TO_JSON_STRING.
 		var name string
-		if int(i) < len(fieldNames) && fieldNames[int(i)] != "" {
+		if int(i) < len(fieldNames) {
 			name = fieldNames[int(i)]
-		} else {
-			name = fmt.Sprintf("_field_%d", i)
 		}
 		val, err := valueFromGoogleSQLValue(*field)
 		if err != nil {
@@ -469,6 +476,9 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
 	if t == nil {
 		return v, nil
 	}
+	if out, handled, err := castScalarStrict(m1(t.Kind()), v); handled {
+		return out, err
+	}
 	// Googlesql_TypeNode carries Kind directly, no upcast needed.
 	switch m1(t.Kind()) {
 	case googlesql.TypeKindTypeInt32, googlesql.TypeKindTypeInt64, googlesql.TypeKindTypeUint32, googlesql.TypeKindTypeUint64:
@@ -490,6 +500,20 @@ func CastValue(t googlesql.Googlesql_TypeNode, v value.Value) (value.Value, erro
 		}
 		return value.FloatValue(f64), nil
 	case googlesql.TypeKindTypeString, googlesql.TypeKindTypeEnum:
+		switch tv := v.(type) {
+		case value.TimestampValue:
+			return value.StringValue(tv.SQLString()), nil
+		case value.DatetimeValue:
+			return value.StringValue(tv.SQLString()), nil
+		}
+		if b, ok := v.(value.BytesValue); ok {
+			// BYTES to STRING reinterprets the bytes as UTF-8; ToString
+			// would return the base64 storage encoding instead.
+			if !utf8.Valid(b) {
+				return nil, fmt.Errorf("invalid UTF-8 in BYTES to STRING cast")
+			}
+			return value.StringValue(b), nil
+		}
 		s, err := v.ToString()
 		if err != nil {
 			return nil, err

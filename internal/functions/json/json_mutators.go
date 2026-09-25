@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/goccy/go-json"
-	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
@@ -97,35 +96,17 @@ func jsonRemoveAtPath(node any, segs []pathSegment) any {
 	return node
 }
 
-func jsonSetAtPath(node any, segs []pathSegment, val any) any {
+// jsonSetAtPath replaces the value at segs. When createIfMissing is
+// set, missing object members are created and arrays are padded with
+// JSON null up to the requested index (json_functions.md, JSON_SET);
+// otherwise only existing paths are replaced. Paths that do not match
+// the document shape (a subscript on an object, a member on an array,
+// anything below a scalar) leave the document unchanged.
+func jsonSetAtPath(node any, segs []pathSegment, val any, createIfMissing bool) any {
 	if len(segs) == 0 {
 		return val
 	}
 	seg := segs[0]
-	if len(segs) == 1 {
-		switch v := node.(type) {
-		case map[string]any:
-			if !seg.arrayIndex {
-				v[seg.name] = val
-			}
-			return v
-		case []any:
-			if seg.arrayIndex {
-				if seg.index >= 0 && seg.index < len(v) {
-					v[seg.index] = val
-				} else if seg.index == len(v) {
-					v = append(v, val)
-				}
-			}
-			return v
-		case nil:
-			if seg.arrayIndex {
-				return []any{val}
-			}
-			return map[string]any{seg.name: val}
-		}
-		return node
-	}
 	switch v := node.(type) {
 	case map[string]any:
 		if seg.arrayIndex {
@@ -133,26 +114,52 @@ func jsonSetAtPath(node any, segs []pathSegment, val any) any {
 		}
 		child, ok := v[seg.name]
 		if !ok {
-			child = nil
+			if !createIfMissing {
+				return v
+			}
+			v[seg.name] = jsonBuildMissing(segs[1:], val)
+			return v
 		}
-		v[seg.name] = jsonSetAtPath(child, segs[1:], val)
+		v[seg.name] = jsonSetAtPath(child, segs[1:], val, createIfMissing)
 		return v
 	case []any:
 		if !seg.arrayIndex || seg.index < 0 {
 			return v
 		}
-		if seg.index >= len(v) {
+		if seg.index < len(v) {
+			v[seg.index] = jsonSetAtPath(v[seg.index], segs[1:], val, createIfMissing)
 			return v
 		}
-		v[seg.index] = jsonSetAtPath(v[seg.index], segs[1:], val)
-		return v
-	case nil:
-		if seg.arrayIndex {
-			return []any{jsonSetAtPath(nil, segs[1:], val)}
+		if !createIfMissing {
+			return v
 		}
-		return map[string]any{seg.name: jsonSetAtPath(nil, segs[1:], val)}
+		for len(v) < seg.index {
+			v = append(v, nil)
+		}
+		return append(v, jsonBuildMissing(segs[1:], val))
+	case nil:
+		if !createIfMissing {
+			return node
+		}
+		return jsonBuildMissing(segs, val)
 	}
 	return node
+}
+
+// jsonBuildMissing materialises the containers a JSON_SET path needs.
+func jsonBuildMissing(segs []pathSegment, val any) any {
+	if len(segs) == 0 {
+		return val
+	}
+	seg := segs[0]
+	if seg.arrayIndex {
+		if seg.index < 0 {
+			return nil
+		}
+		arr := make([]any, seg.index, seg.index+1)
+		return append(arr, jsonBuildMissing(segs[1:], val))
+	}
+	return map[string]any{seg.name: jsonBuildMissing(segs[1:], val)}
 }
 
 // JSON_REMOVE removes one or more path expressions from a JSON value.
@@ -177,7 +184,7 @@ func JSON_REMOVE(jsonText string, paths []string) (value.Value, error) {
 
 // JSON_SET sets one or more (path, value) pairs on a JSON value.
 // pairs come in alternating order [path1, val1, path2, val2, ...].
-func JSON_SET(jsonText string, pairs []value.Value) (value.Value, error) {
+func JSON_SET(jsonText string, pairs []value.Value, createIfMissing bool) (value.Value, error) {
 	if len(pairs)%2 != 0 {
 		return nil, fmt.Errorf("JSON_SET: path/value pairs must be even, got %d", len(pairs))
 	}
@@ -186,6 +193,10 @@ func JSON_SET(jsonText string, pairs []value.Value) (value.Value, error) {
 		return nil, err
 	}
 	for i := 0; i < len(pairs); i += 2 {
+		if pairs[i] == nil {
+			// A NULL json_path skips its pair (json_functions.md JSON_SET).
+			continue
+		}
 		pathStr, err := pairs[i].ToString()
 		if err != nil {
 			return nil, err
@@ -194,15 +205,17 @@ func JSON_SET(jsonText string, pairs []value.Value) (value.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		raw, err := pairs[i+1].ToJSON()
-		if err != nil {
-			return nil, err
-		}
 		var val any
-		if err := json.Unmarshal([]byte(raw), &val); err != nil {
-			return nil, err
+		if pairs[i+1] != nil {
+			raw, err := pairs[i+1].ToJSON()
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal([]byte(raw), &val); err != nil {
+				return nil, err
+			}
 		}
-		node = jsonSetAtPath(node, segs, val)
+		node = jsonSetAtPath(node, segs, val, createIfMissing)
 	}
 	out, err := json.Marshal(node)
 	if err != nil {
@@ -215,7 +228,7 @@ func BindJsonRemove(args ...value.Value) (value.Value, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("JSON_REMOVE: need at least 2 args, got %d", len(args))
 	}
-	if helper.ExistsNull(args) {
+	if args[0] == nil {
 		return nil, nil
 	}
 	jsonText, err := args[0].ToString()
@@ -224,6 +237,11 @@ func BindJsonRemove(args ...value.Value) (value.Value, error) {
 	}
 	paths := make([]string, 0, len(args)-1)
 	for _, a := range args[1:] {
+		if a == nil {
+			// A NULL JSONPath removes nothing (json_queries.test
+			// json_remove_null_jsonpath).
+			continue
+		}
 		s, err := a.ToString()
 		if err != nil {
 			return nil, err
@@ -249,10 +267,19 @@ func BindJsonSet(args ...value.Value) (value.Value, error) {
 	// so arg count for n path/value pairs is 1 + 2n + 1. Strip the
 	// trailing bool back off before pair-pairing.
 	pairs := args[1:]
+	createIfMissing := true
 	if len(pairs)%2 == 1 {
 		// trailing arg is the create_if_missing bool injected by the
-		// analyzer when the caller omits it. Drop it before pair-pairing.
+		// analyzer when the caller omits it.
+		last := pairs[len(pairs)-1]
+		if last == nil {
+			// A NULL create_if_missing ignores the set operation.
+			return args[0], nil
+		}
+		if b, err := last.ToBool(); err == nil {
+			createIfMissing = b
+		}
 		pairs = pairs[:len(pairs)-1]
 	}
-	return JSON_SET(jsonText, pairs)
+	return JSON_SET(jsonText, pairs, createIfMissing)
 }

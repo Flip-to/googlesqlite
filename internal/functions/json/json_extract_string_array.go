@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/goccy/go-json"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
 func JSON_EXTRACT_STRING_ARRAY(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -30,6 +29,10 @@ func JSON_EXTRACT_STRING_ARRAY(v, path string) (value.Value, error) {
 	ret := &value.ArrayValue{}
 	for i := 0; i < rv.Len(); i++ {
 		elem := rv.Index(i).Interface()
+		if elem == nil {
+			ret.Values = append(ret.Values, nil)
+			continue
+		}
 		elemV := reflect.ValueOf(elem)
 		elemKind := elemV.Type().Kind()
 		if elemKind == reflect.Map || elemKind == reflect.Slice {

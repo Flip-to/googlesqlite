@@ -1,6 +1,8 @@
 package date
 
 import (
+	"fmt"
+
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
@@ -8,8 +10,11 @@ import (
 // `step interval` (e.g. step=1, interval="DAY"). Used by
 // GENERATE_DATE_ARRAY.
 func generateDateArray(start, end value.Value, step int, interval string) (value.Value, error) {
-	if start == nil || end == nil || step == 0 {
+	if start == nil || end == nil {
 		return nil, nil
+	}
+	if step == 0 {
+		return nil, fmt.Errorf("sequence step cannot be 0")
 	}
 	isLT, err := start.LTE(end)
 	if err != nil {
@@ -24,6 +29,11 @@ func generateDateArray(start, end value.Value, step int, interval string) (value
 	}
 	cur := start
 	for {
+		// Bound the result so a huge range errors instead of
+		// exhausting memory.
+		if len(arr.Values) >= 10_000_000 {
+			return nil, fmt.Errorf("result exceeds 10000000 elements")
+		}
 		arr.Values = append(arr.Values, cur)
 		after, err := cur.(value.DateValue).AddDateWithInterval(step, interval)
 		if err != nil {

@@ -17,7 +17,7 @@ func (f *APPROX_COUNT_DISTINCT) Step(v value.Value, opt *helper.Option) error {
 		return nil
 	}
 	f.once.Do(func() { f.valueMap = map[string]struct{}{} })
-	val, err := v.ToString()
+	val, err := value.DistinctKey(v)
 	if err != nil {
 		return err
 	}

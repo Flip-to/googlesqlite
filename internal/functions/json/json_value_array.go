@@ -2,48 +2,47 @@ package json
 
 import (
 	"fmt"
-	"reflect"
+	"strings"
 
 	"github.com/goccy/go-json"
+
 	"github.com/goccy/googlesqlite/internal/functions/helper"
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
 func JSON_VALUE_ARRAY(v, path string) (value.Value, error) {
-	p, err := json.CreatePath(path)
+	p, err := createPath(path)
 	if err != nil {
 		return nil, err
 	}
 	if p.UsedSingleQuotePathSelector() {
 		return nil, fmt.Errorf("JSON_VALUE_ARRAY: doesn't use single quote path selector")
 	}
-	var values []any
-	if err := p.Unmarshal([]byte(v), &values); err != nil {
+	if !json.Valid([]byte(v)) {
 		// invalid json content is ignored.
 		return nil, nil
 	}
-	if len(values) == 0 {
+	extracted, err := p.Extract([]byte(v))
+	if err != nil || len(extracted) == 0 {
 		return nil, nil
 	}
-	val := values[0]
-	rv := reflect.ValueOf(val)
-	if !rv.IsValid() || rv.Type().Kind() != reflect.Slice {
+	var elems []json.RawMessage
+	if err := json.Unmarshal(extracted[0], &elems); err != nil || elems == nil {
 		return nil, nil
 	}
+	// Each number keeps its source text: [1, 2.50] is ["1", "2.50"]
+	// (flipto-dbt probe json_value_array-8983.2).
 	ret := &value.ArrayValue{}
-	for i := 0; i < rv.Len(); i++ {
-		elem := rv.Index(i).Interface()
-		elemV := reflect.ValueOf(elem)
-		elemKind := elemV.Type().Kind()
-		if elemKind == reflect.Map || elemKind == reflect.Slice {
+	for _, raw := range elems {
+		text := strings.TrimSpace(string(raw))
+		if text != "" && (text[0] == '{' || text[0] == '[') {
 			return nil, nil
 		}
-		jsonValue := fmt.Sprint(elem)
-		if jsonValue == "null" {
-			ret.Values = append(ret.Values, nil)
-		} else {
-			ret.Values = append(ret.Values, value.StringValue(jsonValue))
+		elem, err := scalarFromRawJSON(raw)
+		if err != nil {
+			return nil, err
 		}
+		ret.Values = append(ret.Values, elem)
 	}
 	return ret, nil
 }

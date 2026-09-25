@@ -205,14 +205,15 @@ func TestCHR(t *testing.T) {
 	if s, _ := got.ToString(); s != "A" {
 		t.Fatalf("CHR(65): got %q, want \"A\"", s)
 	}
-	// CHR(0) -> '' per the BQ docs (the null code point produces an
-	// empty STRING).
+	// CHR(0) is the NUL character: real BigQuery returns a 1-character
+	// string (TO_HEX(CAST(CHR(0) AS BYTES)) = '00'), as does
+	// strings.test strings_function_chr, although the docs say ''.
 	got, err = strfn.BindChr(value.IntValue(0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s, _ := got.ToString(); s != "" {
-		t.Fatalf("CHR(0): got %q, want \"\"", s)
+	if s, _ := got.ToString(); s != "\x00" {
+		t.Fatalf("CHR(0): got %q, want %q", s, "\x00")
 	}
 }
 
@@ -846,9 +847,11 @@ func TestCollate(t *testing.T) {
 	if !equalString(got, "Hello") {
 		t.Errorf("COLLATE empty spec")
 	}
-	// COLLATE with und:ci folds to lower per the implementation.
+	// COLLATE only attaches the collation; the value is unchanged
+	// (collation.test collate_function_with_valid_second_argument:
+	// collate('abc', 'und:ci') -> "abc").
 	got, _ = strfn.BindCollate(value.StringValue("Hello"), value.StringValue("und:ci"))
-	if !equalString(got, "hello") {
+	if !equalString(got, "Hello") {
 		t.Errorf("COLLATE und:ci")
 	}
 	// COLLATE with und:cs returns as-is.
@@ -987,9 +990,10 @@ func TestFormat_ValidationErrors(t *testing.T) {
 	if _, err := strfn.BindFormat(value.StringValue("%d"), value.StringValue("x")); err == nil {
 		t.Errorf("FORMAT %%d with string should fail")
 	}
-	// %o with negative.
-	if _, err := strfn.BindFormat(value.StringValue("%o"), value.IntValue(-1)); err == nil {
-		t.Errorf("FORMAT %%o negative should fail")
+	// %o with a negative value prints a signed octal, as in BigQuery
+	// (flipto-dbt emulator_differential_results.md L8).
+	if got, err := strfn.BindFormat(value.StringValue("%o"), value.IntValue(-8)); err != nil || got != value.StringValue("-10") {
+		t.Errorf("FORMAT %%o -8 = %v, %v; want -10", got, err)
 	}
 }
 
@@ -1066,9 +1070,12 @@ func TestInstrBytesAndNegativePos(t *testing.T) {
 	if got == nil {
 		t.Errorf("INSTR neg pos returned nil")
 	}
-	// position past length -> error.
-	if _, err := strfn.BindInstr(value.StringValue("ab"), value.StringValue("a"), value.IntValue(100)); err == nil {
-		t.Errorf("INSTR pos too large should fail")
+	// position past length -> 0 (string_functions.md INSTR: "Returns 0
+	// if position is greater than the length of value").
+	if got, err := strfn.BindInstr(value.StringValue("ab"), value.StringValue("a"), value.IntValue(100)); err != nil {
+		t.Errorf("INSTR pos too large: %v", err)
+	} else if i, _ := got.ToInt64(); i != 0 {
+		t.Errorf("INSTR pos too large: got %d, want 0", i)
 	}
 	// Different source / search types -> error.
 	if _, err := strfn.BindInstr(value.StringValue("ab"), value.BytesValue("a")); err == nil {

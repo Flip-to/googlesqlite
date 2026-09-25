@@ -18,11 +18,7 @@ func COSINE_DISTANCE(args ...value.Value) (value.Value, error) {
 	if args[0] == nil || args[1] == nil {
 		return nil, nil
 	}
-	a, err := vectorFromValue(args[0])
-	if err != nil {
-		return nil, err
-	}
-	b, err := vectorFromValue(args[1])
+	a, b, err := vectorPair(args[0], args[1])
 	if err != nil {
 		return nil, err
 	}

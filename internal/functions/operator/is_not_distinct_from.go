@@ -5,15 +5,13 @@ import (
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
+// IS_NOT_DISTINCT_FROM is the negation of IS_DISTINCT_FROM.
 func IS_NOT_DISTINCT_FROM(a, b value.Value) (value.Value, error) {
-	if a == nil || b == nil {
-		return value.BoolValue(a == nil && b == nil), nil
-	}
-	cond, err := a.EQ(b)
+	same, err := value.NotDistinct(a, b)
 	if err != nil {
 		return nil, err
 	}
-	return value.BoolValue(cond), nil
+	return value.BoolValue(same), nil
 }
 
 // BindIsNotDistinctFrom observes NULL itself, so it must use the

@@ -5,26 +5,15 @@ import (
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
+// SUM sums exactly and reports overflow; see helper.Summer.
 type SUM struct {
-	sum value.Value
+	s helper.Summer
 }
 
-func (f *SUM) Step(v value.Value, opt *helper.Option) error {
-	if v == nil {
-		return nil
-	}
-	if f.sum == nil {
-		f.sum = v
-	} else {
-		added, err := f.sum.Add(v)
-		if err != nil {
-			return err
-		}
-		f.sum = added
-	}
-	return nil
+func (f *SUM) Step(v value.Value, _ *helper.Option) error {
+	return f.s.Add(v)
 }
 
 func (f *SUM) Done() (value.Value, error) {
-	return f.sum, nil
+	return f.s.Sum("SUM")
 }

@@ -177,3 +177,14 @@ func (bv BytesValue) Format(verb rune) string {
 func (bv BytesValue) Interface() any {
 	return []byte(bv)
 }
+
+// RawText returns the text of a STRING value, or the raw bytes of a
+// BYTES value. BytesValue.ToString returns base64 (the storage
+// encoding), which is wrong wherever SQL semantics need the bytes
+// themselves: CAST(BYTES AS STRING), LIKE and STRING_AGG over BYTES.
+func RawText(v Value) (string, error) {
+	if b, ok := v.(BytesValue); ok {
+		return string(b), nil
+	}
+	return v.ToString()
+}

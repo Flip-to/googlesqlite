@@ -7,6 +7,9 @@ import (
 )
 
 func FLOOR(x value.Value) (value.Value, error) {
+	if n, ok := x.(*value.NumericValue); ok {
+		return numericResult(ratFloor(n.Rat), n.IsBigNumeric), nil
+	}
 	xv, err := x.ToFloat64()
 	if err != nil {
 		return nil, err

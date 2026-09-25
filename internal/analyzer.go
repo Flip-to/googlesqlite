@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/goccy/googlesqlite/internal/exportdata"
 	"github.com/goccy/googlesqlite/internal/value"
+	"github.com/goccy/googlesqlite/internal/zoneinfo"
 )
 
 type Analyzer struct {
@@ -87,8 +90,10 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureV12SafeFunctionCall,
 	googlesql.LanguageFeatureFeatureJsonType,
 	googlesql.LanguageFeatureFeatureJsonArrayFunctions,
-	googlesql.LanguageFeatureFeatureJsonStrictNumberParsing,
 	googlesql.LanguageFeatureFeatureV13IsDistinct,
+	googlesql.LanguageFeatureFeatureCorresponding,
+	googlesql.LanguageFeatureFeatureCorrespondingFull,
+	googlesql.LanguageFeatureFeatureByName,
 	googlesql.LanguageFeatureFeatureV13FormatInCast,
 	googlesql.LanguageFeatureFeatureV13DateArithmetics,
 	googlesql.LanguageFeatureFeatureV11OrderByInAggregate,
@@ -134,6 +139,8 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureWithRecursive,
 	googlesql.LanguageFeatureFeatureTableValuedFunctions,
 	googlesql.LanguageFeatureFeatureCreateTableFunction,
+	// CREATE [TEMP] AGGREGATE FUNCTION (SQL user-defined aggregates).
+	googlesql.LanguageFeatureFeatureCreateAggregateFunction,
 	googlesql.LanguageFeatureFeatureOmitInsertColumnList,
 	googlesql.LanguageFeatureFeatureTokenizedSearch,
 	// Permits ResolvedArgumentRef inside JSON_VALUE / JSON_QUERY
@@ -192,6 +199,17 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// appears in a query.
 	googlesql.LanguageFeatureFeatureInlineLambdaArgument,
 	googlesql.LanguageFeatureFeatureLikeAnySomeAll,
+	// LIKE ANY|SOME|ALL UNNEST(array) and LIKE ANY|SOME|ALL (subquery).
+	// Both are lowered by ResolvedASTRewriteRewriteLikeAnyAll.
+	googlesql.LanguageFeatureFeatureLikeAnySomeAllArray,
+	googlesql.LanguageFeatureFeatureLikeAnySomeAllSubquery,
+	// Collation: the analyzer propagates `und:ci` annotations onto
+	// expression types and ResolvedFunctionCall.collation_list; the
+	// formatter lowers collation-sensitive calls to collation-aware
+	// runtime functions.
+	googlesql.LanguageFeatureFeatureAnnotationFramework,
+	googlesql.LanguageFeatureFeatureCollationSupport,
+	googlesql.LanguageFeatureFeatureCollationInExplicitCast,
 	// Anonymization / Differential Privacy syntax gates. The
 	// analyzer-side rewriter
 	// (ResolvedASTRewriteRewriteAnonymization) is enabled above;
@@ -213,6 +231,11 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureDifferentialPrivacy,
 	googlesql.LanguageFeatureFeatureDifferentialPrivacyReportFunctions,
 	googlesql.LanguageFeatureFeatureDifferentialPrivacyThresholding,
+	// SELECT WITH AGGREGATION_THRESHOLD (BigQuery aggregation
+	// threshold analysis rules). The formatter lowers the resulting
+	// ResolvedAggregationThresholdAggregateScan directly (see
+	// AggregationThresholdAggregateScanNode).
+	googlesql.LanguageFeatureFeatureAggregationThreshold,
 	// BigQuery AEAD encryption family (KEYS.* / AEAD.* /
 	// DETERMINISTIC_*). The catalog-side registration uses the
 	// same flag; the analyzer's resolver also gates the
@@ -248,6 +271,12 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// flags. REGEXP_EXTRACT_GROUPS' Pipe-syntax upstream Example
 	// exercises this path.
 	googlesql.LanguageFeatureFeaturePipes,
+	// Adjacent string literals concatenate ('abc' '123' = 'abc123'),
+	// as in BigQuery (strings.test, string_literal_concat).
+	googlesql.LanguageFeatureFeatureLiteralConcatenation,
+	// LCASE / UCASE aliases of LOWER / UPPER (strings.test,
+	// strings_function_lcase; bytes.test, function_lcase).
+	googlesql.LanguageFeatureFeatureAliasesForStringAndDateFunctions,
 	// `|> IF ... ELSEIF ... ELSE ...` and `|> ASSERT ...` pipe
 	// operators. The Debug ERROR / IFERROR upstream Examples
 	// exercise the pipe-IF cascade; without these toggles the
@@ -267,6 +296,17 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// STRUCT positional accessors `s[OFFSET(i)]` / `s[ORDINAL(n)]`
 	// for the compliance fixtures under types/struct.
 	googlesql.LanguageFeatureFeatureV14StructPositionalAccessor,
+	// MATCH_RECOGNIZE row pattern recognition (standard and pipe
+	// syntax). The ResolvedMatchRecognizeScan is lowered by
+	// internal/match_recognize.go.
+	googlesql.LanguageFeatureFeatureMatchRecognize,
+	// `|> WITH name AS (...)` pipe operator (pipe_operators.test).
+	googlesql.LanguageFeatureFeaturePipeWith,
+	// PIVOT ... IN (<named constant>) (pivot.test).
+	googlesql.LanguageFeatureFeatureAnalysisConstantPivotColumn,
+	// `|> CALL tvf(INPUT TABLE, ...)` names the pipe input's position
+	// among the TVF arguments (pipe_call.test).
+	googlesql.LanguageFeatureFeaturePipeCallInputTable,
 }
 
 // supportedStatementKinds lists the ResolvedStatement kinds the
@@ -340,8 +380,14 @@ func newAnalyzerOptions() (*googlesql.AnalyzerOptions, error) {
 	if err := langOpt.EnableReservableKeyword("QUALIFY", true); err != nil {
 		return nil, err
 	}
+	if err := langOpt.EnableReservableKeyword("MATCH_RECOGNIZE", true); err != nil {
+		return nil, err
+	}
 	opt, optErr := googlesql.NewAnalyzerOptions2()
 	if opt == nil {
+		if hint := zoneinfo.Hint(); hint != "" {
+			return nil, fmt.Errorf("failed to initialize analyzer options: %w (%s)", optErr, hint)
+		}
 		return nil, fmt.Errorf("failed to initialize analyzer options: %w", optErr)
 	}
 	opt.SetAllowUndeclaredParameters(true)
@@ -924,7 +970,8 @@ func isAliasInTypePosition(query string, start, end int) bool {
 // where <value> contains neither a timezone offset (`[+-]\d{2}:?\d{2}`),
 // the literal `Z` / `UTC` suffix, nor any other timezone marker.
 // `TIMESTAMP_ADD` and other identifier prefixes are unaffected because
-// the scanner consumes them as a single word.
+// the scanner consumes them as a single word. RANGE<TIMESTAMP> literal
+// bounds without a zone get the same treatment.
 func applyNaiveTimestampUTC(query string) string {
 	if !timestampNeedle.MatchString(query) {
 		return query
@@ -960,6 +1007,20 @@ func applyNaiveTimestampUTC(query string) string {
 			word := query[i:j]
 			b.WriteString(word)
 			i = j
+			if strings.EqualFold(word, "RANGE") {
+				if k, ok := rangeTimestampLiteralStart(query, i); ok {
+					end := scanStringLiteral(query, k)
+					if end > k+1 && end <= len(query) {
+						b.WriteString(query[i:k])
+						quote := query[k]
+						b.WriteByte(quote)
+						b.WriteString(naiveRangeBoundsUTC(query[k+1 : end-1]))
+						b.WriteByte(quote)
+						i = end
+						continue
+					}
+				}
+			}
 			if strings.EqualFold(word, "TIMESTAMP") {
 				// Skip whitespace, then if the next token is a string
 				// literal without a TZ marker, rewrite it to UTC.
@@ -977,7 +1038,7 @@ func applyNaiveTimestampUTC(query string) string {
 						if !timestampHasTZ(content) {
 							b.WriteByte(quote)
 							b.WriteString(content)
-							b.WriteString("+00:00")
+							b.WriteString(naiveUTCSuffix(content))
 							b.WriteByte(quote)
 						} else {
 							b.WriteString(query[k:end])
@@ -994,11 +1055,66 @@ func applyNaiveTimestampUTC(query string) string {
 	return b.String()
 }
 
+// rangeTimestampLiteralStart reports whether query[i:] continues a
+// RANGE keyword with `<TIMESTAMP> '...'`, returning the index of the
+// string literal's opening quote.
+func rangeTimestampLiteralStart(query string, i int) (int, bool) {
+	skip := func(k int) int {
+		for k < len(query) && isSpaceByte(query[k]) {
+			k++
+		}
+		return k
+	}
+	k := skip(i)
+	if k >= len(query) || query[k] != '<' {
+		return 0, false
+	}
+	k = skip(k + 1)
+	if k+len("TIMESTAMP") > len(query) || !strings.EqualFold(query[k:k+len("TIMESTAMP")], "TIMESTAMP") {
+		return 0, false
+	}
+	k = skip(k + len("TIMESTAMP"))
+	if k >= len(query) || query[k] != '>' {
+		return 0, false
+	}
+	k = skip(k + 1)
+	if k >= len(query) || (query[k] != '\'' && query[k] != '"') {
+		return 0, false
+	}
+	return k, true
+}
+
+// naiveRangeBoundsUTC appends +00:00 to each zone-less bound of a
+// RANGE<TIMESTAMP> literal body such as `[2024-01-01 10:00:00, UNBOUNDED)`,
+// for the same reason applyNaiveTimestampUTC rewrites TIMESTAMP literals.
+func naiveRangeBoundsUTC(body string) string {
+	t := strings.TrimSpace(body)
+	if len(t) < 2 || t[0] != '[' || t[len(t)-1] != ')' {
+		return body
+	}
+	parts := strings.Split(t[1:len(t)-1], ",")
+	if len(parts) != 2 {
+		return body
+	}
+	for i, part := range parts {
+		p := strings.TrimSpace(part)
+		if p == "" || strings.EqualFold(p, "UNBOUNDED") || strings.EqualFold(p, "NULL") || timestampHasTZ(p) {
+			parts[i] = p
+			continue
+		}
+		parts[i] = p + naiveUTCSuffix(p)
+	}
+	return "[" + parts[0] + ", " + parts[1] + ")"
+}
+
 // timestampHasTZ reports whether a TIMESTAMP literal body already
 // carries a timezone marker (offset, `Z`, or an IANA / abbreviation
 // timezone name).
 func timestampHasTZ(s string) bool {
 	if len(s) == 0 {
+		return false
+	}
+	if dateOnlyRe.MatchString(s) {
 		return false
 	}
 	if strings.HasSuffix(s, "Z") || strings.HasSuffix(s, "z") {
@@ -1017,7 +1133,10 @@ func timestampHasTZ(s string) bool {
 }
 
 var (
-	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*['"]`)
+	// A bare date such as `2020-01-01` ends in `-01`, which is not an
+	// offset: an offset only follows a time of day.
+	dateOnlyRe = regexp.MustCompile(`^\s*\d{4}-\d{1,2}-\d{1,2}\s*$`)
+	timestampNeedle = regexp.MustCompile(`(?i)\bTIMESTAMP\s*(?:>\s*)?['"]`)
 	// Match `[+-]HH`, `[+-]HHMM`, or `[+-]HH:MM` at the tail.
 	tzOffsetTail = regexp.MustCompile(`[+-]\d{2}(?::?\d{2})?\s*$`)
 	// Match a trailing alphabetic timezone identifier separated from
@@ -1404,6 +1523,29 @@ var sqlRewritePipelinePreScriptVars = []sqlRewriteStep{
 	{"typeNameAliases", applyTypeNameAliases},
 	{"naiveTimestampUTC", applyNaiveTimestampUTC},
 	{"ingestionPartitionRewrite", applyIngestionPartitionRewrite},
+	{"signedNaNCast", applySignedNaNCast},
+}
+
+var signedNaNCastRe = regexp.MustCompile(`(?i)\bCAST\s*\(\s*(["'])([+-])nan(["'])\s+AS\s+(DOUBLE|FLOAT64|FLOAT)\s*\)`)
+
+// applySignedNaNCast rewrites CAST("-NAN" AS FLOAT64) (and "+NAN") to
+// CAST("NAN" AS FLOAT64). The analyzer folds the literal cast and
+// rejects a signed NaN, while BigQuery accepts it and yields NaN; the
+// sign of a NaN is not observable in GoogleSQL, so dropping it is
+// exact (compliance groupby_queries.test).
+func applySignedNaNCast(query string) string {
+	i := strings.IndexByte(query, 'N')
+	j := strings.IndexByte(query, 'n')
+	if i < 0 && j < 0 {
+		return query
+	}
+	return signedNaNCastRe.ReplaceAllStringFunc(query, func(m string) string {
+		sub := signedNaNCastRe.FindStringSubmatch(m)
+		if sub[1] != sub[3] {
+			return m
+		}
+		return "CAST(" + sub[1] + "NAN" + sub[1] + " AS " + sub[4] + ")"
+	})
 }
 
 // sqlRewritePipelinePostScriptVars holds the uniform-signature rewrites
@@ -1492,19 +1634,139 @@ func (a *Analyzer) sliceArgsPerStatement(parsed *parsedScript, args []driver.Nam
 // they do — wildcard-table pre-registration, StmtAction construction
 // — can itself re-enter Analyze; keeping that outside this critical
 // section is what prevents a self-deadlock.
-func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string) (googlesql.ResolvedStatementNode, error) {
+// pivotCollationUnsupported is the analyzer's error for a collated
+// column inside PIVOT. The resolver has no support for it yet.
+const pivotCollationUnsupported = "Collation is not supported in a PIVOT clause yet"
+
+// analyzeStatementLocked analyzes stmt. When the resolver rejects a
+// collated column in a PIVOT clause, the statement is re-analyzed with
+// its case-insensitive COLLATE(x, '...:ci') calls folded to LOWER(x)
+// (see analyzeWithFoldedCollate); foldedQuery is then the rewritten
+// text the resolved AST's parse locations refer to, "" otherwise.
+func (a *Analyzer) analyzeStatementLocked(stmt googlesql.ASTStatementNode, mode googlesql.ParameterMode, args []driver.NamedValue, query string, unfold bool) (_ googlesql.ResolvedStatementNode, foldedQuery string, _ error) {
 	wasmAnalyzeMu.Lock()
 	defer wasmAnalyzeMu.Unlock()
 	a.opt.SetParameterMode(mode)
 	if err := a.declareParameterTypes(mode, args); err != nil {
-		return nil, fmt.Errorf("failed to declare parameter types: %w", err)
+		return nil, "", fmt.Errorf("failed to declare parameter types: %w", err)
+	}
+	// The analyzer folds literal casts in its built-in default time zone
+	// (America/Los_Angeles), and go-googlesql v0.4.0 cannot be given a
+	// UTC TimeZone. Folding stays on: the formatter re-evaluates the
+	// zone-dependent folded literals in UTC from their source text
+	// (utcLiteralSQL). When a folded literal has a shape it cannot
+	// re-evaluate, the statement is analyzed again with unfold set, so
+	// the casts reach the runtime, which uses UTC. See
+	// docs/decisions/analyzer-default-time-zone.md.
+	if unfold {
+		if ferr := a.opt.SetFoldLiteralCast(false); ferr == nil {
+			defer func() { _ = a.opt.SetFoldLiteralCast(true) }()
+		}
 	}
 	out, err := googlesql.AnalyzeStatementFromParserAST(stmt, a.opt, query, a.catalog.catalog, tf())
+	if err != nil && strings.Contains(err.Error(), pivotCollationUnsupported) {
+		if retry, rquery, rerr := a.analyzeWithFoldedCollate(stmt, query); rerr == nil {
+			out, err, foldedQuery = retry, nil, rquery
+		}
+	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to analyze: %w", err)
+		return nil, "", fmt.Errorf("failed to analyze: %w", err)
 	}
 	stmtNode, _ := out.ResolvedStatement()
-	return stmtNode, nil
+	return stmtNode, foldedQuery, nil
+}
+
+// analyzeWithFoldedCollate re-analyzes stmt after rewriting each
+// COLLATE(x, '<tag>:ci') call in its text to LOWER(x). The resolver
+// does not support collation inside PIVOT yet; folding the values to
+// lower case gives the pivot the same case-insensitive comparisons and
+// grouping. It returns the analyzer output and the rewritten query.
+func (a *Analyzer) analyzeWithFoldedCollate(stmt googlesql.ASTStatementNode, query string) (*googlesql.AnalyzerOutput, string, error) {
+	type span struct {
+		start, end int
+		repl       string
+	}
+	offset := func(p *googlesql.ParseLocationPoint, err error) int {
+		if err != nil || p == nil {
+			return -1
+		}
+		off, err := p.GetByteOffset()
+		if err != nil {
+			return -1
+		}
+		return int(off)
+	}
+	var spans []span
+	_ = astWalk(stmt, func(node googlesql.ASTNode) error {
+		call, ok := node.(*googlesql.ASTFunctionCall)
+		if !ok {
+			return nil
+		}
+		if n, _ := call.NumChildren(); n != 3 {
+			return nil
+		}
+		path, _ := call.Function()
+		if path == nil {
+			return nil
+		}
+		ids, _ := path.ToIdentifierVector()
+		if len(ids) != 1 || !strings.EqualFold(ids[0], "collate") {
+			return nil
+		}
+		arg, _ := call.Arguments(0)
+		specNode, _ := call.Arguments(1)
+		lit, ok := specNode.(*googlesql.ASTStringLiteral)
+		if arg == nil || !ok {
+			return nil
+		}
+		spec, _ := lit.StringValue()
+		if !strings.HasSuffix(strings.ToLower(spec), ":ci") {
+			return nil
+		}
+		start, end := offset(call.StartLocation()), offset(call.EndLocation())
+		argStart, argEnd := offset(arg.StartLocation()), offset(arg.EndLocation())
+		if start < 0 || end > len(query) || argStart < start || argEnd > end || argStart > argEnd {
+			return nil
+		}
+		spans = append(spans, span{start, end, "LOWER(" + query[argStart:argEnd] + ")"})
+		return nil
+	})
+	if len(spans) == 0 {
+		return nil, "", fmt.Errorf("no case-insensitive COLLATE call to fold")
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	var b strings.Builder
+	prev := 0
+	for _, sp := range spans {
+		if sp.start < prev {
+			continue // nested inside an already folded call
+		}
+		b.WriteString(query[prev:sp.start])
+		b.WriteString(sp.repl)
+		prev = sp.end
+	}
+	b.WriteString(query[prev:])
+	folded := b.String()
+
+	// Re-parse the rewritten text; the statement keeps its start
+	// offset because every rewrite lies at or after it.
+	stmtStart := offset(stmt.StartLocation())
+	parsed, err := a.parseScript(folded)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, s := range parsed.stmts {
+		if offset(s.StartLocation()) != stmtStart {
+			continue
+		}
+		out, err := googlesql.AnalyzeStatementFromParserAST(s, a.opt, folded, a.catalog.catalog, tf())
+		runtime.KeepAlive(parsed)
+		if err != nil {
+			return nil, "", err
+		}
+		return out, folded, nil
+	}
+	return nil, "", fmt.Errorf("folded statement not found")
 }
 
 func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args []driver.NamedValue) ([]stmtActionFunc, error) {
@@ -1567,14 +1829,39 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
 				return nil, err
 			}
 			a.preRegisterWildcardTables(stmt)
-			stmtNode, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query)
+			stmtNode, foldedQuery, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, false)
 			if err != nil {
 				return nil, err
 			}
-			ctx = a.context(ctx, funcMap, tvfMap)
-			ctx = withSystemVars(ctx, conn.systemVars)
-			ctx = withConn(ctx, conn)
-			action, err := a.newStmtAction(ctx, query, stmtArgs, stmtNode)
+			build := func(node googlesql.ResolvedStatementNode, foldedQuery string, allowRefold bool) (StmtAction, *zoneFoldState, error) {
+				sourceQuery := query
+				if foldedQuery != "" {
+					sourceQuery = foldedQuery
+				}
+				state := newZoneFoldState(sourceQuery, allowRefold && refoldableStmt(node))
+				sctx := a.context(ctx, funcMap, tvfMap)
+				sctx = withSystemVars(sctx, conn.systemVars)
+				sctx = withConn(sctx, conn)
+				sctx = withSourceQuery(sctx, sourceQuery)
+				sctx = withZoneFoldState(sctx, state)
+				action, err := a.newStmtAction(sctx, query, stmtArgs, node)
+				return action, state, err
+			}
+			action, state, err := build(stmtNode, foldedQuery, true)
+			if state.needRefold {
+				// A literal was folded in the analyzer's default time
+				// zone in a shape utcLiteralSQL cannot re-evaluate:
+				// analyze again without literal-cast folding so the
+				// conversion runs at runtime, in UTC.
+				unfolded, ufq, uerr := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, true)
+				if uerr != nil {
+					// Without folding the analyzer rejects some
+					// statements (a bare NULL typed as INT64 cannot be
+					// coerced to GEOGRAPHY); keep the folded form.
+					unfolded, ufq = stmtNode, foldedQuery
+				}
+				action, _, err = build(unfolded, ufq, false)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -1858,7 +2145,41 @@ func sqlTypeName(t googlesql.Googlesql_TypeNode) (string, error) {
 	return named.TypeName(googlesql.ProductModeProductExternal)
 }
 
+// checkUnsupportedHints rejects unqualified hints (`@{ name=value }`)
+// anywhere in a resolved statement. Unqualified hints address this
+// engine, which implements none, so each one is unsupported; hints
+// qualified with another engine's name (`@{ other.name=value }`) are
+// ignored, as GoogleSQL prescribes (compliance hints.test).
+func checkUnsupportedHints(node googlesql.ResolvedNode) error {
+	if node == nil {
+		return nil
+	}
+	if h, ok := node.(interface {
+		HintList() ([]*googlesql.ResolvedOption, error)
+	}); ok {
+		hints, _ := h.HintList()
+		for _, hint := range hints {
+			if q, _ := hint.Qualifier(); q == "" {
+				name, _ := hint.Name()
+				return fmt.Errorf("Unsupported hint: %s", name)
+			}
+		}
+	}
+	children, _ := node.GetChildNodes()
+	for _, c := range children {
+		if err := checkUnsupportedHints(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *Analyzer) newStmtAction(ctx context.Context, query string, args []driver.NamedValue, node googlesql.ResolvedStatementNode) (StmtAction, error) {
+	if strings.Contains(query, "@{") {
+		if err := checkUnsupportedHints(node); err != nil {
+			return nil, err
+		}
+	}
 	kind, _ := node.NodeKind()
 	switch kind {
 	case googlesql.ResolvedNodeKindResolvedCreateTableStmt:
@@ -2107,13 +2428,26 @@ func (a *Analyzer) buildScalarTypeFuncFromTemplatedFunc(node *googlesql.Resolved
 		if !m1(arg.IsTemplated()) {
 			typ = newType(m1(arg.Type())).FormatType()
 		}
+		if argumentIsNotAggregate(arg) {
+			typ += " NOT AGGREGATE"
+		}
 		args = append(args, fmt.Sprintf("%s %s", m1(arg.ArgumentName()), typ))
 	}
 	return fmt.Sprintf(
-		"CREATE TEMP FUNCTION __googlesqlite_func__(%s) as (%s)",
+		"CREATE TEMP %sFUNCTION __googlesqlite_func__(%s) as (%s)",
+		aggregateKeyword(m1(node.IsAggregate())),
 		strings.Join(args, ","),
 		m1(node.Code()),
 	)
+}
+
+// aggregateKeyword returns the AGGREGATE keyword of a CREATE
+// AGGREGATE FUNCTION statement, or "" for a scalar function.
+func aggregateKeyword(isAggregate bool) string {
+	if isAggregate {
+		return "AGGREGATE "
+	}
+	return ""
 }
 
 func (a *Analyzer) buildArrayTypeFuncFromTemplatedFunc(node *googlesql.ResolvedCreateFunctionStmt, realType string) string {
@@ -2124,10 +2458,14 @@ func (a *Analyzer) buildArrayTypeFuncFromTemplatedFunc(node *googlesql.ResolvedC
 		if !m1(arg.IsTemplated()) {
 			typ = newType(m1(arg.Type())).FormatType()
 		}
+		if argumentIsNotAggregate(arg) {
+			typ += " NOT AGGREGATE"
+		}
 		args = append(args, fmt.Sprintf("%s %s", m1(arg.ArgumentName()), typ))
 	}
 	return fmt.Sprintf(
-		"CREATE TEMP FUNCTION __googlesqlite_func__(%s) as (%s)",
+		"CREATE TEMP %sFUNCTION __googlesqlite_func__(%s) as (%s)",
+		aggregateKeyword(m1(node.IsAggregate())),
 		strings.Join(args, ","),
 		m1(node.Code()),
 	)
@@ -2191,6 +2529,24 @@ func (a *Analyzer) newDMLStmtAction(ctx context.Context, query string, args []dr
 	// target InsertColumnList types so sparse Go maps expand to match
 	// the declared STRUCT field order. See reshapeInsertArgs.
 	args = reshapeInsertArgs(args, node)
+	if insert, ok := node.(*googlesql.ResolvedInsertStmt); ok && !a.catalog.tableHasPrimaryKey(m1(m1(insert.TableScan()).Table())) {
+		// INSERT OR IGNORE / REPLACE / UPDATE resolve conflicts on the
+		// primary key, so on a table without one they fail the way
+		// GoogleSQL prescribes (compliance dml_insert.test,
+		// dml_value_table.test).
+		switch mode, _ := insert.InsertMode(); mode {
+		case googlesql.ResolvedInsertStmtEnums_InsertModeOrIgnore:
+			return nil, fmt.Errorf("INSERT OR IGNORE is not allowed because the table does not have a primary key")
+		case googlesql.ResolvedInsertStmtEnums_InsertModeOrReplace:
+			return nil, fmt.Errorf("INSERT OR REPLACE is not allowed because the table does not have a primary key")
+		case googlesql.ResolvedInsertStmtEnums_InsertModeOrUpdate:
+			return nil, fmt.Errorf("INSERT OR UPDATE is not allowed because the table does not have a primary key")
+		}
+	}
+	assertRows, err := dmlAssertRowsModified(node)
+	if err != nil {
+		return nil, err
+	}
 	formattedQuery, params, err := collectFormatParams(ctx, node)
 	if err != nil {
 		return nil, fmt.Errorf("failed to format query %s: %w", query, err)
@@ -2208,7 +2564,42 @@ func (a *Analyzer) newDMLStmtAction(ctx context.Context, query string, args []dr
 		args:           queryArgs,
 		colTypes:       insertColumnTypes(node),
 		formattedQuery: formattedQuery,
+		assertRows:     assertRows,
 	}, nil
+}
+
+// dmlAssertRowsModified returns the row count required by a DML
+// statement's `ASSERT_ROWS_MODIFIED n` clause, or nil when the
+// statement has none.
+func dmlAssertRowsModified(node googlesql.ResolvedNode) (*int64, error) {
+	var assert *googlesql.ResolvedAssertRowsModified
+	switch n := node.(type) {
+	case *googlesql.ResolvedInsertStmt:
+		assert, _ = n.AssertRowsModified()
+	case *googlesql.ResolvedUpdateStmt:
+		assert, _ = n.AssertRowsModified()
+	case *googlesql.ResolvedDeleteStmt:
+		assert, _ = n.AssertRowsModified()
+	}
+	if assert == nil {
+		return nil, nil
+	}
+	lit, ok := m1(assert.Rows()).(*googlesql.ResolvedLiteral)
+	if !ok {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED supports only a literal row count")
+	}
+	v, err := lit.Value()
+	if err != nil || v == nil {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED: failed to read row count")
+	}
+	if isNull, _ := v.IsNull(); isNull {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED expected a non-NULL row count")
+	}
+	n, err := v.ToInt64()
+	if err != nil {
+		return nil, fmt.Errorf("ASSERT_ROWS_MODIFIED: %w", err)
+	}
+	return &n, nil
 }
 
 // insertColumnTypes returns the per-position destination column types
@@ -2385,6 +2776,34 @@ func mergeSingleKeyStructArray(av *value.ArrayValue) (*value.StructValue, bool) 
 	return merged, true
 }
 
+// flattenStructValueTable expands a top-level value table of STRUCT
+// (`SELECT AS STRUCT ...`) into one result column per struct field,
+// which is how BigQuery returns such a query's rows.
+func flattenStructValueTable(node *googlesql.ResolvedQueryStmt, outputColumns []*ColumnSpec, formattedQuery string) ([]*ColumnSpec, string) {
+	if !m1(node.IsValueTable()) || len(outputColumns) != 1 {
+		return outputColumns, formattedQuery
+	}
+	st, err := m1(m1(node.OutputColumnList())[0].Column()).Type()
+	if err != nil || st == nil {
+		return outputColumns, formattedQuery
+	}
+	structType, err := st.AsStruct()
+	if err != nil || structType == nil {
+		return outputColumns, formattedQuery
+	}
+	fields, err := structType.Fields()
+	if err != nil || len(fields) == 0 {
+		return outputColumns, formattedQuery
+	}
+	cols := make([]*ColumnSpec, 0, len(fields))
+	exprs := make([]string, 0, len(fields))
+	for i, f := range fields {
+		cols = append(cols, &ColumnSpec{Name: f.Name, Type: newType(f.Type_)})
+		exprs = append(exprs, fmt.Sprintf("googlesqlite_get_struct_field(`%s`, %d) AS `$field%d`", outputColumns[0].Name, i, i))
+	}
+	return cols, fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(exprs, ","), formattedQuery)
+}
+
 func (a *Analyzer) newQueryStmtAction(ctx context.Context, query string, args []driver.NamedValue, node *googlesql.ResolvedQueryStmt) (*QueryStmtAction, error) {
 	outputColumns := []*ColumnSpec{}
 	for _, col := range m1(node.OutputColumnList()) {
@@ -2403,6 +2822,7 @@ func (a *Analyzer) newQueryStmtAction(ctx context.Context, query string, args []
 	if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "GRAPH ") {
 		fmt.Fprintf(debugStream(), "[googlesqlite][graph] in : %s\n[googlesqlite][graph] out: %s\n", query, formattedQuery)
 	}
+	outputColumns, formattedQuery = flattenStructValueTable(node, outputColumns, formattedQuery)
 	queryArgs, err := getArgsFromParams(args, params)
 	if err != nil {
 		return nil, err
@@ -3069,4 +3489,18 @@ func getArgsFromParams(values []driver.NamedValue, params []*googlesql.ResolvedP
 		args = append(args, newNamedValue)
 	}
 	return args, nil
+}
+
+func isSpaceByte(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+// naiveUTCSuffix is the text appended to a zone-less TIMESTAMP value to
+// make it UTC. A bare date gets a midnight time first, since an offset
+// may only follow a time of day.
+func naiveUTCSuffix(s string) string {
+	if dateOnlyRe.MatchString(s) {
+		return " 00:00:00+00:00"
+	}
+	return "+00:00"
 }

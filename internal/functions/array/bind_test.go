@@ -126,13 +126,14 @@ func TestArrayIn(t *testing.T) {
 	if got != value.BoolValue(false) {
 		t.Errorf("miss = %v; want false", got)
 	}
-	// NULL IN UNNEST([1]) -> false (helper.ExistsNull short-circuit)
+	// NULL IN UNNEST([1]) -> NULL (operators.md IN: "Returns NULL if
+	// search_value is NULL" once value_set is non-empty).
 	got, err = arrayfn.BindInArray(nil, arr(value.IntValue(1)))
 	if err != nil {
 		t.Fatalf("BindInArray null: %v", err)
 	}
-	if got != value.BoolValue(false) {
-		t.Errorf("null = %v; want false", got)
+	if got != nil {
+		t.Errorf("null = %v; want NULL", got)
 	}
 }
 

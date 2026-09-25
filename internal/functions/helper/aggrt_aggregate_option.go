@@ -48,6 +48,14 @@ func (o *FuncOption) UnmarshalJSON(b []byte) error {
 			return err
 		}
 		o.Value = val.Value
+	case OptionHaving:
+		var val struct {
+			Value *Having `json:"value"`
+		}
+		if err := json.Unmarshal(b, &val); err != nil {
+			return err
+		}
+		o.Value = val.Value
 	}
 	return nil
 }
@@ -60,6 +68,7 @@ const (
 	OptionLimit       FuncOptionType = "aggregate_limit"
 	OptionOrderBy     FuncOptionType = "aggregate_order_by"
 	OptionIgnoreNulls FuncOptionType = "aggregate_ignore_nulls"
+	OptionHaving      FuncOptionType = "aggregate_having"
 )
 
 // DISTINCT, IGNORE_NULLS, LIMIT, ORDER_BY emit the encoded marker
@@ -124,6 +133,51 @@ func ORDER_BY(v value.Value, isAsc bool) (value.Value, error) {
 	return value.StringValue(string(b)), nil
 }
 
+// Having is the HAVING MAX / HAVING MIN key of one input row.
+type Having struct {
+	Value value.Value `json:"value"`
+	IsMax bool        `json:"isMax"`
+}
+
+// MarshalJSON uses the driver's value codec so every type (RANGE,
+// INTERVAL, STRUCT, ...) round-trips, unlike plain json.Marshal.
+func (h *Having) MarshalJSON() ([]byte, error) {
+	encoded, err := value.EncodeValue(h.Value)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(struct {
+		Value any  `json:"value"`
+		IsMax bool `json:"isMax"`
+	}{encoded, h.IsMax})
+}
+
+func (h *Having) UnmarshalJSON(b []byte) error {
+	var v struct {
+		Value any  `json:"value"`
+		IsMax bool `json:"isMax"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	val, err := value.DecodeValue(v.Value)
+	if err != nil {
+		return err
+	}
+	h.Value = val
+	h.IsMax = v.IsMax
+	return nil
+}
+
+// HAVING emits the marker carrying a row's HAVING MAX/MIN key.
+func HAVING(v value.Value, isMax bool) (value.Value, error) {
+	b, _ := json.Marshal(&FuncOption{
+		Type:  OptionHaving,
+		Value: &Having{Value: v, IsMax: isMax},
+	})
+	return value.StringValue(string(b)), nil
+}
+
 // Option holds the aggregate-call-level flags parsed out of the
 // FuncOption markers in a step's argument list.
 type Option struct {
@@ -131,6 +185,8 @@ type Option struct {
 	IgnoreNulls bool
 	Limit       *int64
 	OrderBy     []*OrderBy
+	// Having is set when the call used HAVING MAX or HAVING MIN.
+	Having *Having
 }
 
 // ParseOptions strips the encoded option markers from args and returns
@@ -165,6 +221,8 @@ func ParseOptions(args ...value.Value) ([]value.Value, *Option) {
 			opt.Limit = &i64
 		case OptionOrderBy:
 			opt.OrderBy = append(opt.OrderBy, v.Value.(*OrderBy))
+		case OptionHaving:
+			opt.Having = v.Value.(*Having)
 		default:
 			filteredArgs = append(filteredArgs, arg)
 			continue
