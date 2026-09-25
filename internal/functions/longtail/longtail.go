@@ -503,6 +503,12 @@ func jsonModify(doc any, path string, val any, append bool) any {
 					} else {
 						m[field] = prepend(arr, val)
 					}
+				} else if cur, exists := m[field]; append && exists && cur == nil {
+					// A JSON null target is appended to as an empty
+					// array: JSON_ARRAY_APPEND(JSON '{"a": null}', '$.a',
+					// 10) is {"a":[10]} (json_functions.md; verified on
+					// BigQuery).
+					m[field] = appendValues([]any{}, val)
 				}
 				return m
 			}

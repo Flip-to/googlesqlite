@@ -31,6 +31,14 @@ func JSON_EXTRACT_ARRAY(v, path string) (value.Value, error) {
 	}
 	ret := &value.ArrayValue{}
 	for _, val := range values {
+		// Elements come back re-serialised without insignificant
+		// whitespace: an element written `{"apples": 5}` in a STRING
+		// input is returned as '{"apples":5}' (json_functions.md,
+		// JSON_EXTRACT_ARRAY; verified on BigQuery).
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, val); err == nil {
+			val = compact.Bytes()
+		}
 		jsonValue := string(val)
 		if jsonValue == "null" {
 			ret.Values = append(ret.Values, nil)

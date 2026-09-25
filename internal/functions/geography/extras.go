@@ -1,6 +1,7 @@
 package geography
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math"
 	"strings"
@@ -363,6 +364,14 @@ func BindStAzimuth(args ...value.Value) (value.Value, error) {
 		return nil, nil
 	}
 	if lng1 == lng2 && lat1 == lat2 {
+		return nil, nil
+	}
+	// Antipodal points have no defined bearing: ST_AZIMUTH(POINT(-30 0),
+	// POINT(150 0)) is NULL (geography_functions.md, ST_AZIMUTH;
+	// verified on BigQuery).
+	pa := s2.PointFromLatLng(s2.LatLngFromDegrees(lat1, lng1))
+	pb := s2.PointFromLatLng(s2.LatLngFromDegrees(lat2, lng2))
+	if pa.Add(pb.Vector).Norm() < 1e-12 {
 		return nil, nil
 	}
 	phi1 := degToRad(lat1)
@@ -1243,6 +1252,14 @@ func BindStGeogFrom(args ...value.Value) (value.Value, error) {
 	}
 	if strings.HasPrefix(t, "<") {
 		return parseKML(t)
+	}
+	// A hex-encoded WKB string: ST_GEOGFROM('0101000000...') is
+	// POINT(2 4) (geography_functions.md, ST_GEOGFROM; verified on
+	// BigQuery).
+	if len(t) >= 10 && len(t)%2 == 0 && (strings.HasPrefix(t, "00") || strings.HasPrefix(t, "01")) {
+		if b, err := hex.DecodeString(t); err == nil {
+			return geographyFromWKB(b)
+		}
 	}
 	return value.GeographyFromWKT(t)
 }

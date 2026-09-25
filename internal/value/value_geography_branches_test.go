@@ -181,7 +181,8 @@ func TestGeographyPointEmptyToWKT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wkt != "POINT EMPTY" {
-		t.Fatalf("expected POINT EMPTY, got %q", wkt)
+	// BigQuery prints every empty geography as GEOMETRYCOLLECTION EMPTY.
+	if wkt != "GEOMETRYCOLLECTION EMPTY" {
+		t.Fatalf("expected GEOMETRYCOLLECTION EMPTY, got %q", wkt)
 	}
 }

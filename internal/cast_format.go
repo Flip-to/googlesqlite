@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"math/big"
 	"encoding/base32"
 	"encoding/base64"
 	"fmt"
@@ -92,6 +93,28 @@ func bindCastFormat(args ...value.Value) (value.Value, error) {
 				typeName = "TIME"
 			}
 			s, err := formatDateTimeElements(t, rawFormat, typeName)
+			if err != nil {
+				return fail(err)
+			}
+			return value.StringValue(s), nil
+		}
+	case value.IntValue, value.FloatValue, *value.NumericValue:
+		if toType.Kind == int(googlesql.TypeKindTypeString) {
+			var r *big.Rat
+			nan := false
+			if fv, ok := v.(value.FloatValue); ok {
+				var ok2 bool
+				if r, ok2 = floatToRat(float64(fv)); !ok2 {
+					nan = true
+					r = new(big.Rat)
+				}
+			} else {
+				var err error
+				if r, err = v.ToRat(); err != nil {
+					return nil, err
+				}
+			}
+			s, err := formatNumberElements(r, nan, strings.TrimSpace(rawFormat))
 			if err != nil {
 				return fail(err)
 			}

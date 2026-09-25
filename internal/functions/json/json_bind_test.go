@@ -1039,12 +1039,14 @@ func TestBindLaxScalars(t *testing.T) {
 	if mustFloat64(t, got) != 3.14 {
 		t.Fatalf("got %f", mustFloat64(t, got))
 	}
+	// A JSON boolean does not convert: LAX_FLOAT64(JSON 'false') is
+	// NULL on BigQuery (json_functions.md, LAX_FLOAT64).
 	got, err = BindLaxFloat64(value.JsonValue("false"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustFloat64(t, got) != 0 {
-		t.Fatalf("got %f", mustFloat64(t, got))
+	if got != nil {
+		t.Fatalf("LAX_FLOAT64(JSON 'false') = %v, want NULL", got)
 	}
 
 	// LAX_BOOL.
@@ -1196,21 +1198,22 @@ func TestBindLaxScientificNumeric(t *testing.T) {
 		}
 	}
 
-	// LaxBool on a numeric string falls through the strconv branch.
+	// Only "true" / "false" strings convert (case-insensitively): a
+	// numeric string is NULL, LAX_BOOL(JSON '"1"') on BigQuery.
 	got, err := BindLaxBool(value.JsonValue(`"1"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf(`LAX_BOOL(JSON '"1"') = %v, want NULL`, got)
+	}
+
+	got, err = BindLaxBool(value.JsonValue(`"TRue"`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !mustBool(t, got) {
 		t.Fatal("expected true")
-	}
-
-	got, err = BindLaxBool(value.JsonValue(`"0"`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mustBool(t, got) {
-		t.Fatal("expected false")
 	}
 
 	got, err = BindLaxBool(value.JsonValue(`"true"`))

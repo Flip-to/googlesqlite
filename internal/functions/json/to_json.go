@@ -8,7 +8,11 @@ import (
 )
 
 func TO_JSON(v value.Value, stringifyWideNumbers bool) (value.Value, error) {
-	s, err := value.EncodeJSON(v)
+	encode := value.EncodeJSON
+	if stringifyWideNumbers {
+		encode = value.EncodeJSONStringifyWide
+	}
+	s, err := encode(v)
 	if err != nil {
 		return nil, err
 	}

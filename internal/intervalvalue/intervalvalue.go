@@ -120,8 +120,25 @@ var canonicalIntervalRe = regexp.MustCompile(`^([+-]?)(\d+)-(\d+) ([+-]?\d+) ([+
 // ParseInterval parses an interval in canonical string format and returns the IntervalValue it represents.
 // The canonical format is [sign]Y-M [sign]D [sign]H:M:S[.F]; the sign in
 // front of a group applies to every field in it.
+//
+// CAST(string AS INTERVAL) also accepts the partial forms Y-M, H:M:S[.F],
+// Y-M D and D H:M:S[.F], and ISO 8601 durations such as P1Y2M3D and
+// PT10H20M30,456S (conversion_functions.md, CAST AS INTERVAL; verified
+// on BigQuery).
 func ParseInterval(value string) (*IntervalValue, error) {
-	m := canonicalIntervalRe.FindStringSubmatch(strings.TrimSpace(value))
+	s := strings.TrimSpace(value)
+	m := canonicalIntervalRe.FindStringSubmatch(s)
+	if m == nil {
+		if strings.HasPrefix(s, "P") || strings.HasPrefix(s, "-P") {
+			if iv, ok := parseISO8601Interval(s); ok {
+				return iv, nil
+			}
+			return nil, fmt.Errorf("invalid interval %q", value)
+		}
+		if canon, ok := expandPartialInterval(s); ok {
+			m = canonicalIntervalRe.FindStringSubmatch(canon)
+		}
+	}
 	if m == nil {
 		return nil, fmt.Errorf("invalid interval %q", value)
 	}
@@ -341,4 +358,68 @@ func sameSign(nums ...int32) bool {
 		return false
 	}
 	return true
+}
+
+var (
+	intervalYMRe   = regexp.MustCompile(`^[+-]?\d+-\d+$`)
+	intervalHMSRe  = regexp.MustCompile(`^[+-]?\d+:\d+:\d+(?:\.\d{1,9})?$`)
+	intervalYMDRe  = regexp.MustCompile(`^[+-]?\d+-\d+ [+-]?\d+$`)
+	intervalDHMSRe = regexp.MustCompile(`^[+-]?\d+ [+-]?\d+:\d+:\d+(?:\.\d{1,9})?$`)
+	intervalISORe  = regexp.MustCompile(`^(-)?P(?:([+-]?\d+)Y)?(?:([+-]?\d+)M)?(?:([+-]?\d+)W)?(?:([+-]?\d+)D)?(?:T(?:([+-]?\d+)H)?(?:([+-]?\d+)M)?(?:([+-]?\d+)(?:[.,](\d{1,9}))?S)?)?$`)
+)
+
+// expandPartialInterval pads a partial interval string to the canonical
+// Y-M D H:M:S form with zero fields.
+func expandPartialInterval(s string) (string, bool) {
+	switch {
+	case intervalYMRe.MatchString(s):
+		return s + " 0 0:0:0", true
+	case intervalHMSRe.MatchString(s):
+		return "0-0 0 " + s, true
+	case intervalYMDRe.MatchString(s):
+		return s + " 0:0:0", true
+	case intervalDHMSRe.MatchString(s):
+		return "0-0 " + s, true
+	}
+	return "", false
+}
+
+// parseISO8601Interval parses P[nY][nM][nW][nD][T[nH][nM][n[.F]S]]. A
+// leading '-' negates every field; W counts as 7 days.
+func parseISO8601Interval(s string) (*IntervalValue, bool) {
+	m := intervalISORe.FindStringSubmatch(s)
+	if m == nil || s == "P" || s == "-P" || strings.HasSuffix(s, "T") {
+		return nil, false
+	}
+	var f [8]int64
+	for i := 2; i <= 8; i++ {
+		if m[i] == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(m[i], 10, 32)
+		if err != nil {
+			return nil, false
+		}
+		f[i-2] = n
+	}
+	var nanos int64
+	if m[9] != "" {
+		n, err := strconv.ParseInt((m[9] + "000000000")[:9], 10, 32)
+		if err != nil {
+			return nil, false
+		}
+		nanos = n
+		if strings.HasPrefix(m[8], "-") {
+			nanos = -nanos
+		}
+	}
+	iv := &IntervalValue{
+		Years: int32(f[0]), Months: int32(f[1]), Days: int32(f[2]*7 + f[3]),
+		Hours: int32(f[4]), Minutes: int32(f[5]), Seconds: int32(f[6]), SubSecondNanos: int32(nanos),
+	}
+	if m[1] == "-" {
+		iv.Years, iv.Months, iv.Days = -iv.Years, -iv.Months, -iv.Days
+		iv.Hours, iv.Minutes, iv.Seconds, iv.SubSecondNanos = -iv.Hours, -iv.Minutes, -iv.Seconds, -iv.SubSecondNanos
+	}
+	return iv, true
 }
