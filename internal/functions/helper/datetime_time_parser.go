@@ -618,8 +618,11 @@ func ansicParser(text []rune, t *time.Time) (int, error) {
 	return len(text), nil
 }
 
+// ansicFormatter renders %c in the C asctime layout, whose day of
+// month is space-padded: "Sun Nov  3 08:30:00 2024" (data-types.md,
+// Daylight saving time; verified on BigQuery).
 func ansicFormatter(t *time.Time) ([]rune, error) {
-	return []rune(t.Format("Mon Jan 02 15:04:05 2006")), nil
+	return []rune(t.Format("Mon Jan _2 15:04:05 2006")), nil
 }
 
 var monthDayYearParser = composeParseFunctions("month/day/year format", []ParseFunction{
@@ -1172,9 +1175,26 @@ func timeZoneParser(text []rune, t *time.Time) (int, error) {
 	return 0, fmt.Errorf("unimplemented time zone matcher")
 }
 
+// timeZoneFormatter renders %Z as the UTC offset, not the zone
+// abbreviation: "UTC" at offset zero, otherwise "UTC-7" or "UTC+0530".
+// FORMAT_TIMESTAMP("%c %Z", "2024-03-10 10:30:00 UTC",
+// "America/Los_Angeles") ends in "UTC-7" (data-types.md, Daylight
+// saving time; verified on BigQuery).
 func timeZoneFormatter(t *time.Time) ([]rune, error) {
-	name, _ := t.Zone()
-	return []rune(name), nil
+	_, off := t.Zone()
+	if off == 0 {
+		return []rune("UTC"), nil
+	}
+	sign := "+"
+	if off < 0 {
+		sign = "-"
+		off = -off
+	}
+	h, m := off/3600, (off%3600)/60
+	if m == 0 {
+		return []rune(fmt.Sprintf("UTC%s%d", sign, h)), nil
+	}
+	return []rune(fmt.Sprintf("UTC%s%02d%02d", sign, h, m)), nil
 }
 
 func timeZoneOffsetParser(text []rune, t *time.Time) (int, error) {

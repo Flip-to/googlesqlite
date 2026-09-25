@@ -68,11 +68,10 @@ var bindInt64 = helper.Scalar1KeepNull(func(v value.Value) (value.Value, error) 
 	}
 	// INT64(json_expr): a JSON number with a zero fractional part
 	// (e.g. 10.0) converts; anything else is an error
-	// (json_functions.md, INT64).
+	// (json_functions.md, INT64). That includes JSON null: INT64(JSON
+	// 'null') raises "The provided JSON input is not an integer" on
+	// BigQuery, as the docs say.
 	body := strings.TrimSpace(string(jv))
-	if body == "null" {
-		return nil, nil
-	}
 	r, ok := new(big.Rat).SetString(body)
 	if !ok || body == "" || body[0] == '"' {
 		return nil, fmt.Errorf("The provided JSON input is not an integer")
@@ -119,8 +118,13 @@ func bindDouble(args ...value.Value) (value.Value, error) {
 		return value.FloatValue(f), nil
 	}
 	body := strings.TrimSpace(string(jv))
-	if body == "" || body == "null" {
+	if body == "" {
 		return nil, nil
+	}
+	if body == "null" {
+		// FLOAT64(JSON 'null') is an error, like INT64 and BOOL on a
+		// JSON null (json_functions.md, FLOAT64; verified on BigQuery).
+		return nil, fmt.Errorf("The provided JSON input is not a number") //nolint:staticcheck // BigQuery's error text
 	}
 	if body[0] == '"' || body[0] == '{' || body[0] == '[' || body == "true" || body == "false" {
 		return nil, fmt.Errorf("FLOAT64: JSON value is not a number")

@@ -38,12 +38,11 @@ func BindString(args ...value.Value) (value.Value, error) {
 	}
 	jsonValue, ok := args[0].(value.JsonValue)
 	if ok {
-		// STRING(json_expr) accepts only a JSON string; JSON null gives
-		// SQL NULL (json_functions.md, STRING).
+		// STRING(json_expr) accepts only a JSON string; anything else,
+		// JSON null included, is an error (json_functions.md, STRING:
+		// "SELECT STRING(JSON 'null') -- Throws an error"; BigQuery
+		// raises "The provided JSON input is not a string").
 		body := strings.TrimSpace(string(jsonValue))
-		if body == "null" {
-			return nil, nil
-		}
 		if body == "" || body[0] != '"' {
 			return nil, fmt.Errorf("The provided JSON input is not a string") //nolint:staticcheck // BigQuery's error text
 		}

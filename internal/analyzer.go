@@ -199,6 +199,16 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	// appears in a query.
 	googlesql.LanguageFeatureFeatureInlineLambdaArgument,
 	googlesql.LanguageFeatureFeatureLikeAnySomeAll,
+	// BigQuery accepts bare `array[i]` (zero-based, same as OFFSET),
+	// positional struct access `s[0]` / `s[OFFSET(0)]`, the WITH
+	// expression, and named windows in pipe SELECT / EXTEND. Each
+	// resolves to nodes the formatter already handles (array and
+	// struct field access, the WITH-expression rewrite, analytic
+	// scans), so enabling them needs no formatter change.
+	googlesql.LanguageFeatureFeatureBareArrayAccess,
+	googlesql.LanguageFeatureFeatureStructPositionalAccessor,
+	googlesql.LanguageFeatureFeatureWithExpression,
+	googlesql.LanguageFeatureFeaturePipeNamedWindows,
 	// LIKE ANY|SOME|ALL UNNEST(array) and LIKE ANY|SOME|ALL (subquery).
 	// Both are lowered by ResolvedASTRewriteRewriteLikeAnyAll.
 	googlesql.LanguageFeatureFeatureLikeAnySomeAllArray,

@@ -173,6 +173,11 @@ func JSON_REMOVE(jsonText string, paths []string) (value.Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		if len(segs) == 0 {
+			// json_functions.md, JSON_REMOVE: "The JSONPath can't be
+			// '$'"; BigQuery raises this exact error.
+			return nil, fmt.Errorf("The JSONPath cannot be '$'") //nolint:staticcheck // BigQuery's error text
+		}
 		node = jsonRemoveAtPath(node, segs)
 	}
 	out, err := json.Marshal(node)

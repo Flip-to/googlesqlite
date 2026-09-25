@@ -416,7 +416,10 @@ type geographyPoint struct {
 func (g *geographyPoint) Kind() string { return "POINT" }
 func (g *geographyPoint) ToWKT() (string, error) {
 	if g.empty {
-		return "POINT EMPTY", nil
+		// BigQuery prints every empty geography as GEOMETRYCOLLECTION
+		// EMPTY: ST_GEOGFROMTEXT('POINT EMPTY') renders that way
+		// (data-types.md, Geography type; verified on BigQuery).
+		return "GEOMETRYCOLLECTION EMPTY", nil
 	}
 	return fmt.Sprintf("POINT (%s %s)", formatCoord(g.longitude), formatCoord(g.latitude)), nil
 }
@@ -602,6 +605,11 @@ func (g *geographyCollection) ToWKT() (string, error) {
 		}
 		parts[i] = s
 	}
+	if len(parts) == 0 {
+		// "GEOMETRYCOLLECTION ()" is not valid WKT and would not parse
+		// back; BigQuery prints GEOMETRYCOLLECTION EMPTY.
+		return "GEOMETRYCOLLECTION EMPTY", nil
+	}
 	return "GEOMETRYCOLLECTION (" + strings.Join(parts, ", ") + ")", nil
 }
 func (g *geographyCollection) equal(o geographyType) bool {
@@ -753,6 +761,13 @@ func (p *wktParser) parseGeometry() (*GeographyValue, error) {
 		parts, err := p.readCollection()
 		if err != nil {
 			return nil, err
+		}
+		// A collection of points only is a MULTIPOINT:
+		// GEOMETRYCOLLECTION(POINT(1 1), POINT(2 2)) reads back as
+		// MULTIPOINT(1 1, 2 2) (data-types.md, Geography type;
+		// verified on BigQuery).
+		if pts, ok := collectionPoints(parts); ok {
+			return NewGeographyMultiPoint(pts), nil
 		}
 		return NewGeographyCollection(parts), nil
 	}
@@ -1017,4 +1032,21 @@ func (g *GeographyValue) DistanceTo(other *GeographyValue) (float64, error) {
 		return 0, fmt.Errorf("unsupported geography type %s for ST_DISTANCE (only POINT supported)", other.Kind())
 	}
 	return haversineDistance(p1.latitude, p1.longitude, p2.latitude, p2.longitude), nil
+}
+
+// collectionPoints returns the coordinates of a non-empty collection
+// whose members are all non-empty points.
+func collectionPoints(parts []*GeographyValue) ([][2]float64, bool) {
+	if len(parts) == 0 {
+		return nil, false
+	}
+	pts := make([][2]float64, 0, len(parts))
+	for _, p := range parts {
+		pt, ok := p.g.(*geographyPoint)
+		if !ok || pt.empty {
+			return nil, false
+		}
+		pts = append(pts, [2]float64{pt.longitude, pt.latitude})
+	}
+	return pts, true
 }

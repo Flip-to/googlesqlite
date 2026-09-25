@@ -16,7 +16,14 @@ import (
 // ("2017-03-06"), at any depth inside an ARRAY or STRUCT.
 // https://cloud.google.com/bigquery/docs/reference/standard-sql/json_functions#json_encodings
 func EncodeJSON(v Value) (string, error) {
-	return encodeJSON(v, false)
+	return encodeJSON(v, jsonEncodeOpts{})
+}
+
+// EncodeJSONStringifyWide is EncodeJSON for TO_JSON(...,
+// stringify_wide_numbers=>TRUE): numbers a FLOAT64 cannot hold exactly
+// are JSON strings.
+func EncodeJSONStringifyWide(v Value) (string, error) {
+	return encodeJSON(v, jsonEncodeOpts{quoteWide: true})
 }
 
 // EncodeJSONString is EncodeJSON for TO_JSON_STRING, which also quotes
@@ -24,10 +31,23 @@ func EncodeJSON(v Value) (string, error) {
 // (json_functions.md, JSON encodings; flipto-dbt probe
 // to_json_string-5209.19).
 func EncodeJSONString(v Value) (string, error) {
-	return encodeJSON(v, true)
+	return encodeJSON(v, jsonEncodeOpts{canonical: true, quoteWide: true})
 }
 
-func encodeJSON(v Value, toString bool) (string, error) {
+type jsonEncodeOpts struct {
+	// canonical re-renders embedded JSON values in BigQuery's
+	// canonical form (TO_JSON_STRING).
+	canonical bool
+	// quoteWide quotes INT64 outside [-2^53, 2^53] and NUMERIC /
+	// BIGNUMERIC values that are not integers in that range.
+	// TO_JSON_STRING always does; TO_JSON only with
+	// stringify_wide_numbers=>TRUE, so TO_JSON(9007199254740993) is the
+	// JSON number 9007199254740993 (json_functions.md, TO_JSON;
+	// verified on BigQuery).
+	quoteWide bool
+}
+
+func encodeJSON(v Value, opts jsonEncodeOpts) (string, error) {
 	switch vv := v.(type) {
 	case nil:
 		return "null", nil
@@ -36,7 +56,7 @@ func encodeJSON(v Value, toString bool) (string, error) {
 		// that use doubles do not lose precision (json_functions.md
 		// TO_JSON_STRING).
 		const maxExact = 1 << 53
-		if vv > maxExact || vv < -maxExact {
+		if opts.quoteWide && (vv > maxExact || vv < -maxExact) {
 			return strconv.Quote(strconv.FormatInt(int64(vv), 10)), nil
 		}
 		return strconv.FormatInt(int64(vv), 10), nil
@@ -53,7 +73,7 @@ func encodeJSON(v Value, toString bool) (string, error) {
 	case StringValue:
 		return jsonQuote(string(vv)), nil
 	case JsonValue:
-		if toString {
+		if opts.canonical {
 			// Numbers and strings come back in BigQuery's canonical
 			// form: 2.50 is 2.5 and "it's" is "it's" (flipto-dbt
 			// probes safe_parse_json-2825.1 and .2).
@@ -62,7 +82,7 @@ func encodeJSON(v Value, toString bool) (string, error) {
 			}
 		}
 	case *NumericValue:
-		if toString {
+		if opts.quoteWide {
 			s := vv.toString()
 			if !vv.IsInt() || vv.Num().CmpAbs(maxExactJSONInt) > 0 {
 				return strconv.Quote(s), nil
@@ -72,7 +92,7 @@ func encodeJSON(v Value, toString bool) (string, error) {
 	case *ArrayValue:
 		elems := make([]string, 0, len(vv.Values))
 		for _, e := range vv.Values {
-			s, err := encodeJSON(e, toString)
+			s, err := encodeJSON(e, opts)
 			if err != nil {
 				return "", err
 			}
@@ -82,7 +102,7 @@ func encodeJSON(v Value, toString bool) (string, error) {
 	case *StructValue:
 		fields := make([]string, 0, len(vv.Keys))
 		for i, key := range vv.Keys {
-			s, err := encodeJSON(vv.Values[i], toString)
+			s, err := encodeJSON(vv.Values[i], opts)
 			if err != nil {
 				return "", err
 			}

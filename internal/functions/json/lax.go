@@ -1,7 +1,9 @@
 package json
 
 import (
+	"math"
 	"strconv"
+	"strings"
 
 	"github.com/goccy/go-json"
 	"github.com/goccy/googlesqlite/internal/functions/helper"
@@ -46,32 +48,46 @@ func laxInt64(raw any) (value.Value, bool) {
 		}
 		return value.IntValue(0), true
 	case float64:
-		return value.IntValue(int64(v)), true
+		return roundToInt64(v)
 	case json.Number:
 		if i, err := v.Int64(); err == nil {
 			return value.IntValue(i), true
 		}
 		if f, err := v.Float64(); err == nil {
-			return value.IntValue(int64(f)), true
+			return roundToInt64(f)
 		}
 	case string:
 		if i, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return value.IntValue(i), true
 		}
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return value.IntValue(int64(f)), true
+			return roundToInt64(f)
 		}
 	}
 	return nil, false
 }
 
+// roundToInt64 rounds half away from zero, as LAX_INT64 does
+// (LAX_INT64(JSON '3.5') is 4, LAX_INT64(JSON '"+1.5"') is 2), and
+// reports false when the result is outside the INT64 range
+// (LAX_INT64(JSON '1e100') is NULL). json_functions.md, LAX_INT64;
+// both verified on BigQuery.
+func roundToInt64(f float64) (value.Value, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return nil, false
+	}
+	r := math.Round(f)
+	if r < math.MinInt64 || r >= math.MaxInt64 {
+		return nil, false
+	}
+	return value.IntValue(int64(r)), true
+}
+
+// laxFloat64 converts JSON numbers and numeric strings. A JSON boolean
+// is not converted: LAX_FLOAT64(JSON 'true') is NULL
+// (json_functions.md, LAX_FLOAT64; verified on BigQuery).
 func laxFloat64(raw any) (value.Value, bool) {
 	switch v := raw.(type) {
-	case bool:
-		if v {
-			return value.FloatValue(1), true
-		}
-		return value.FloatValue(0), true
 	case float64:
 		return value.FloatValue(v), true
 	case json.Number:
@@ -97,8 +113,14 @@ func laxBool(raw any) (value.Value, bool) {
 			return value.BoolValue(i != 0), true
 		}
 	case string:
-		if b, err := strconv.ParseBool(v); err == nil {
-			return value.BoolValue(b), true
+		// Only "true" and "false" convert, case-insensitively: "TRue"
+		// is true and "1" is NULL (json_functions.md, LAX_BOOL /
+		// LAX_BOOL_ARRAY; verified on BigQuery).
+		switch {
+		case strings.EqualFold(v, "true"):
+			return value.BoolValue(true), true
+		case strings.EqualFold(v, "false"):
+			return value.BoolValue(false), true
 		}
 	}
 	return nil, false

@@ -179,12 +179,22 @@ func numPointsTotal(g *value.GeographyValue) int {
 // a MULTI* / GEOMETRYCOLLECTION; for a singleton kind it returns
 // 1; for the empty geometry it returns 0.
 func numSubGeometries(g *value.GeographyValue) int {
-	if g == nil {
+	if g == nil || g.IsEmpty() {
 		return 0
 	}
 	switch g.Kind() {
 	case "POINT", "LINESTRING", "POLYGON":
 		return 1
+	case "GEOMETRYCOLLECTION":
+		// Members count one by one, multi-geometries by their parts:
+		// ST_NUMGEOMETRIES(GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2,
+		// 2 1))) is 2 (geography_functions.md, ST_NUMGEOMETRIES).
+		parts, _ := g.CollectionParts()
+		n := 0
+		for _, p := range parts {
+			n += numSubGeometries(p)
+		}
+		return n
 	case "MULTIPOINT":
 		pts, _ := g.MultiPointPoints()
 		return len(pts)
