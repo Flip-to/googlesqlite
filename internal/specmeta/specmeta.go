@@ -175,6 +175,18 @@ type Case struct {
 	// stays in the YAML as documentation of the docs' specific
 	// realization.
 	Nondeterministic bool `yaml:"nondeterministic,omitempty"`
+	// Skip, when set, keeps the case (and its documented expectation)
+	// as documentation but does not run it; the value is the reason.
+	// Use it only for cases that cannot apply to this driver: the
+	// upstream Example assumes a session time zone other than UTC,
+	// uses a feature BigQuery does not have (property graphs, protos,
+	// MAP, ...), or is non-deterministic. Never use it to hide a
+	// driver bug; those stay in testdata/specs_pending with Pending.
+	Skip string `yaml:"skip,omitempty"`
+	// Pending records why a case under testdata/specs_pending does not
+	// pass yet (for example "analyzer: ..." or "driver_bug: ..."). The
+	// default suite never runs testdata/specs_pending.
+	Pending string `yaml:"pending,omitempty"`
 }
 
 // Expected captures the expected outcome of a case. Exactly one of

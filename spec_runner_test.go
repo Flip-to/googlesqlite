@@ -114,6 +114,9 @@ func runFile(t *testing.T, root, rel, path string) {
 				if !gateAsserts {
 					t.Skip("spec status is not implemented/tested; case retained as documentation only")
 				}
+				if c.Skip != "" {
+					t.Skip(c.Skip)
+				}
 				runCase(t, td.Dialect, c)
 			})
 		}

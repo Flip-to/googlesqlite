@@ -29,6 +29,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -94,6 +95,10 @@ type docsResult struct {
 	gotRaw       [][]any
 	// runnerMismatch marks a pass the spec runner cannot express.
 	RunnerMismatch bool `json:"spec_runner_mismatch,omitempty"`
+	// Class and ClassReason come from the classification file
+	// (docsClassFile) for examples that do not pass.
+	Class       string `json:"class,omitempty"`
+	ClassReason string `json:"class_reason,omitempty"`
 }
 
 // strictFloats disables the rounded-display float match.
@@ -102,9 +107,25 @@ var strictFloats bool
 func TestDocsExamples(t *testing.T) {
 	in := os.Getenv("GOOGLESQLITE_DOCS_EXAMPLES")
 	if in == "" {
-		t.Skip("set GOOGLESQLITE_DOCS_EXAMPLES to the JSON written by `specctl extract-docs-examples`")
+		t.Skip("set GOOGLESQLITE_DOCS_EXAMPLES to the JSON written by `specctl extract-docs-examples`, or to 1 to extract first")
 	}
 	outDir := os.Getenv("GOOGLESQLITE_DOCS_EXAMPLES_OUT")
+	if in == "1" {
+		// Extract first: from GOOGLESQLITE_DOCS_EXAMPLES_DOCS (a
+		// google/googlesql docs/ checkout) or the vendored snapshot.
+		docs := os.Getenv("GOOGLESQLITE_DOCS_EXAMPLES_DOCS")
+		if docs == "" {
+			docs = "docs/third_party/googlesql-docs"
+		}
+		if outDir == "" {
+			outDir = t.TempDir()
+		}
+		in = filepath.Join(outDir, "extracted.json")
+		cmd := exec.Command("go", "run", "./cmd/specctl", "extract-docs-examples", "--docs", docs, "--out", in)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("extract-docs-examples: %v\n%s", err, out)
+		}
+	}
 	if outDir == "" {
 		outDir = filepath.Dir(in)
 	}
@@ -250,11 +271,24 @@ func execDocsExample(ex *docsExample, r *docsResult) {
 		return
 	}
 	defer conn.Close()
+	var setup []string
 	for _, st := range ex.Setup {
+		// A query in the setup is a neighbouring example from the same
+		// block; it has no side effects, so only an example documented
+		// to fail (whose error may fire there) needs it.
+		if !ex.ExpectError && setupQueryRe.MatchString(stripDocsComments(st)) {
+			continue
+		}
 		if _, err := conn.ExecContext(ctx, st); err != nil {
 			if why := classifyError(ex, err.Error()); why != "" {
 				r.Status, r.Reason, r.GotError = stSkipped, why, err.Error()
 				return
+			}
+			if isFixtureStmt(st, ex) && !strings.Contains(strings.ToLower(ex.SQL), "create ") {
+				// A page fixture the extractor mis-built (for example a
+				// recursive CTE body turned into CREATE TABLE). Drop it:
+				// if the example needs it, the query fails loudly.
+				continue
 			}
 			if ex.ExpectError && !isFixtureStmt(st, ex) {
 				// The documented failure fires in an earlier statement
@@ -265,7 +299,9 @@ func execDocsExample(ex *docsExample, r *docsResult) {
 			r.Status, r.Kind, r.Reason, r.GotError = stError, "loud", "setup statement failed", err.Error()
 			return
 		}
+		setup = append(setup, st)
 	}
+	r.Setup = setup
 	rows, qerr := conn.QueryContext(ctx, ex.SQL)
 	var got [][]any
 	var cols []string
@@ -324,6 +360,14 @@ func execDocsExample(ex *docsExample, r *docsResult) {
 		}
 		r.Status, r.Kind, r.Reason = stError, "loud", "query failed"
 		return
+	}
+	if len(ex.Rows) == 0 && len(ex.Columns) > 0 && len(cols) == len(ex.Columns) && allAnonymous(cols) {
+		// For a query whose columns are all anonymous the docs print the
+		// single result row in a header-only box (lexical.md, "Tokens in
+		// literals"): the "header" is the row.
+		ex.Rows = [][]string{ex.Columns}
+		ex.Columns = cols
+		r.DocColumns, r.DocRows = ex.Columns, ex.Rows
 	}
 	if len(cols) != len(ex.Columns) {
 		r.Status, r.Kind = stFail, "silent"
@@ -386,6 +430,26 @@ func execDocsExample(ex *docsExample, r *docsResult) {
 		r.Kind = "order"
 		r.Reason = "same rows, different order under ORDER BY (may be ties in the sort key)"
 	}
+}
+
+func allAnonymous(cols []string) bool {
+	for _, c := range cols {
+		if !strings.HasPrefix(c, "$col") {
+			return false
+		}
+	}
+	return true
+}
+
+var setupQueryRe = regexp.MustCompile(`(?is)^\s*(SELECT|WITH|FROM)\b`)
+
+// stripDocsComments drops leading `--` comment lines.
+func stripDocsComments(st string) string {
+	lines := strings.Split(st, "\n")
+	for len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "--") {
+		lines = lines[1:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func isFixtureStmt(st string, ex *docsExample) bool {
@@ -710,9 +774,10 @@ func splitTopLevel(s string) []string {
 		ch := s[i]
 		switch {
 		case quote != 0:
-			if ch == '\\' {
+			switch ch {
+			case '\\':
 				i++
-			} else if ch == quote {
+			case quote:
 				quote = 0
 			}
 		case ch == '"' || ch == '\'':
@@ -1055,6 +1120,10 @@ type yamlCase struct {
 	Setup    []string     `yaml:"setup,omitempty"`
 	SQL      string       `yaml:"sql"`
 	Expected yamlExpected `yaml:"expected"`
+	Skip     string       `yaml:"skip,omitempty"`
+	Pending  string       `yaml:"pending,omitempty"`
+	// Note is written as a comment above the case.
+	Note string `yaml:"-"`
 }
 
 type yamlExpected struct {
@@ -1065,12 +1134,6 @@ type yamlExpected struct {
 
 type yamlError struct {
 	Contains string `yaml:"contains"`
-}
-
-type yamlFile struct {
-	Spec    string     `yaml:"spec"`
-	Dialect string     `yaml:"dialect"`
-	Cases   []yamlCase `yaml:"cases"`
 }
 
 func writeDocsOutputs(outDir string, results []*docsResult) error {
@@ -1086,6 +1149,19 @@ func writeDocsOutputs(outDir string, results []*docsResult) error {
 	if err := writeJSON(filepath.Join(outDir, "failures.json"), failures); err != nil {
 		return err
 	}
+	classes, err := loadDocsClasses()
+	if err != nil {
+		return err
+	}
+	var stale []string
+	defer func() {
+		if len(stale) > 0 {
+			// The IDs in the classification file are for the docs commit
+			// it names; other docs renumber the examples.
+			fmt.Fprintf(os.Stderr, "docs examples: %d classified examples now pass (if these are the docs the classification was made for, drop them from %s): %s\n",
+				len(stale), docsClassFile, strings.Join(stale, ", "))
+		}
+	}()
 	pass := map[string][]yamlCase{}
 	pending := map[string][]yamlCase{}
 	pendingNotes := map[string][]string{}
@@ -1127,6 +1203,23 @@ func writeDocsOutputs(outDir string, results []*docsResult) error {
 			}
 			c.Expected.Unordered = !r.Ordered && len(r.DocRows) > 1
 		}
+		if cl, ok := classes[r.ID]; ok && r.Status == stPass && cl.Class == "bigquery" {
+			// The typed comparison matches the docs' display, but BigQuery
+			// prints something more precise (for example the leading sign
+			// blank of a numeric FORMAT the docs table trims): pin
+			// BigQuery's answer.
+			r.Class, r.ClassReason = cl.Class, cl.Reason
+			bc, agrees, err := bigQueryCase(c, cl, r)
+			if err != nil {
+				return err
+			}
+			if agrees {
+				pass[r.Page] = append(pass[r.Page], bc)
+				continue
+			}
+			r.Status, r.Kind = stFail, "silent"
+			r.Reason = "the driver does not match the BigQuery answer"
+		}
 		if r.Status == stPass && r.RoundedFloat {
 			// Documented floats are rounded for display; not expressible
 			// with the spec runner's 1e-9 tolerance.
@@ -1146,8 +1239,37 @@ func writeDocsOutputs(outDir string, results []*docsResult) error {
 			}
 		}
 		if r.Status == stPass {
+			if cl, ok := classes[r.ID]; ok {
+				stale = append(stale, r.ID+" ("+cl.Class+")")
+			}
 			pass[r.Page] = append(pass[r.Page], c)
-		} else {
+			continue
+		}
+		cl, ok := classes[r.ID]
+		if !ok {
+			cl = docsClass{Class: "unclassified", Reason: "not yet triaged"}
+		}
+		r.Class, r.ClassReason = cl.Class, cl.Reason
+		disp := docsClassDisposition[cl.Class]
+		if disp == dispBigQuery {
+			bc, agrees, err := bigQueryCase(c, cl, r)
+			if err != nil {
+				return err
+			}
+			if agrees {
+				pass[r.Page] = append(pass[r.Page], bc)
+				continue
+			}
+			r.ClassReason += " (the driver does not match the BigQuery answer yet)"
+			disp = dispPending
+		}
+		if disp == dispSkip {
+			c.Skip = cl.Class + ": " + cl.Reason
+			pass[r.Page] = append(pass[r.Page], c)
+			continue
+		}
+		{
+			c.Pending = cl.Class + ": " + r.ClassReason
 			pending[r.Page] = append(pending[r.Page], c)
 			note := fmt.Sprintf("%s: %s (%s)", r.ID, r.Status, r.Reason)
 			if r.GotError != "" {
@@ -1192,7 +1314,10 @@ func writeYAMLTree(dir string, byPage map[string][]yamlCase, notes map[string][]
 		var b strings.Builder
 		fmt.Fprintf(&b, "# Generated by TestDocsExamples from %s/%s.md.\n", docsSource(), p)
 		b.WriteString("# Expected values are the documented result tables, typed with the\n")
-		b.WriteString("# column types the analyzer reports. Do not edit by hand.\n")
+		b.WriteString("# column types the analyzer reports, except where a case says it\n")
+		b.WriteString("# follows BigQuery (see " + docsClassFile + ").\n")
+		b.WriteString("# Cases with `skip:` keep the documented expectation but do not run.\n")
+		b.WriteString("# Do not edit by hand.\n")
 		if pending {
 			b.WriteString("# PENDING: these cases diverge from the docs today. They live outside\n")
 			b.WriteString("# testdata/specs so the default suite stays green.\n")
@@ -1277,8 +1402,21 @@ func renderYAMLFile(cases []yamlCase) (string, error) {
 	var b strings.Builder
 	b.WriteString("spec: docs/specs/googlesql/syntax/docs_examples.md\ndialect: googlesql\ncases:\n")
 	for _, c := range cases {
+		if c.Note != "" {
+			for _, l := range strings.Split(c.Note, "\n") {
+				b.WriteString(strings.TrimRight("  # "+l, " ") + "\n")
+			}
+		}
 		desc, _ := json.Marshal(c.Desc)
 		fmt.Fprintf(&b, "  - desc: %s\n", desc)
+		if c.Skip != "" {
+			reason, _ := json.Marshal(c.Skip)
+			fmt.Fprintf(&b, "    skip: %s\n", reason)
+		}
+		if c.Pending != "" {
+			reason, _ := json.Marshal(c.Pending)
+			fmt.Fprintf(&b, "    pending: %s\n", reason)
+		}
 		if len(c.Setup) > 0 {
 			b.WriteString("    setup:\n")
 			for _, st := range c.Setup {
@@ -1290,7 +1428,8 @@ func renderYAMLFile(cases []yamlCase) (string, error) {
 		writeIndented(&b, c.SQL, "      ")
 		b.WriteString("    expected:\n")
 		if c.Expected.Error != nil {
-			b.WriteString("      error:\n        contains: \"\"\n")
+			contains, _ := json.Marshal(c.Expected.Error.Contains)
+			fmt.Fprintf(&b, "      error:\n        contains: %s\n", contains)
 			continue
 		}
 		if len(c.Expected.Rows) == 0 {

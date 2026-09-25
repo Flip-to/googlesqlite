@@ -354,7 +354,7 @@ func extractPageExamplesFx(page, md string) ([]docExample, []fixture) {
 		if b.lang == "" {
 			// Unlabelled fences hold grammar or output; only a pure
 			// result table directly after a pending SQL block matters.
-			if !(pending != nil && isTableStart(trimmed)) {
+			if pending == nil || !isTableStart(trimmed) {
 				pending = nil
 				continue
 			}
@@ -574,8 +574,22 @@ var errorPrefixRe = regexp.MustCompile(`(?i)^--s*errorb`)
 
 var commentErrRe = regexp.MustCompile(`error|doesn't work|does not work|invalid|isn't valid|not valid|fails|not allowed|not supported`)
 
-// leadingComment returns the `--` comment lines that open a statement.
+// leadingComment returns the `--` comment lines that open a statement,
+// or, when there are none, the same-line comment splitStatements kept
+// after a single-line statement ("SELECT ...; -- Returns NULL").
 func leadingComment(st string) string {
+	if c := ownLeadingComment(st); c != "" {
+		return c
+	}
+	if !strings.Contains(st, "\n") {
+		if i := strings.LastIndex(st, " -- "); i >= 0 && !insideOpenString(st[:i]) {
+			return strings.TrimSpace(st[i+4:])
+		}
+	}
+	return ""
+}
+
+func ownLeadingComment(st string) string {
 	var out []string
 	for _, l := range strings.Split(st, "\n") {
 		t := strings.TrimSpace(l)
@@ -1071,15 +1085,14 @@ func isWordByte(b byte) bool {
 
 // scanner walks SQL text tracking strings and comments.
 type scanner struct {
-	s         string
-	i         int
-	inString  bool
-	quote     string
-	inLine    bool
-	inBlock   bool
-	cur       byte
-	isCode    bool // cur is outside strings and comments
-	stringEnd bool
+	s        string
+	i        int
+	inString bool
+	quote    string
+	inLine   bool
+	inBlock  bool
+	cur      byte
+	isCode   bool // cur is outside strings and comments
 }
 
 func newScanner(s string) *scanner { return &scanner{s: s, i: -1} }
@@ -1188,8 +1201,22 @@ func splitStatements(s string) []string {
 	last := 0
 	for sc.next() {
 		if sc.isCode && sc.cur == ';' {
-			out = appendStmt(out, s[last:sc.i])
+			stmt := s[last:sc.i]
 			last = sc.i + 1
+			// A `-- comment` on the same line after the semicolon
+			// ("SELECT ...; -- Throws an error") describes the statement
+			// it ends, not the next one: keep it as a trailing comment.
+			rest := s[last:]
+			if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+				rest = rest[:nl]
+			}
+			if t := strings.TrimSpace(rest); strings.HasPrefix(t, "--") {
+				stmt += " " + t
+				last += len(rest)
+				for sc.i < last-1 && sc.next() {
+				}
+			}
+			out = appendStmt(out, stmt)
 		}
 	}
 	out = appendStmt(out, s[last:])

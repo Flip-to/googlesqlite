@@ -8,9 +8,14 @@ import (
 
 func TestSplitStatementsRespectsStringsAndComments(t *testing.T) {
 	got := splitStatements("CREATE TEMP FUNCTION f() AS (';'); -- a ; comment\nSELECT \"x;y\", f();\n")
-	want := []string{"CREATE TEMP FUNCTION f() AS (';')", "-- a ; comment\nSELECT \"x;y\", f()"}
+	// The same-line comment after `;` stays with the statement it ends.
+	want := []string{"CREATE TEMP FUNCTION f() AS (';') -- a ; comment", "SELECT \"x;y\", f()"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q want %q", got, want)
+	}
+	got = splitStatements("-- head\nSELECT 1; -- Throws an error\nSELECT 2; -- Returns NULL\n")
+	if len(got) != 2 || leadingComment(got[0]) != "head" || leadingComment(got[1]) != "Returns NULL" {
+		t.Fatalf("same-line comments: %q", got)
 	}
 	got = splitStatements("SELECT '''a;\nb''' AS s")
 	if len(got) != 1 {

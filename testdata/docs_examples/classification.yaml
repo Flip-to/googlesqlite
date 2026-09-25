@@ -1,0 +1,803 @@
+# Triage of every upstream reference-docs example (google/googlesql
+# docs/*.md at d82db99) that does not pass exactly as documented.
+# TestDocsExamples reads this file; see docs_examples_classes_test.go for
+# what each class does. Keys are the example IDs `specctl
+# extract-docs-examples` assigns (page#ordinal).
+#
+# Classes:
+#   la_timezone      the docs print results under the America/Los_Angeles
+#                    default time zone of the GoogleSQL reference
+#                    implementation; the driver, like BigQuery, uses UTC.
+#                    Skipped; the documented expectation is kept.
+#   not_in_bigquery  the example uses a feature BigQuery does not have
+#                    (property graphs, protos, MAP, INT32/UINT64/FLOAT
+#                    types, functions absent from BigQuery, syntax
+#                    BigQuery rejects). Skipped. Where noted, the
+#                    BigQuery error was observed with the bq CLI.
+#   nondeterministic the documented result depends on the environment,
+#                    the time of day, or ties in an ORDER BY. Skipped.
+#   docs_artifact    the documented table cannot be compared as printed
+#                    (a column left out, a fixture defined for another
+#                    section, a fragment that is not a query, a value the
+#                    table rendering changes). Skipped.
+#   bigquery         the docs contradict real BigQuery; the case follows
+#                    BigQuery's answer (bigquery_rows, or bigquery_error:
+#                    a substring of the expected error, "*" for any
+#                    error). Every answer here was observed on BigQuery
+#                    with the bq CLI on 2026-09-25.
+#   analyzer         blocked by the go-googlesql v0.4.0 analyzer.
+#                    Pending.
+#   driver_bug       a real driver divergence not fixed yet. Pending.
+cases:
+  # ---- aggregate WHERE modifier -------------------------------------
+  aggregate-function-calls#7:
+    class: analyzer
+    reason: >-
+      BigQuery supports the aggregate WHERE modifier (COUNT(DISTINCT x
+      WHERE x > 0) returns 3 there), but go-googlesql v0.4.0 exposes no
+      where_expr accessor on ResolvedAggregateFunctionCall, and enabling
+      FEATURE_AGGREGATE_FILTERING makes the analyzer accept the modifier
+      while the filter is silently dropped.
+  aggregate_functions#29:
+    class: analyzer
+    reason: >-
+      Aggregate WHERE modifier; see aggregate-function-calls#7 (the
+      go-googlesql v0.4.0 binding has no where_expr accessor).
+  aggregate_functions#30:
+    class: analyzer
+    reason: >-
+      Aggregate WHERE modifier; see aggregate-function-calls#7 (the
+      go-googlesql v0.4.0 binding has no where_expr accessor).
+  aggregate_functions#31:
+    class: analyzer
+    reason: >-
+      Aggregate WHERE modifier; see aggregate-function-calls#7 (the
+      go-googlesql v0.4.0 binding has no where_expr accessor).
+
+  # ---- arrays ---------------------------------------------------------
+  arrays#14:
+    class: not_in_bigquery
+    reason: >-
+      Array subscript on a FROM-clause path without UNNEST; BigQuery
+      rejects it with "Array element access is not allowed in the FROM
+      clause without UNNEST".
+  arrays#27:
+    class: not_in_bigquery
+    reason: ARRAY<INT32>; BigQuery has no INT32 type.
+  bit_functions#2:
+    class: not_in_bigquery
+    reason: BIT_CAST_TO_UINT64 returns UINT64, a type BigQuery does not have.
+  bit_functions#4:
+    class: not_in_bigquery
+    reason: BIT_CAST_TO_UINT64 returns UINT64, a type BigQuery does not have.
+
+  # ---- collation ------------------------------------------------------
+  collation-concepts#5:
+    class: bigquery
+    reason: >-
+      collation-concepts.md, Caveats, prints the values as orange1,
+      orange2, orange3, dropping the invisible U+2060 WORD JOINER from
+      the inputs. BigQuery returns the strings unchanged,
+      ["oran⁠ge1","⁠orange2","orange3"], in that order.
+    bigquery_rows:
+      - ["oran⁠ge1"]
+      - ["⁠orange2"]
+      - ["orange3"]
+
+  # ---- conversion functions -------------------------------------------
+  conversion_functions#7:
+    class: not_in_bigquery
+    reason: CAST(... AS JSON); BigQuery rejects it with "Invalid cast from INT64 to JSON".
+  conversion_functions#8:
+    class: not_in_bigquery
+    reason: CAST(... AS JSON); BigQuery rejects it with "Invalid cast from INT64 to JSON".
+  conversion_functions#10:
+    class: not_in_bigquery
+    reason: MAP type and MAP_FROM_ARRAY; BigQuery has no MAP type.
+  conversion_functions#11:
+    class: not_in_bigquery
+    reason: MAP type and MAP_FROM_ARRAY; BigQuery has no MAP type.
+  conversion_functions#13:
+    class: bigquery
+    reason: >-
+      conversion_functions.md, CAST AS RANGE, prints bounds as typed
+      literals ([DATE '2020-01-01', DATE '2020-01-02')). BigQuery returns
+      [2020-01-01, 2020-01-02).
+    bigquery_rows:
+      - ["[2020-01-01, 2020-01-02)"]
+  conversion_functions#14:
+    class: bigquery
+    reason: >-
+      conversion_functions.md, CAST AS RANGE, prints bounds as typed
+      literals with the input's precision. BigQuery's
+      CAST(... AS STRING) of the result is
+      [2014-09-27 12:30:00.450, 2016-10-17 11:15:00.330).
+    bigquery_rows:
+      - ["[2014-09-27 12:30:00.450, 2016-10-17 11:15:00.330)"]
+  conversion_functions#15:
+    class: nondeterministic
+    reason: >-
+      The docs say "Results depend upon where this query was executed" and
+      print the bounds in +08; the rendering depends on the session time
+      zone.
+  conversion_functions#16:
+    class: bigquery
+    reason: >-
+      conversion_functions.md, CAST AS RANGE, prints [UNBOUNDED, DATE
+      '2020-01-02'). BigQuery returns [UNBOUNDED, 2020-01-02).
+    bigquery_rows:
+      - ["[UNBOUNDED, 2020-01-02)"]
+  conversion_functions#17:
+    class: bigquery
+    reason: >-
+      conversion_functions.md, CAST AS RANGE, prints [DATE '2020-01-01',
+      UNBOUNDED). BigQuery returns [2020-01-01, UNBOUNDED).
+    bigquery_rows:
+      - ["[2020-01-01, UNBOUNDED)"]
+  conversion_functions#20:
+    class: la_timezone
+    reason: >-
+      The docs render TIMESTAMP '2008-12-25 00:00:00+00' as 2008-12-24
+      16:00:00 -08:00 (America/Los_Angeles); in UTC it is 2008-12-25
+      00:00:00 +00:00.
+  conversion_functions#26:
+    class: bigquery
+    reason: >-
+      conversion_functions.md, PARSE_BIGNUMERIC, documents
+      PARSE_BIGNUMERIC("123.456E37") as 1234 followed by 35 zeros, but
+      123.456E37 is 1.23456e39, above the BIGNUMERIC maximum. BigQuery
+      raises "Invalid input to PARSE_BIGNUMERIC".
+    bigquery_error: "*"
+
+  # ---- data definition / data types -----------------------------------
+  data-definition-language#2:
+    class: not_in_bigquery
+    reason: CREATE CONSTANT; BigQuery has no named constants.
+  data-types#1:
+    class: not_in_bigquery
+    reason: >-
+      ORDER BY an ARRAY; BigQuery rejects it with "ORDER BY does not
+      support expressions of type ARRAY<INT64>".
+  data-types#3:
+    class: docs_artifact
+    reason: >-
+      The docs print the NULL array as []: BigQuery's result API renders a
+      NULL ARRAY as an empty array, but the value is NULL (numbers IS
+      NULL is true on BigQuery, as the example's third column shows). The
+      driver returns the NULL.
+  data-types#15:
+    class: bigquery
+    reason: >-
+      data-types.md, Daylight saving time, prints "Sun Nov 3 08:30:00 2024
+      UTC". BigQuery's %c pads the day of month with a space, as C
+      asctime does: "Sun Nov  3 08:30:00 2024 UTC".
+    bigquery_rows:
+      - ["Sun Nov  3 08:30:00 2024 UTC", "Sun Nov  3 10:30:00 2024 UTC"]
+
+  # ---- functions BigQuery does not have -------------------------------
+  date_functions#1:
+    class: not_in_bigquery
+    reason: ADD_MONTHS is not a BigQuery function.
+  date_functions#2:
+    class: not_in_bigquery
+    reason: ADD_MONTHS is not a BigQuery function.
+  date_functions#3:
+    class: not_in_bigquery
+    reason: ADD_MONTHS is not a BigQuery function.
+  date_functions#33:
+    class: not_in_bigquery
+    reason: MONTHS_BETWEEN is not a BigQuery function.
+  date_functions#34:
+    class: not_in_bigquery
+    reason: MONTHS_BETWEEN is not a BigQuery function.
+  date_functions#35:
+    class: not_in_bigquery
+    reason: NEXT_DAY is not a BigQuery function.
+  date_functions#36:
+    class: not_in_bigquery
+    reason: NEXT_DAY is not a BigQuery function.
+  datetime_functions#1:
+    class: not_in_bigquery
+    reason: ADD_MONTHS is not a BigQuery function.
+  datetime_functions#2:
+    class: not_in_bigquery
+    reason: ADD_MONTHS is not a BigQuery function.
+  datetime_functions#3:
+    class: not_in_bigquery
+    reason: ADD_MONTHS is not a BigQuery function.
+  datetime_functions#29:
+    class: not_in_bigquery
+    reason: MONTHS_BETWEEN is not a BigQuery function.
+  datetime_functions#30:
+    class: not_in_bigquery
+    reason: MONTHS_BETWEEN is not a BigQuery function.
+  datetime_functions#32:
+    class: not_in_bigquery
+    reason: NEXT_DAY is not a BigQuery function.
+  datetime_functions#33:
+    class: not_in_bigquery
+    reason: NEXT_DAY is not a BigQuery function.
+
+  # ---- format elements ------------------------------------------------
+  format-elements#21:
+    class: la_timezone
+    reason: >-
+      The docs format TIMESTAMP '2008-12-25 00:00:00+00' with TZH as -08
+      (America/Los_Angeles); in UTC it is +00.
+  format-elements#30:
+    class: bigquery
+    reason: >-
+      format-elements.md, Format string as second part, documents
+      CAST('01:05:07.16' AS TIME FORMAT 'HH24:MI:SS.FF1') as 01:05:07.2.
+      BigQuery rejects the input: "Illegal non-space trailing data '6' in
+      timestamp string".
+    bigquery_error: "*"
+  format-elements#32:
+    class: bigquery
+    reason: >-
+      format-elements.md, Format string as time zone part, documents
+      'YYYY.MM.DD HH:MI:SSTZH' as parsing. BigQuery rejects the format:
+      "Format element in category MERIDIAN_INDICATOR is required when
+      format element 'HH' exists".
+    bigquery_error: "*"
+  format-elements#33:
+    class: bigquery
+    reason: >-
+      format-elements.md, Format numeric type as string: the table trims
+      the output, but the prose says the output has a fixed width with
+      one leading character for the sign. BigQuery returns the padded
+      strings.
+    bigquery_rows:
+      - [1.2, "       $1.200"]
+      - [12.3, "      $12.300"]
+      - [123.456, "     $123.456"]
+      - [1234.56, "   $1,234.560"]
+      - [-12345.678, " -$12,345.678"]
+      - [1234567.89, " $###,###.###"]
+  format-elements#34:
+    class: bigquery
+    reason: >-
+      format-elements.md, Format digits as string: the table trims the
+      output. BigQuery returns '  12' and ' -12' (one position per digit
+      element plus one for the sign).
+    bigquery_rows:
+      - ["  12", " -12"]
+  format-elements#35:
+    class: bigquery
+    reason: >-
+      format-elements.md, Format decimal point as string: the table trims
+      the output. BigQuery returns ' 12.50'.
+    bigquery_rows:
+      - [" 12.50"]
+  format-elements#37:
+    class: bigquery
+    reason: >-
+      format-elements.md, Format currency symbol as string: the table
+      trims the output. BigQuery returns ' $12' and '-$12'.
+    bigquery_rows:
+      - [" $12", "-$12"]
+  format-elements#38:
+    class: bigquery
+    reason: >-
+      format-elements.md, Format group separator as string: the table
+      trims the output. BigQuery returns '   1,234'.
+    bigquery_rows:
+      - ["   1,234"]
+
+  # ---- geography ------------------------------------------------------
+  geography_functions#10:
+    class: driver_bug
+    reason: >-
+      ST_CONVEXHULL is planar: the docs' S2 hull keeps geodesic vertices
+      (POINT(0.999999999999943 1), a curved LINESTRING) and orders polygon
+      vertices differently.
+  geography_functions#11:
+    class: driver_bug
+    reason: >-
+      ST_COVERS does not treat a polygon vertex as covered
+      (ST_COVERS(POLYGON((1 1, 20 1, 10 20, 1 1)), POINT(1 1)) is TRUE in
+      the docs).
+  geography_functions#18:
+    class: driver_bug
+    reason: >-
+      ST_EXTERIORRING keeps the input vertex order; BigQuery normalizes
+      rings to S2 orientation (LINESTRING(2 2, 1 4, 0 0, 2 2)).
+  geography_functions#19:
+    class: driver_bug
+    reason: >-
+      Polygons keep the input vertex order; BigQuery normalizes them:
+      ST_GEOGFROM('POLYGON((0 0, 0 2, 2 2, 2 0, 0 0))') prints as
+      POLYGON((2 0, 2 2, 0 2, 0 0, 2 0)) (verified on BigQuery).
+  geography_functions#23:
+    class: driver_bug
+    reason: >-
+      ST_CONTAINS(ST_GEOGFROMTEXT(polygon), point) is FALSE for a point
+      inside the polygon, and oriented => TRUE does not invert a
+      clockwise ring.
+  geography_functions#24:
+    class: driver_bug
+    reason: >-
+      ST_GEOGFROMTEXT accepts a self-intersecting polygon (the docs return
+      NULL under SAFE) and make_valid => TRUE does not repair it into a
+      MULTIPOLYGON.
+  geography_functions#39:
+    class: driver_bug
+    reason: >-
+      ST_MAKELINE of an array of equal points (the docs return POINT(1 2))
+      and of overlapping segments (a MULTILINESTRING) raises "needs at
+      least 2 points".
+  geography_functions#43:
+    class: driver_bug
+    reason: >-
+      ST_SIMPLIFY does not collapse degenerate results to a LINESTRING or
+      POINT as the docs show.
+  geography_functions#45:
+    class: driver_bug
+    reason: >-
+      ST_UNION of two touching linestrings returns a MULTILINESTRING;
+      BigQuery merges them into one LINESTRING.
+
+  # ---- graph, hash, HLL -----------------------------------------------
+  graph-patterns#35:
+    class: not_in_bigquery
+    reason: GQL graph query over the FinGraph property graph.
+  graph-sql-queries#1:
+    class: not_in_bigquery
+    reason: GRAPH_TABLE over the FinGraph property graph.
+  graph-sql-queries#2:
+    class: not_in_bigquery
+    reason: GRAPH_TABLE over the FinGraph property graph.
+  graph-sql-queries#5:
+    class: not_in_bigquery
+    reason: GRAPH_TABLE over the FinGraph property graph.
+  hash_functions#2:
+    class: not_in_bigquery
+    reason: HIGHWAY_FINGERPRINT128; BigQuery raises "Function not found".
+  hash_functions#3:
+    class: not_in_bigquery
+    reason: HIGHWAY_FINGERPRINT128; BigQuery raises "Function not found".
+  hll_functions#2:
+    class: nondeterministic
+    reason: >-
+      The documented sketch bytes are an implementation-specific encoding
+      (a GoogleSQL proto text dump); BigQuery and this driver produce
+      different, equally valid sketches.
+
+  # ---- JSON -------------------------------------------------------------
+  json_functions#6:
+    class: not_in_bigquery
+    reason: BOOL_ARRAY is not a BigQuery function.
+  json_functions#7:
+    class: not_in_bigquery
+    reason: BOOL_ARRAY is not a BigQuery function.
+  json_functions#20:
+    class: not_in_bigquery
+    reason: DOUBLE_ARRAY is not a BigQuery function.
+  json_functions#21:
+    class: not_in_bigquery
+    reason: DOUBLE_ARRAY is not a BigQuery function.
+  json_functions#24:
+    class: not_in_bigquery
+    reason: FLOAT (FLOAT32) is not a BigQuery function or type.
+  json_functions#27:
+    class: not_in_bigquery
+    reason: FLOAT (FLOAT32) is not a BigQuery function or type.
+  json_functions#28:
+    class: not_in_bigquery
+    reason: FLOAT (FLOAT32) is not a BigQuery function or type.
+  json_functions#30:
+    class: not_in_bigquery
+    reason: FLOAT_ARRAY is not a BigQuery function.
+  json_functions#33:
+    class: not_in_bigquery
+    reason: FLOAT_ARRAY is not a BigQuery function.
+  json_functions#34:
+    class: not_in_bigquery
+    reason: FLOAT_ARRAY is not a BigQuery function.
+  json_functions#38:
+    class: not_in_bigquery
+    reason: INT32 is not a BigQuery function or type.
+  json_functions#43:
+    class: not_in_bigquery
+    reason: INT32_ARRAY is not a BigQuery function.
+  json_functions#45:
+    class: not_in_bigquery
+    reason: INT32_ARRAY is not a BigQuery function.
+  json_functions#55:
+    class: not_in_bigquery
+    reason: INT64_ARRAY is not a BigQuery function.
+  json_functions#57:
+    class: not_in_bigquery
+    reason: INT64_ARRAY is not a BigQuery function.
+  json_functions#278:
+    class: not_in_bigquery
+    reason: LAX_FLOAT (FLOAT32) is not a BigQuery function.
+  json_functions#279:
+    class: not_in_bigquery
+    reason: LAX_FLOAT (FLOAT32) is not a BigQuery function.
+  json_functions#285:
+    class: not_in_bigquery
+    reason: LAX_FLOAT (FLOAT32) is not a BigQuery function.
+  json_functions#292:
+    class: not_in_bigquery
+    reason: LAX_FLOAT_ARRAY is not a BigQuery function.
+  json_functions#294:
+    class: not_in_bigquery
+    reason: LAX_FLOAT_ARRAY is not a BigQuery function.
+  json_functions#297:
+    class: not_in_bigquery
+    reason: LAX_FLOAT_ARRAY is not a BigQuery function.
+  json_functions#423:
+    class: not_in_bigquery
+    reason: SAFE_TO_JSON and the placeholder UNSUPPORTED_TYPE are not BigQuery features.
+  json_functions#424:
+    class: not_in_bigquery
+    reason: SAFE_TO_JSON and the placeholder UNSUPPORTED_TYPE are not BigQuery features.
+  json_functions#430:
+    class: not_in_bigquery
+    reason: STRING_ARRAY is not a BigQuery function.
+  json_functions#431:
+    class: not_in_bigquery
+    reason: STRING_ARRAY is not a BigQuery function.
+  json_functions#440:
+    class: docs_artifact
+    reason: >-
+      The pretty-printed TO_JSON_STRING(..., true) result is one string
+      with newlines; the docs table prints each line as a row.
+  json_functions#444:
+    class: not_in_bigquery
+    reason: UINT32 is not a BigQuery function or type.
+  json_functions#450:
+    class: not_in_bigquery
+    reason: UINT32_ARRAY is not a BigQuery function.
+  json_functions#453:
+    class: not_in_bigquery
+    reason: UINT32_ARRAY is not a BigQuery function.
+  json_functions#458:
+    class: not_in_bigquery
+    reason: UINT64 is not a BigQuery function or type.
+  json_functions#464:
+    class: not_in_bigquery
+    reason: UINT64_ARRAY is not a BigQuery function.
+  json_functions#467:
+    class: not_in_bigquery
+    reason: UINT64_ARRAY is not a BigQuery function.
+  json_functions#469:
+    class: driver_bug
+    reason: >-
+      JSON_VALUE on a STRING input does not validate the whole document:
+      JSON_VALUE('{"hello": "world"', "$.hello") is 'world' on BigQuery
+      (verified); the driver parses the full text and returns NULL.
+
+  # ---- NET, numbering -------------------------------------------------
+  net_functions#7:
+    class: bigquery
+    reason: >-
+      net_functions.md, NET.SAFE_IP_FROM_STRING, shows NULL for invalid
+      inputs, but the column is FORMAT("%T", ...), which returns the
+      STRING 'NULL' (not SQL NULL) on BigQuery.
+    bigquery_rows:
+      - ["48.49.50.51", 'b"0123"']
+      - ["::1", 'b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01"']
+      - ["3031:3233:3435:3637:3839:4041:4243:4445", 'b"0123456789@ABCDE"']
+      - ["::ffff:192.0.2.128", 'b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xff\xc0\x00\x02\x80"']
+      - ["48.49.50.51/32", "NULL"]
+      - ["48.49.50", "NULL"]
+      - ["::wxyz", "NULL"]
+  numbering_functions#5:
+    class: la_timezone
+    reason: >-
+      The docs print the zone-less TIMESTAMP literals as America/Los_Angeles
+      times (2:51:45 shown as 09:51:45+00); the ranking also ties on
+      2:59:01.
+  numbering_functions#7:
+    class: la_timezone
+    reason: >-
+      The docs print the zone-less TIMESTAMP literals as America/Los_Angeles
+      times; the ranking also ties on 2:59:01.
+  numbering_functions#8:
+    class: la_timezone
+    reason: >-
+      The docs print the zone-less TIMESTAMP literals as America/Los_Angeles
+      times; the ranking also ties on 2:59:01.
+  numbering_functions#13:
+    class: la_timezone
+    reason: >-
+      The docs print the zone-less TIMESTAMP literals as America/Los_Angeles
+      times; the ranking also ties on 2:59:01.
+
+  # ---- operators ------------------------------------------------------
+  operators#5:
+    class: not_in_bigquery
+    reason: MAP subscript; BigQuery has no MAP type.
+  operators#7:
+    class: not_in_bigquery
+    reason: MAP subscript; BigQuery has no MAP type.
+  operators#8:
+    class: not_in_bigquery
+    reason: MAP subscript; BigQuery has no MAP type.
+  operators#9:
+    class: not_in_bigquery
+    reason: MAP subscript; BigQuery has no MAP type.
+  operators#10:
+    class: not_in_bigquery
+    reason: MAP subscript; BigQuery has no MAP type.
+  operators#17:
+    class: not_in_bigquery
+    reason: Protocol buffer map subscript on a proto type.
+  operators#30:
+    class: not_in_bigquery
+    reason: The `::` cast operator; BigQuery raises "CAST operators are not supported".
+  operators#31:
+    class: not_in_bigquery
+    reason: The `::` cast operator; BigQuery raises "CAST operators are not supported".
+  operators#68:
+    class: not_in_bigquery
+    reason: >-
+      LIKE ANY (subquery); BigQuery raises "The LIKE ANY|SOME|ALL operator
+      does not support subquery expression as patterns".
+
+  # ---- pipe syntax ------------------------------------------------------
+  pipe-syntax#10:
+    class: docs_artifact
+    reason: >-
+      The documented table leaves out the sales column that |> EXTEND
+      keeps (the docs show item, category, category_total).
+  pipe-syntax#36:
+    class: not_in_bigquery
+    reason: Pipe RECURSIVE UNION; BigQuery raises "Pipe RECURSIVE UNION is not supported".
+  pipe-syntax#37:
+    class: not_in_bigquery
+    reason: Pipe RECURSIVE UNION; BigQuery raises "Pipe RECURSIVE UNION is not supported".
+  pipe-syntax#59:
+    class: not_in_bigquery
+    reason: Pipe DESCRIBE; BigQuery raises "Pipe DESCRIBE not supported".
+  pipe-syntax#60:
+    class: not_in_bigquery
+    reason: Pipe DESCRIBE; BigQuery raises "Pipe DESCRIBE not supported".
+  pipe-syntax#61:
+    class: not_in_bigquery
+    reason: Pipe DESCRIBE; BigQuery raises "Pipe DESCRIBE not supported".
+  pipe-syntax#65:
+    class: not_in_bigquery
+    reason: Pipe TEE; BigQuery raises "Pipe TEE not supported".
+  pipe-syntax#66:
+    class: not_in_bigquery
+    reason: Pipe TEE; BigQuery raises "Pipe TEE not supported".
+
+  # ---- protocol buffers -------------------------------------------------
+  protocol_buffer_functions#19:
+    class: not_in_bigquery
+    reason: Protocol buffers (NEW Book, REPLACE_FIELDS).
+  protocol_buffer_functions#20:
+    class: not_in_bigquery
+    reason: Protocol buffers (NEW Book, REPLACE_FIELDS).
+  protocol_buffer_functions#21:
+    class: not_in_bigquery
+    reason: Protocol buffers (NEW Book, REPLACE_FIELDS).
+  protocol_buffer_functions#24:
+    class: not_in_bigquery
+    reason: TO_PROTO and google.protobuf.Duration.
+
+  # ---- query syntax -----------------------------------------------------
+  query-syntax#10:
+    class: not_in_bigquery
+    reason: TABLE statement; BigQuery raises "TABLE statements are not supported".
+  query-syntax#11:
+    class: not_in_bigquery
+    reason: TABLE statement; BigQuery raises "TABLE statements are not supported".
+  query-syntax#12:
+    class: not_in_bigquery
+    reason: TABLE statement; BigQuery raises "TABLE statements are not supported".
+  query-syntax#13:
+    class: not_in_bigquery
+    reason: TABLE statement; BigQuery raises "TABLE statements are not supported".
+  query-syntax#46:
+    class: not_in_bigquery
+    reason: LATERAL join; BigQuery raises "LATERAL join is not supported".
+  query-syntax#47:
+    class: not_in_bigquery
+    reason: LATERAL join; BigQuery raises "LATERAL join is not supported".
+  query-syntax#66:
+    class: nondeterministic
+    reason: >-
+      ORDER BY product_name ties the two NULL product_name rows (shirt,
+      pants); their order is unspecified.
+  query-syntax#70:
+    class: bigquery
+    reason: >-
+      query-syntax.md, Group rows by ROLLUP, lists (shirt, t-shirt) before
+      (shirt, polo) under ORDER BY product_type, product_name. BigQuery
+      sorts polo before t-shirt.
+    bigquery_rows:
+      - [null, null, 42]
+      - ["pants", null, 6]
+      - ["pants", "jeans", 6]
+      - ["shirt", null, 36]
+      - ["shirt", "polo", 25]
+      - ["shirt", "t-shirt", 11]
+  query-syntax#145:
+    class: docs_artifact
+    reason: The docs never define the CustomerCreationTimeRange TVF or MyCustomerTable.
+  recursive-ctes#4:
+    class: docs_artifact
+    reason: The block is a WITH RECURSIVE fragment without a query; the table traces iterations.
+
+  # ---- strings ----------------------------------------------------------
+  string_functions#7:
+    class: bigquery
+    reason: >-
+      string_functions.md, CHR, prints CHR(0) as an empty cell. BigQuery
+      returns the NUL character (TO_HEX(CAST(CHR(0) AS BYTES)) is '00').
+      CHR(0xF9B5) is U+F9B5, written as an escape here.
+    bigquery_rows:
+      - ["a", "例", "\u0000", null]
+  string_functions#11:
+    class: bigquery
+    reason: >-
+      string_functions.md, CODE_POINTS_TO_STRING, prints
+      CODE_POINTS_TO_STRING([97, 0, 0xF9B5]) without the NUL. BigQuery
+      keeps it: the UTF-8 bytes are 61 00 efa6b5.
+    bigquery_rows:
+      - ["a\u0000例"]
+  string_functions#13:
+    class: nondeterministic
+    reason: ORDER BY 2 DESC ties the letters that share a count; their order is unspecified.
+  string_functions#42:
+    class: docs_artifact
+    reason: >-
+      The example reads an `items` table the page defines for another
+      section (three rows); the docs show one row.
+  string_functions#109:
+    class: bigquery
+    reason: >-
+      string_functions.md, SPLIT, documents SPLIT('', ' ') as []. BigQuery
+      returns [""] (ARRAY_LENGTH is 1).
+    bigquery_rows:
+      - [[""]]
+      - [["a"]]
+      - [["b", "c", "d"]]
+  string_functions#145:
+    class: bigquery
+    reason: >-
+      string_functions.md, TRIM, documents d as 'Ūaba'. BigQuery returns
+      the input unchanged ('Ū' followed by U+030A, then 'aba'): the
+      combining ring after the leading Ū is not removed.
+    bigquery_rows:
+      - ["abaW", "W̊aba", "abaŪ", "Ū̊aba"]
+  subqueries#5:
+    class: not_in_bigquery
+    reason: >-
+      LIKE ANY (subquery); BigQuery raises "The LIKE ANY|SOME|ALL operator
+      does not support subquery expression as patterns".
+
+  # ---- timestamps -------------------------------------------------------
+  timestamp_functions#4:
+    class: docs_artifact
+    reason: The documented table leaves out the timestamp_value column the query selects.
+  timestamp_functions#5:
+    class: docs_artifact
+    reason: The documented table leaves out the timestamp_value column the query selects.
+  timestamp_functions#6:
+    class: docs_artifact
+    reason: The documented table leaves out the timestamp_value column the query selects.
+  timestamp_functions#7:
+    class: docs_artifact
+    reason: The documented table leaves out the timestamp_value column the query selects.
+  timestamp_functions#8:
+    class: docs_artifact
+    reason: The documented table leaves out the timestamp_value column the query selects.
+  timestamp_functions#9:
+    class: la_timezone
+    reason: >-
+      2017-11-06 00:00:00+00 is Sunday 2017-11-05 in America/Los_Angeles,
+      so the docs get week 44 for WEEK(MONDAY); in UTC it is Monday, week
+      45.
+
+  # ---- user-defined functions -------------------------------------------
+  user-defined-functions#6:
+    class: nondeterministic
+    reason: The JavaScript UDF branches on the current hour.
+  user-defined-functions#11:
+    class: not_in_bigquery
+    reason: >-
+      UDF arguments with DEFAULT values; BigQuery raises "Function
+      arguments with DEFAULT values are not supported".
+  user-defined-functions#13:
+    class: not_in_bigquery
+    reason: LANGUAGE lua UDFs.
+  user-defined-functions#14:
+    class: not_in_bigquery
+    reason: LANGUAGE lua UDFs.
+  user-defined-functions#15:
+    class: not_in_bigquery
+    reason: LANGUAGE lua UDFs (and INT32).
+  user-defined-functions#16:
+    class: not_in_bigquery
+    reason: LANGUAGE lua UDFs.
+  user-defined-functions#17:
+    class: not_in_bigquery
+    reason: LANGUAGE lua UDFs.
+  user-defined-functions#18:
+    class: not_in_bigquery
+    reason: LANGUAGE lua UDFs.
+  user-defined-functions#19:
+    class: not_in_bigquery
+    reason: LANGUAGE lua UDFs.
+  user-defined-functions#20:
+    class: not_in_bigquery
+    reason: >-
+      UDF arguments with DEFAULT values; BigQuery raises "Function
+      arguments with DEFAULT values are not supported".
+
+  # ---- functions-and-operators.md (entries without a per-page twin) ------
+  functions-and-operators#89:
+    class: docs_artifact
+    reason: The example reads json_keyset, which the docs never define.
+  functions-and-operators#968:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#969:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#970:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#971:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#972:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#973:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#974:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#975:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#976:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#977:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#979:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#980:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#981:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#982:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#983:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#985:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#986:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#987:
+    class: not_in_bigquery
+    reason: MAP functions; BigQuery has no MAP type.
+  functions-and-operators#1012:
+    class: docs_artifact
+    reason: The example reads a `news` table the docs never define.
+  functions-and-operators#1017:
+    class: not_in_bigquery
+    reason: >-
+      A KMEANS table-valued function over an undefined table; not a
+      BigQuery SQL function.
+  functions-and-operators#1180:
+    class: docs_artifact
+    reason: >-
+      The example reads an `items` table the page defines for another
+      section (three rows); the docs show one row.

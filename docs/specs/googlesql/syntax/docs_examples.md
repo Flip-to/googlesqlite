@@ -5,7 +5,7 @@ category: syntax
 status: tested
 source_url: docs/third_party/googlesql-docs/functions-and-operators.md
 upstream_url: https://github.com/google/googlesql/tree/master/docs
-last_synced: 2026-09-23
+last_synced: 2026-09-25
 testdata: testdata/specs/googlesql/docs_examples/string_functions.yaml
 ---
 
@@ -29,14 +29,24 @@ construct the reference pages exemplify.
 `specctl extract-docs-examples` parses the pages. `TestDocsExamples`
 (env-gated, see `docs/docs_examples_results.md`) replays each example,
 types the documented cells with the column types the analyzer reports,
-and compares. Examples that match are emitted here; examples that
-diverge go to `testdata/specs_pending/googlesql/docs_examples/`, which
-the default suite does not run.
+and compares. Examples that match are emitted here. Every example that
+does not match is triaged in `testdata/docs_examples/classification.yaml`:
+
+- examples that assume the America/Los_Angeles default time zone, use a
+  feature BigQuery does not have, are non-deterministic, or whose table
+  cannot be compared as printed are emitted here with a `skip:` reason
+  and the documented expectation;
+- examples where the docs contradict real BigQuery are emitted here with
+  BigQuery's answer and a comment citing both;
+- examples blocked by the analyzer or by a driver bug go to
+  `testdata/specs_pending/googlesql/docs_examples/` with a `pending:`
+  reason; the default suite does not run that directory.
 
 ## Examples
 
 See the testdata files. Expected values are the documented result
-tables, never observed driver output.
+tables or, for cases that say so, the answer real BigQuery returned;
+never observed driver output.
 
 ## Edge cases
 
