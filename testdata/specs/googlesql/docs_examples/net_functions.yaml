@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "net_functions#1 L289 NET.IP_FROM_STRING"
     sql: |-
       SELECT
@@ -24,6 +25,7 @@ cases:
         - ["3031:3233:3435:3637:3839:4041:4243:4445","b\"0123456789@ABCDE\""]
         - ["::ffff:192.0.2.128","b\"\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xff\\xff\\xc0\\x00\\x02\\x80\""]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "net_functions#2 L363 NET.IP_NET_MASK"
     sql: |-
       SELECT x, y, FORMAT("%T", NET.IP_NET_MASK(x, y)) AS ip_net_mask
@@ -44,6 +46,7 @@ cases:
         - [16,1,"b\"\\x80\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\""]
         - [16,128,"b\"\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\""]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "net_functions#3 L408 NET.IP_TO_STRING"
     sql: |-
       SELECT FORMAT("%T", x) AS addr_bin, NET.IP_TO_STRING(x) AS ip_to_string
@@ -60,6 +63,7 @@ cases:
         - ["b\"0123456789@ABCDE\"","3031:3233:3435:3637:3839:4041:4243:4445"]
         - ["b\"\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\xff\\xff\\xc0\\x00\\x02\\x80\"","::ffff:192.0.2.128"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "net_functions#4 L448 NET.IP_TRUNC"
     sql: |-
       SELECT
@@ -80,6 +84,7 @@ cases:
         - ["b\"\\xaa\\xbb\\xcc\\xdd\"",32,"b\"\\xaa\\xbb\\xcc\\xdd\""]
         - ["b\"0123456789@ABCDE\"",80,"b\"0123456789\\x00\\x00\\x00\\x00\\x00\\x00\""]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "net_functions#5 L497 NET.IPV4_FROM_INT64"
     sql: |-
       SELECT x, x_hex, FORMAT("%T", NET.IPV4_FROM_INT64(x)) AS ipv4_from_int64
@@ -95,6 +100,7 @@ cases:
         - [-1,"-0x1","b\"\\xff\\xff\\xff\\xff\""]
         - [-2,"-0x2","b\"\\xff\\xff\\xff\\xfe\""]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "net_functions#6 L539 NET.IPV4_TO_INT64"
     sql: |-
       SELECT
@@ -109,6 +115,7 @@ cases:
         - ["b\"\\xff\\xff\\xff\\xff\"","0xFFFFFFFF"]
       unordered: true
   # Follows BigQuery, not the docs: net_functions.md, NET.SAFE_IP_FROM_STRING, shows NULL for invalid inputs, but the column is FORMAT("%T", ...), which returns the STRING 'NULL' (not SQL NULL) on BigQuery.
+  # Verified on BigQuery 2026-09-25.
   - desc: "net_functions#7 L828 NET.SAFE_IP_FROM_STRING"
     sql: |-
       SELECT

@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#1 L877 S2_CELLIDFROMPOINT"
     sql: |-
       WITH data AS (
@@ -28,6 +29,7 @@ cases:
         - [2,null,null]
         - [3,null,null]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#4 L1181 ST_AZIMUTH"
     sql: |-
       WITH geos AS (
@@ -51,6 +53,7 @@ cases:
         - [null]
         - [null]
         - [null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#9 L1623 ST_CONTAINS"
     sql: |-
       SELECT
@@ -64,24 +67,28 @@ cases:
         - ["POINT(1 1)",false]
         - ["POINT(10 10)",true]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#16 L2027 ST_ENDPOINT"
     sql: |-
       SELECT ST_ENDPOINT(ST_GEOGFROMTEXT('LINESTRING(1 1, 2 1, 3 2, 3 3)')) last
     expected:
       rows:
         - ["POINT(3 3)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#20 L2217 ST_GEOGFROM"
     sql: |-
       SELECT ST_GEOGFROM(FROM_HEX('010100000000000000000000400000000000001040')) AS WKB_format
     expected:
       rows:
         - ["POINT(2 4)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#21 L2229 ST_GEOGFROM"
     sql: |-
       SELECT ST_GEOGFROM('010100000000000000000000400000000000001040') AS WKB_format
     expected:
       rows:
         - ["POINT(2 4)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#22 L2241 ST_GEOGFROM"
     sql: |-
       SELECT ST_GEOGFROM(
@@ -90,12 +97,14 @@ cases:
     expected:
       rows:
         - ["POLYGON((2 0, 2 2, 1 2, 0 2, 0 0, 2 0))"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#26 L2601 ST_GEOHASH"
     sql: |-
       SELECT ST_GEOHASH(ST_GEOGPOINT(-122.35, 47.62), 10) geohash
     expected:
       rows:
         - ["c22yzugqw7"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#27 L2647 ST_GEOMETRYTYPE"
     sql: |-
       WITH example AS(
@@ -117,6 +126,7 @@ cases:
         - ["GEOMETRYCOLLECTION(MULTIPOINT(-1 2, 0 12), LINESTRING(-2 4, 0 6))","ST_GeometryCollection"]
         - ["GEOMETRYCOLLECTION EMPTY","ST_GeometryCollection"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#33 L2982 ST_INTERSECTSBOX"
     sql: |-
       SELECT p, ST_INTERSECTSBOX(p, -90, 0, 90, 20) AS box1,
@@ -129,6 +139,7 @@ cases:
         - ["POINT(170 10)",false,true]
         - ["POINT(30 30)",false,false]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#34 L3024 ST_ISCLOSED"
     sql: |-
       WITH example AS(
@@ -153,6 +164,7 @@ cases:
         - ["GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2, 2 1))",false]
         - ["GEOMETRYCOLLECTION EMPTY",false]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#35 L3175 ST_LINEINTERPOLATEPOINT"
     sql: |-
       WITH fractions AS (
@@ -173,6 +185,7 @@ cases:
         - [1,"POINT(5 5)"]
         - [null,null]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#40 L3607 ST_NUMGEOMETRIES"
     sql: |-
       WITH example AS(
@@ -194,6 +207,7 @@ cases:
         - ["GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 2, 2 1))",2]
         - ["GEOMETRYCOLLECTION EMPTY",0]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#41 L3702 ST_POINTN"
     sql: |-
       WITH linestring AS (
@@ -205,6 +219,7 @@ cases:
     expected:
       rows:
         - ["POINT(1 1)","POINT(3 3)","POINT(2 1)","POINT(3 2)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#42 L3761 ST_SIMPLIFY"
     sql: |-
       WITH example AS
@@ -216,12 +231,14 @@ cases:
     expected:
       rows:
         - ["LINESTRING(0 0, 0.05 0, 0.1 0, 0.15 0, 2 0)","LINESTRING(0 0, 2 0)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#44 L3839 ST_STARTPOINT"
     sql: |-
       SELECT ST_STARTPOINT(ST_GEOGFROMTEXT('LINESTRING(1 1, 2 1, 3 2, 3 3)')) first
     expected:
       rows:
         - ["POINT(1 1)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#47 L3997 ST_X"
     sql: |-
       WITH points AS

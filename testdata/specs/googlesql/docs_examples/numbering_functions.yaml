@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "numbering_functions#2 L214 DENSE_RANK"
     sql: |-
       WITH Numbers AS
@@ -31,6 +32,7 @@ cases:
         - [10,5]
         - [10,5]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "numbering_functions#4 L320 IS_FIRST"
     sql: |-
       WITH Numbers AS
@@ -55,6 +57,7 @@ cases:
         - [10,false]
         - [10,false]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "numbering_functions#5 L347 IS_FIRST"
     skip: "la_timezone: The docs print the zone-less TIMESTAMP literals as America/Los_Angeles times (2:51:45 shown as 09:51:45+00); the ranking also ties on 2:59:01."
     sql: |-
@@ -110,7 +113,7 @@ cases:
         - [10,true]
       unordered: true
   - desc: "numbering_functions#7 L453 IS_LAST"
-    skip: "la_timezone: The docs print the zone-less TIMESTAMP literals as America/Los_Angeles times; the ranking also ties on 2:59:01."
+    skip: "not_in_bigquery: IS_LAST; BigQuery raises \"Analytic function IS_LAST is not supported\". (The docs also print the zone-less TIMESTAMP literals as America/Los_Angeles times.)"
     sql: |-
       WITH finishers AS
        (SELECT 'Sophia Liu' as name,
@@ -139,6 +142,7 @@ cases:
         - ["Desiree Berry","2016-10-18 10:05:42+00","F35-39",true]
         - ["Suzy Slane","2016-10-18 10:06:24+00","F35-39",true]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "numbering_functions#8 L526 NTILE"
     skip: "la_timezone: The docs print the zone-less TIMESTAMP literals as America/Los_Angeles times; the ranking also ties on 2:59:01."
     sql: |-
@@ -169,6 +173,7 @@ cases:
         - ["Desiree Berry","2016-10-18 10:05:42+00","F35-39",2]
         - ["Suzy Slane","2016-10-18 10:06:24+00","F35-39",3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "numbering_functions#10 L665 RANK"
     sql: |-
       WITH Numbers AS
@@ -193,6 +198,7 @@ cases:
         - [10,6]
         - [10,6]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "numbering_functions#12 L764 ROW_NUMBER"
     sql: |-
       WITH Numbers AS
@@ -217,6 +223,7 @@ cases:
         - [10,6]
         - [10,7]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "numbering_functions#13 L791 ROW_NUMBER"
     skip: "la_timezone: The docs print the zone-less TIMESTAMP literals as America/Los_Angeles times; the ranking also ties on 2:59:01."
     sql: |-

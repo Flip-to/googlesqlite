@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#1 L110 APPROX_COUNT_DISTINCT"
     sql: |-
       SELECT APPROX_COUNT_DISTINCT(x) as approx_distinct
@@ -14,6 +15,7 @@ cases:
     expected:
       rows:
         - [5]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#2 L169 APPROX_QUANTILES"
     sql: |-
       SELECT APPROX_QUANTILES(x, 2) AS approx_quantiles
@@ -21,6 +23,7 @@ cases:
     expected:
       rows:
         - [[1,5,10]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#3 L180 APPROX_QUANTILES"
     sql: |-
       SELECT APPROX_QUANTILES(x, 100)[OFFSET(90)] AS percentile_90
@@ -28,6 +31,7 @@ cases:
     expected:
       rows:
         - [9]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#4 L191 APPROX_QUANTILES"
     sql: |-
       SELECT APPROX_QUANTILES(DISTINCT x, 2) AS approx_quantiles
@@ -35,6 +39,7 @@ cases:
     expected:
       rows:
         - [[1,6,10]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#5 L202 APPROX_QUANTILES"
     sql: |-
       SELECT APPROX_QUANTILES(x, 2 RESPECT NULLS) AS approx_quantiles
@@ -42,6 +47,7 @@ cases:
     expected:
       rows:
         - [[null,4,10]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#6 L213 APPROX_QUANTILES"
     sql: |-
       SELECT APPROX_QUANTILES(DISTINCT x, 2 RESPECT NULLS) AS approx_quantiles
@@ -49,6 +55,7 @@ cases:
     expected:
       rows:
         - [[null,6,10]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#7 L266 APPROX_TOP_COUNT"
     sql: |-
       SELECT APPROX_TOP_COUNT(x, 2) as approx_top_count
@@ -56,6 +63,7 @@ cases:
     expected:
       rows:
         - [[["pear",3],["apple",2]]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#8 L281 APPROX_TOP_COUNT"
     sql: |-
       SELECT APPROX_TOP_COUNT(x, 2) as approx_top_count
@@ -63,6 +71,7 @@ cases:
     expected:
       rows:
         - [[["pear",3],[null,2]]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#9 L346 APPROX_TOP_SUM"
     sql: |-
       SELECT APPROX_TOP_SUM(x, weight, 2) AS approx_top_sum FROM
@@ -76,6 +85,7 @@ cases:
     expected:
       rows:
         - [[["pear",6],["banana",5]]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#10 L368 APPROX_TOP_SUM"
     sql: |-
       SELECT APPROX_TOP_SUM(x, weight, 2) AS approx_top_sum FROM
@@ -83,6 +93,7 @@ cases:
     expected:
       rows:
         - [[["pear",0],["apple",null]]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#11 L379 APPROX_TOP_SUM"
     sql: |-
       SELECT APPROX_TOP_SUM(x, weight, 2) AS approx_top_sum FROM
@@ -90,6 +101,7 @@ cases:
     expected:
       rows:
         - [[[null,2],["apple",0]]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "approximate_aggregate_functions#12 L390 APPROX_TOP_SUM"
     sql: |-
       SELECT APPROX_TOP_SUM(x, weight, 2) AS approx_top_sum FROM

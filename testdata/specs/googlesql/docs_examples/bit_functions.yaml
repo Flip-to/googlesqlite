@@ -33,6 +33,7 @@ cases:
     expected:
       rows:
         - [-1,"18446744073709551615"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "bit_functions#5 L250 BIT_COUNT"
     sql: |-
       SELECT a, BIT_COUNT(a) AS a_bits, FORMAT("%T", b) as b, BIT_COUNT(b) AS b_bits

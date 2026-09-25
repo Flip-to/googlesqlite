@@ -7,12 +7,14 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#1 L150 SELECT *"
     sql: |-
       SELECT * FROM (SELECT "apple" AS fruit, "carrot" AS vegetable)
     expected:
       rows:
         - ["apple","carrot"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#2 L185 SELECT expression.*"
     sql: |-
       WITH groceries AS
@@ -24,6 +26,7 @@ cases:
     expected:
       rows:
         - ["milk","eggs","bread"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#3 L202 SELECT expression.*"
     sql: |-
       WITH locations AS
@@ -37,6 +40,7 @@ cases:
         - ["Seattle","Washington"]
         - ["Phoenix","Arizona"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#4 L218 SELECT expression.*"
     sql: |-
       WITH locations AS
@@ -47,6 +51,7 @@ cases:
     expected:
       rows:
         - ["Seattle","Washington"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#5 L237 SELECT * EXCEPT"
     sql: |-
       WITH orders AS
@@ -58,6 +63,7 @@ cases:
     expected:
       rows:
         - ["sprocket",200]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#6 L267 SELECT * REPLACE"
     sql: |-
       WITH orders AS
@@ -69,6 +75,7 @@ cases:
     expected:
       rows:
         - [5,"widget",200]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#7 L279 SELECT * REPLACE"
     sql: |-
       WITH orders AS
@@ -80,6 +87,7 @@ cases:
     expected:
       rows:
         - [5,"sprocket",100]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#8 L307 SELECT DISTINCT"
     sql: |-
       WITH PlayerStats AS (
@@ -144,6 +152,7 @@ cases:
         - ["105","\"Active account\"","CUSTOMER_TYPE_ADVERTISER"]
         - ["180","\"Inactive account\"","CUSTOMER_TYPE_ADVERTISER"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#14 L778 UNNEST` operator"
     sql: |-
       SELECT * FROM UNNEST ([10,20,30]) as numbers WITH OFFSET
@@ -153,6 +162,7 @@ cases:
         - [20,1]
         - [30,2]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#15 L810 UNNEST` and structs"
     sql: |-
       SELECT *
@@ -169,6 +179,7 @@ cases:
         - [1,"foo",[10,11]]
         - [3,"bar",[20,21]]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#16 L838 UNNEST` and structs"
     sql: |-
       SELECT *, struct_value
@@ -184,6 +195,7 @@ cases:
         - [3,"bar",[3,"bar"]]
         - [1,"foo",[1,"foo"]]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#19 L997 Array subscript operator limitations in implicit unnesting"
     sql: |-
       -- Invalid
@@ -322,6 +334,7 @@ cases:
         - ["Apple",78,0]
         - ["Kale",121,108]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#27 L1590 UNPIVOT` operator"
     sql: |-
       WITH Produce AS (
@@ -582,6 +595,7 @@ cases:
         - ["Adams",50,"Buchanan",50,13]
         - ["Eisenhower",77,"Buchanan",77,0]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#56 L3411 Group rows by values"
     sql: |-
       WITH PlayerStats AS (
@@ -599,6 +613,7 @@ cases:
         - [13,"Buchanan"]
         - [1,"Coolidge"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#57 L3435 Group rows by values"
     sql: |-
       WITH PlayerStats AS (
@@ -616,6 +631,7 @@ cases:
         - [13,"Buchanan"]
         - [1,"Coolidge"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#58 L3458 Group rows by values"
     sql: |-
       WITH PlayerStats AS (
@@ -632,6 +648,7 @@ cases:
         - [0,["Adams","Buchanan"]]
         - [1,["Kiran","Noam"]]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#60 L3537 Group rows by column ordinals"
     sql: |-
       WITH PlayerStats AS (
@@ -649,6 +666,7 @@ cases:
         - [13,"Buchanan","Jie"]
         - [1,"Coolidge","Kiran"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#61 L3557 Group rows by column ordinals"
     sql: |-
       WITH PlayerStats AS (
@@ -688,6 +706,7 @@ cases:
         - [null,"jeans",6]
         - [null,"polo",25]
         - [null,"t-shirt",11]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#67 L3871 Group rows by `GROUPING SETS"
     sql: |-
       -- GROUP BY with GROUPING SETS and a groupable item set
@@ -711,6 +730,7 @@ cases:
         - ["shirt",null,36]
         - ["shirt","polo",25]
         - ["shirt","t-shirt",11]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#68 L3921 Group rows by `GROUPING SETS"
     sql: |-
       -- GROUP BY with GROUPING SETS and ROLLUP
@@ -737,6 +757,7 @@ cases:
         - ["shirt",null,36]
         - ["shirt","polo",25]
         - ["shirt","t-shirt",11]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#69 L3974 Group rows by `GROUPING SETS"
     sql: |-
       -- GROUP BY with GROUPING SETS and CUBE
@@ -767,6 +788,7 @@ cases:
         - ["shirt","polo",25]
         - ["shirt","t-shirt",11]
   # Follows BigQuery, not the docs: query-syntax.md, Group rows by ROLLUP, lists (shirt, t-shirt) before (shirt, polo) under ORDER BY product_type, product_name. BigQuery sorts polo before t-shirt.
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#70 L4099 Group rows by `ROLLUP"
     sql: |-
       -- GROUP BY with ROLLUP
@@ -789,6 +811,7 @@ cases:
         - ["shirt",null,36]
         - ["shirt","polo",25]
         - ["shirt","t-shirt",11]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#71 L4150 Group rows by `ROLLUP"
     sql: |-
       WITH
@@ -810,6 +833,7 @@ cases:
         - ["shirt",null,36]
         - ["shirt","polo",25]
         - ["shirt","t-shirt",11]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#72 L4254 Group rows by `CUBE"
     sql: |-
       -- GROUP BY with CUBE
@@ -835,6 +859,7 @@ cases:
         - ["shirt",null,36]
         - ["shirt","polo",25]
         - ["shirt","t-shirt",11]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#73 L4287 Group rows by `CUBE"
     sql: |-
       WITH
@@ -859,6 +884,7 @@ cases:
         - ["shirt","polo",25]
         - ["shirt","t-shirt",11]
         - ["shirt","t-shirt",11]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#74 L4463 ORDER BY` clause"
     sql: |-
       SELECT x, y
@@ -871,6 +897,7 @@ cases:
         - [null,false]
         - [1,true]
         - [9,true]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#75 L4481 ORDER BY` clause"
     sql: |-
       SELECT x, y
@@ -883,6 +910,7 @@ cases:
         - [1,true]
         - [9,true]
         - [null,false]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#76 L4499 ORDER BY` clause"
     sql: |-
       SELECT x, y
@@ -895,6 +923,7 @@ cases:
         - [9,true]
         - [1,true]
         - [null,false]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#77 L4517 ORDER BY` clause"
     sql: |-
       SELECT x, y
@@ -949,6 +978,7 @@ cases:
         - ["lettuce"]
         - ["cabbage"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#80 L4831 Set operators"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit
@@ -959,6 +989,7 @@ cases:
         - [1,10]
         - [2,20]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#81 L5082 UNION"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3]) AS number
@@ -971,6 +1002,7 @@ cases:
         - [3]
         - [1]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#82 L5097 UNION"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3]) AS number
@@ -982,6 +1014,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#83 L5113 UNION"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3]) AS number
@@ -995,6 +1028,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#84 L5134 UNION"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit
@@ -1005,6 +1039,7 @@ cases:
         - [1,10]
         - [20,2]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#86 L5170 UNION"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit
@@ -1015,6 +1050,7 @@ cases:
         - [1,10]
         - [2,20]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#87 L5191 UNION"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit, 100 AS three_digit
@@ -1025,6 +1061,7 @@ cases:
         - [1,10]
         - [2,20]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#88 L5208 UNION"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit, 100 AS three_digit
@@ -1035,6 +1072,7 @@ cases:
         - [1,10,100,null]
         - [2,20,null,1000]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#89 L5225 UNION"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit, 100 AS three_digit
@@ -1045,6 +1083,7 @@ cases:
         - [1,10,100]
         - [2,20,null]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#90 L5241 UNION"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit, 100 AS three_digit
@@ -1066,6 +1105,7 @@ cases:
         - [3]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#92 L5276 INTERSECT"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -1076,6 +1116,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#93 L5291 INTERSECT"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -1086,6 +1127,7 @@ cases:
     expected:
       rows:
         - [3]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#95 L5333 INTERSECT"
     sql: |-
       WITH
@@ -1102,6 +1144,7 @@ cases:
     expected:
       rows:
         - [1,10]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#96 L5357 INTERSECT"
     sql: |-
       WITH
@@ -1129,6 +1172,7 @@ cases:
         - [3]
         - [4]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#98 L5402 EXCEPT"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -1139,6 +1183,7 @@ cases:
         - [3]
         - [4]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#99 L5417 EXCEPT"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -1149,6 +1194,7 @@ cases:
     expected:
       rows:
         - [3]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#100 L5438 EXCEPT"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -1164,6 +1210,7 @@ cases:
         - [3]
         - [4]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#101 L5462 EXCEPT"
     sql: |-
       WITH
@@ -1183,6 +1230,7 @@ cases:
         - [2,20]
         - [3,30]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#102 L5489 EXCEPT"
     sql: |-
       WITH
@@ -1201,6 +1249,7 @@ cases:
         - [2,20]
         - [3,30]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#103 L5514 EXCEPT"
     sql: |-
       WITH
@@ -1219,6 +1268,7 @@ cases:
         - [2,20]
         - [3,30]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#104 L5580 LIMIT` and `OFFSET` clause"
     sql: |-
       SELECT *
@@ -1228,6 +1278,7 @@ cases:
       rows:
         - ["a"]
         - ["b"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#105 L5593 LIMIT` and `OFFSET` clause"
     sql: |-
       SELECT *
@@ -1238,6 +1289,7 @@ cases:
         - ["b"]
         - ["c"]
         - ["d"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#106 L5748 Recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1249,6 +1301,7 @@ cases:
         - [1]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#107 L5786 Examples of allowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1261,6 +1314,7 @@ cases:
         - [1]
         - [3]
         - [5]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#108 L5806 Examples of allowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1275,6 +1329,7 @@ cases:
         - [2]
         - [3]
         - [4]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#109 L5827 Examples of allowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1285,6 +1340,7 @@ cases:
       rows:
         - [1]
         - [4]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#110 L5843 Examples of allowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1295,6 +1351,7 @@ cases:
       rows:
         - [1]
         - [2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#111 L5859 Examples of allowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1318,6 +1375,7 @@ cases:
         - [2]
         - [3]
         - [4]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#113 L5901 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1326,6 +1384,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#114 L5912 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1334,6 +1393,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#115 L5923 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1342,6 +1402,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#116 L5934 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1350,6 +1411,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#117 L5945 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1360,6 +1422,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#118 L5958 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1369,6 +1432,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#119 L5970 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1379,6 +1443,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#120 L5983 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1389,6 +1454,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#122 L6007 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1397,6 +1463,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#123 L6018 Examples of disallowed recursive CTEs"
     sql: |-
       WITH RECURSIVE
@@ -1405,6 +1472,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#124 L6113 Visibility of CTEs in a `WITH` clause with the `RECURSIVE` keyword"
     sql: |-
       WITH RECURSIVE
@@ -1416,6 +1484,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#125 L6129 Visibility of CTEs in a `WITH` clause with the `RECURSIVE` keyword"
     sql: |-
       WITH RECURSIVE
@@ -1425,6 +1494,7 @@ cases:
     expected:
       rows:
         - [1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#126 L6144 Visibility of CTEs in a `WITH` clause with the `RECURSIVE` keyword"
     sql: |-
       WITH RECURSIVE
@@ -1434,6 +1504,7 @@ cases:
     expected:
       rows:
         - [1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#127 L6159 Visibility of CTEs in a `WITH` clause with the `RECURSIVE` keyword"
     sql: |-
       WITH RECURSIVE
@@ -1443,6 +1514,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#128 L6186 Visibility of CTEs in a `WITH` clause without the `RECURSIVE` keyword"
     sql: |-
       WITH
@@ -1451,6 +1523,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#129 L6197 Visibility of CTEs in a `WITH` clause without the `RECURSIVE` keyword"
     sql: |-
       WITH
@@ -1460,6 +1533,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#130 L6208 Visibility of CTEs in a `WITH` clause without the `RECURSIVE` keyword"
     sql: |-
       WITH
@@ -1469,6 +1543,7 @@ cases:
     expected:
       rows:
         - [1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#131 L6224 Visibility of CTEs in a `WITH` clause without the `RECURSIVE` keyword"
     sql: |-
       WITH
@@ -1478,6 +1553,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#132 L6291 AGGREGATION_THRESHOLD` clause"
     sql: |-
       WITH ExamTable AS (
@@ -1504,12 +1580,14 @@ cases:
         - ["P91",3,510]
         - ["U25",4,516]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#140 L7001 Duplicate aliases"
     sql: |-
       SELECT 1 AS a, 2 AS a
     expected:
       rows:
         - [1,2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#141 L7047 Ambiguous aliases"
     sql: |-
       SELECT FirstName, LastName, PrimaryContact AS P
@@ -1518,6 +1596,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#142 L7101 Range variables"
     sql: |-
       WITH Grid AS (SELECT 1 x, 2 y)
@@ -1525,6 +1604,7 @@ cases:
     expected:
       rows:
         - [1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#143 L7115 Range variables"
     sql: |-
       WITH Grid AS (SELECT 1 x, 2 y)
@@ -1532,6 +1612,7 @@ cases:
     expected:
       rows:
         - [1,2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "query-syntax#144 L7131 Range variables"
     sql: |-
       WITH Grid AS (SELECT 1 x, 2 y)

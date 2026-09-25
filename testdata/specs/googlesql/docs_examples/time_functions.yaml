@@ -7,12 +7,14 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#2 L171 EXTRACT"
     sql: |-
       SELECT EXTRACT(HOUR FROM TIME "15:30:00") as hour
     expected:
       rows:
         - [15]
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#4 L237 PARSE_TIME"
     sql: |-
       -- This produces an error because the seconds element is in different locations.
@@ -20,6 +22,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#5 L237 PARSE_TIME"
     sql: |-
       -- This produces an error because one of the seconds elements is missing.
@@ -27,12 +30,14 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#6 L271 PARSE_TIME"
     sql: |-
       SELECT PARSE_TIME("%H", "15") as parsed_time
     expected:
       rows:
         - ["15:00:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#8 L319 TIME"
     sql: |-
       SELECT
@@ -41,12 +46,14 @@ cases:
     expected:
       rows:
         - ["15:30:00","23:30:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#9 L331 TIME"
     sql: |-
       SELECT TIME(DATETIME "2008-12-25 15:30:00.000000") AS time_dt
     expected:
       rows:
         - ["15:30:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#10 L372 TIME_ADD"
     sql: |-
       SELECT
@@ -55,6 +62,7 @@ cases:
     expected:
       rows:
         - ["15:30:00","15:40:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#11 L428 TIME_DIFF"
     sql: |-
       SELECT
@@ -64,6 +72,7 @@ cases:
     expected:
       rows:
         - ["15:30:00","14:35:00",55]
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#12 L470 TIME_SUB"
     sql: |-
       SELECT
@@ -72,6 +81,7 @@ cases:
     expected:
       rows:
         - ["15:30:00","15:20:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "time_functions#13 L524 TIME_TRUNC"
     sql: |-
       SELECT

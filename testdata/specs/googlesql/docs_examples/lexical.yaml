@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#1 L254 Tokens in literals"
     sql: |-
       -- Error: string and bytes tokens can't be used together in the same literal.
@@ -14,6 +15,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#2 L271 Tokens in literals"
     sql: |-
       -- Compatible format types can be used together in a string literal.
@@ -21,6 +23,7 @@ cases:
     expected:
       rows:
         - ["abcdef"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#3 L280 Tokens in literals"
     sql: |-
       -- \n is escaped in the raw string token but not in the quoted string token.
@@ -35,6 +38,7 @@ cases:
     expected:
       rows:
         - ["QUJB"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#5 L310 Tokens in literals"
     sql: |-
       -- Control characters are escaped in the raw bytes tokens but not in the
@@ -43,6 +47,7 @@ cases:
     expected:
       rows:
         - ["QVx4NDJceDQx"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#6 L322 Tokens in literals"
     sql: |-
       -- The following JSON literal is equivalent to: JSON '{"name":"my_file.md","regex":"\\d+"}'
@@ -50,6 +55,7 @@ cases:
     expected:
       rows:
         - ["{\"name\":\"my_file.md\",\"regex\":\"\\\\d+\"}"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#7 L331 Tokens in literals"
     sql: |-
       -- The following NUMERIC literal is equivalent to: NUMERIC '-1.2'
@@ -57,6 +63,7 @@ cases:
     expected:
       rows:
         - ["-1.2"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#8 L349 Tokens in literals"
     sql: |-
       -- The following DATE literal is equivalent to: DATE '2014-01-31'
@@ -64,6 +71,7 @@ cases:
     expected:
       rows:
         - ["2014-01-31"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#9 L358 Tokens in literals"
     sql: |-
       -- Error: Illegal escape sequence found in '\def'.
@@ -71,6 +79,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#10 L363 Tokens in literals"
     sql: |-
       -- Error: backticks are reserved for quoted identifiers and not a valid
@@ -79,6 +88,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#11 L1123 Interval literal with a datetime part range"
     sql: |-
       -- Produces an error because the negative sign for minutes must come before the hour.
@@ -86,6 +96,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "lexical#12 L1123 Interval literal with a datetime part range"
     sql: |-
       -- Produces an error because the negative sign for months must come before the year.

@@ -25,6 +25,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "window-function-calls#3 L492 Employees table"
     sql: |-
       WITH Employees AS

@@ -152,6 +152,7 @@ cases:
     expected:
       rows:
         - ["{\"a\": 1, \"b\": 2, \"x\": 4, \"y\": 5}"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "functions-and-operators#978 L33698 MAP_INSERT"
     sql: |-
       -- Error: Key 'b' already exists in map
@@ -227,6 +228,7 @@ cases:
     expected:
       rows:
         - ["{\"a\": 101, \"b\": 2, \"c\": 103}"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "functions-and-operators#984 L33910 MAP_REPLACE"
     sql: |-
       -- Error: x doesn't exist in input_map.

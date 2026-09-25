@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#1 L644 Field access operator"
     sql: |-
       SELECT
@@ -16,6 +17,7 @@ cases:
     expected:
       rows:
         - ["Canada"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#2 L718 Array subscript operator"
     sql: |-
       SELECT
@@ -27,6 +29,7 @@ cases:
     expected:
       rows:
         - [["coffee","tea","milk"],"coffee","coffee","coffee",null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#3 L737 Array subscript operator"
     sql: |-
       -- Error. Array index 6 is out of bounds.
@@ -34,6 +37,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#4 L742 Array subscript operator"
     sql: |-
       -- Error. Array index 6 is out of bounds.
@@ -52,6 +56,7 @@ cases:
     expected:
       rows:
         - ["2"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#6 L809 Map subscript operator"
     sql: |-
       -- ERROR: Key not found in map: "D"
@@ -109,6 +114,7 @@ cases:
     expected:
       rows:
         - ["2",null,null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#11 L937 Struct subscript operator"
     sql: |-
       SELECT
@@ -118,6 +124,7 @@ cases:
     expected:
       rows:
         - [23,23,23]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#12 L953 Struct subscript operator"
     sql: |-
       -- Error: Field ordinal 6 is out of bounds in STRUCT
@@ -125,6 +132,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#13 L958 Struct subscript operator"
     sql: |-
       -- Error: Field ordinal 6 is out of bounds in STRUCT
@@ -132,6 +140,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#14 L1010 JSON subscript operator"
     sql: |-
       SELECT json_value.class.students[0]['name'] AS first_student
@@ -148,6 +157,7 @@ cases:
         - [null]
         - ["\"John\""]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#16 L1095 Protocol buffer map subscript operator"
     sql: |-
       -- ERROR: Key not found in map: 2
@@ -168,6 +178,7 @@ cases:
     expected:
       rows:
         - [null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#20 L1300 Array elements field access operator"
     sql: |-
       WITH
@@ -334,12 +345,14 @@ cases:
     expected:
       rows:
         - ["3.0","1","123.0","{a: 1, b: 2}"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#32 L1764 Date arithmetics operators"
     sql: |-
       SELECT DATE "2020-09-22" + 1 AS day_later, DATE "2020-09-22" - 7 AS week_ago
     expected:
       rows:
         - ["2020-09-23","2020-09-15"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#33 L1793 Datetime subtraction"
     sql: |-
       SELECT
@@ -348,6 +361,7 @@ cases:
     expected:
       rows:
         - ["0-0 396 0:0:0","0-0 0 36:34:56.789"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#34 L1827 Interval arithmetic operators"
     sql: |-
       SELECT
@@ -356,6 +370,7 @@ cases:
     expected:
       rows:
         - ["2021-04-21T01:00:00","2021-05-02 00:00:52.345000+00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#35 L1853 Interval arithmetic operators"
     sql: |-
       SELECT
@@ -366,6 +381,7 @@ cases:
     expected:
       rows:
         - ["0-0 0 10:20:30","0-0 0 0:2:20","3-4 0 0:0:0","0-0 2 12:0:0"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#52 L2730 EXISTS` operator"
     sql: |-
       WITH Words AS (
@@ -377,6 +393,7 @@ cases:
     expected:
       rows:
         - [false]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#53 L2879 IN` operator"
     sql: |-
       WITH Words AS (
@@ -395,6 +412,7 @@ cases:
         - ["Peace"]
         - ["Intend"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#54 L2900 IN` operator"
     sql: |-
       WITH
@@ -473,6 +491,7 @@ cases:
         - ["Secure"]
         - ["Clarity"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#60 L3295 LIKE` operator"
     sql: |-
       -- Produces an error
@@ -480,6 +499,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#61 L3300 LIKE` operator"
     sql: |-
       -- Produces an error
@@ -580,6 +600,7 @@ cases:
         - ["Secure with intention."]
         - ["Clarity and security."]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#71 L3736 Quantified `LIKE` operator"
     sql: |-
       -- ERROR: BYTES and STRING values can't be used together.
@@ -587,6 +608,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#72 L3900 WITH` expression"
     sql: |-
       SELECT WITH(a AS '123',               -- a is '123'
@@ -596,6 +618,7 @@ cases:
     expected:
       rows:
         - ["123456789"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#74 L3929 WITH` expression"
     sql: |-
       SELECT WITH(s AS SUM(input), c AS COUNT(input), s/c)
@@ -603,6 +626,7 @@ cases:
     expected:
       rows:
         - [2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#75 L3943 WITH` expression"
     sql: |-
       SELECT WITH(diff AS a - b, AVG(diff))
@@ -614,6 +638,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "operators#76 L3958 WITH` expression"
     sql: |-
       WITH my_table AS (

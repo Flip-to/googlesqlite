@@ -37,6 +37,7 @@ cases:
         - ["Dana","2"]
         - ["Lee","3"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "graph-sql-queries#3 L112 Examples"
     sql: |-
       SELECT name, id
@@ -48,6 +49,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "graph-sql-queries#4 L126 Examples"
     sql: |-
       -- Error

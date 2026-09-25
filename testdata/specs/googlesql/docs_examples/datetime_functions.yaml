@@ -28,6 +28,7 @@ cases:
     expected:
       rows:
         - ["2026-04-15 00:00:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#5 L269 DATETIME"
     sql: |-
       SELECT
@@ -36,6 +37,7 @@ cases:
     expected:
       rows:
         - ["2008-12-25T05:30:00","2008-12-24T21:30:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#6 L318 DATETIME_ADD"
     sql: |-
       SELECT
@@ -44,6 +46,7 @@ cases:
     expected:
       rows:
         - ["2008-12-25T15:30:00","2008-12-25T15:40:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#7 L388 DATETIME_DIFF"
     sql: |-
       SELECT
@@ -54,6 +57,7 @@ cases:
     expected:
       rows:
         - ["2010-07-07T10:20:00","2008-12-25T15:30:00",559]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#8 L402 DATETIME_DIFF"
     sql: |-
       SELECT
@@ -64,6 +68,7 @@ cases:
     expected:
       rows:
         - [1,1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#9 L430 DATETIME_DIFF"
     sql: |-
       SELECT
@@ -74,6 +79,7 @@ cases:
     expected:
       rows:
         - [3,2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#10 L451 DATETIME_DIFF"
     sql: |-
       SELECT
@@ -83,6 +89,7 @@ cases:
     expected:
       rows:
         - [0,1,1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#11 L503 DATETIME_SUB"
     sql: |-
       SELECT
@@ -91,6 +98,7 @@ cases:
     expected:
       rows:
         - ["2008-12-25T15:30:00","2008-12-25T15:20:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#12 L637 DATETIME_TRUNC"
     sql: |-
       SELECT
@@ -99,6 +107,7 @@ cases:
     expected:
       rows:
         - ["2008-12-25T15:30:00","2008-12-25T00:00:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#13 L653 DATETIME_TRUNC"
     sql: |-
       SELECT
@@ -108,6 +117,7 @@ cases:
     expected:
       rows:
         - ["2017-11-05T00:00:00","2017-10-30T00:00:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#14 L674 DATETIME_TRUNC"
     sql: |-
       SELECT
@@ -116,12 +126,14 @@ cases:
     expected:
       rows:
         - ["2014-12-29T00:00:00",2015]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#15 L751 EXTRACT"
     sql: |-
       SELECT EXTRACT(HOUR FROM DATETIME(2008, 12, 25, 15, 30, 00)) as hour
     expected:
       rows:
         - [15]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#16 L764 EXTRACT"
     sql: |-
       WITH Datetimes AS (
@@ -148,6 +160,7 @@ cases:
         - ["2009-12-31T00:00:00",2009,53,2009,52]
         - ["2017-01-02T00:00:00",2017,1,2017,1]
         - ["2017-05-26T00:00:00",2017,21,2017,21]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#17 L798 EXTRACT"
     sql: |-
       WITH table AS (SELECT DATETIME(TIMESTAMP "2017-11-05 00:00:00+00", "UTC") AS datetime)
@@ -159,6 +172,7 @@ cases:
     expected:
       rows:
         - ["2017-11-05T00:00:00",45,44]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#18 L841 FORMAT_DATETIME"
     sql: |-
       SELECT
@@ -167,6 +181,7 @@ cases:
     expected:
       rows:
         - ["Thu Dec 25 15:30:00 2008"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#19 L853 FORMAT_DATETIME"
     sql: |-
       SELECT
@@ -175,6 +190,7 @@ cases:
     expected:
       rows:
         - ["Dec-25-2008"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#20 L865 FORMAT_DATETIME"
     sql: |-
       SELECT
@@ -183,30 +199,35 @@ cases:
     expected:
       rows:
         - ["Dec 2008"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#21 L915 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATETIME '2008-11-25', MONTH) AS last_day
     expected:
       rows:
         - ["2008-11-30"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#22 L925 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATETIME '2008-11-25') AS last_day
     expected:
       rows:
         - ["2008-11-30"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#23 L937 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATETIME '2008-11-25 15:30:00', YEAR) AS last_day
     expected:
       rows:
         - ["2008-12-31"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#24 L949 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATETIME '2008-11-10 15:30:00', WEEK(SUNDAY)) AS last_day
     expected:
       rows:
         - ["2008-11-15"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#25 L961 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATETIME '2008-11-10 15:30:00', WEEK(MONDAY)) AS last_day
@@ -243,6 +264,7 @@ cases:
     expected:
       rows:
         - ["2026-05-29"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#34 L1166 PARSE_DATETIME"
     sql: |-
       -- This produces an error because the year element is in different locations.
@@ -250,6 +272,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#35 L1166 PARSE_DATETIME"
     sql: |-
       -- This produces an error because one of the year elements is missing.
@@ -257,18 +280,21 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#36 L1225 PARSE_DATETIME"
     sql: |-
       SELECT PARSE_DATETIME('%Y-%m-%d %H:%M:%S', '1998-10-18 13:45:55') AS datetime
     expected:
       rows:
         - ["1998-10-18T13:45:55"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#37 L1235 PARSE_DATETIME"
     sql: |-
       SELECT PARSE_DATETIME('%m/%d/%Y %I:%M:%S %p', '8/30/2018 2:23:38 pm') AS datetime
     expected:
       rows:
         - ["2018-08-30T14:23:38"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "datetime_functions#38 L1249 PARSE_DATETIME"
     sql: |-
       SELECT PARSE_DATETIME('%A, %B %e, %Y','Wednesday, December 19, 2018')

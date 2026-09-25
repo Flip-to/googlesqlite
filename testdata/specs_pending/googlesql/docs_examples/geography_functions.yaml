@@ -18,8 +18,10 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Follows BigQuery, not the docs: ST_CONVEXHULL is planar: BigQuery's S2 hull of LINESTRING(1 1, 2 2) keeps the geodesic midpoint (LINESTRING(2 2, 1.49988573656168 1.5000570914792, 1 1)) and starts the polygon at another vertex. The docs print the hull of POINT(1 1) as POINT(0.999999999999943 1); BigQuery returns POINT(1 1), so the case waits for BigQuery's answer.
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#10 L1675 ST_CONVEXHULL"
-    pending: "driver_bug: ST_CONVEXHULL is planar: the docs' S2 hull keeps geodesic vertices (POINT(0.999999999999943 1), a curved LINESTRING) and orders polygon vertices differently."
+    pending: "driver_bug: ST_CONVEXHULL is planar: BigQuery's S2 hull of LINESTRING(1 1, 2 2) keeps the geodesic midpoint (LINESTRING(2 2, 1.49988573656168 1.5000570914792, 1 1)) and starts the polygon at another vertex. The docs print the hull of POINT(1 1) as POINT(0.999999999999943 1); BigQuery returns POINT(1 1), so the case waits for BigQuery's answer."
     sql: |-
       WITH Geographies AS
        (SELECT ST_GEOGFROMTEXT('POINT(1 1)') AS g UNION ALL
@@ -31,10 +33,11 @@ cases:
       FROM Geographies
     expected:
       rows:
-        - ["POINT(1 1)","POINT(0.999999999999943 1)"]
+        - ["POINT(1 1)","POINT(1 1)"]
         - ["LINESTRING(1 1, 2 2)","LINESTRING(2 2, 1.49988573656168 1.5000570914792, 1 1)"]
         - ["MULTIPOINT(1 9, 4 12, 2 11, 1 12, 0 15)","POLYGON((1 9, 4 12, 0 15, 1 9))"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#11 L1737 ST_COVERS"
     pending: "driver_bug: ST_COVERS does not treat a polygon vertex as covered (ST_COVERS(POLYGON((1 1, 20 1, 10 20, 1 1)), POINT(1 1)) is TRUE in the docs)."
     sql: |-
@@ -49,6 +52,7 @@ cases:
         - ["POINT(1 1)",true]
         - ["POINT(10 10)",true]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#18 L2154 ST_EXTERIORRING"
     pending: "driver_bug: ST_EXTERIORRING keeps the input vertex order; BigQuery normalizes rings to S2 orientation (LINESTRING(2 2, 1 4, 0 0, 2 2))."
     sql: |-
@@ -62,6 +66,7 @@ cases:
         - ["LINESTRING(2 2, 1 4, 0 0, 2 2)"]
         - ["LINESTRING(5 1, 5 10, 1 10, 1 1, 5 1)"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#19 L2204 ST_GEOGFROM"
     pending: "driver_bug: Polygons keep the input vertex order; BigQuery normalizes them: ST_GEOGFROM('POLYGON((0 0, 0 2, 2 2, 2 0, 0 0))') prints as POLYGON((2 0, 2 2, 0 2, 0 0, 2 0)) (verified on BigQuery)."
     sql: |-
@@ -69,6 +74,7 @@ cases:
     expected:
       rows:
         - ["POLYGON((2 0, 2 2, 0 2, 0 0, 2 0))"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#23 L2388 ST_GEOGFROMTEXT"
     pending: "driver_bug: ST_CONTAINS(ST_GEOGFROMTEXT(polygon), point) is FALSE for a point inside the polygon, and oriented =\u003e TRUE does not invert a clockwise ring."
     sql: |-
@@ -81,6 +87,7 @@ cases:
     expected:
       rows:
         - [true,true,false]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#24 L2409 ST_GEOGFROMTEXT"
     pending: "driver_bug: ST_GEOGFROMTEXT accepts a self-intersecting polygon (the docs return NULL under SAFE) and make_valid =\u003e TRUE does not repair it into a MULTIPOLYGON."
     sql: |-
@@ -93,6 +100,7 @@ cases:
     expected:
       rows:
         - [null,"MULTIPOLYGON(((0 -1, 1 0, 0 1, 0 -1)), ((1 0, 2 -1, 2 1, 1 0)))"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#39 L3387 ST_MAKELINE"
     pending: "driver_bug: ST_MAKELINE of an array of equal points (the docs return POINT(1 2)) and of overlapping segments (a MULTILINESTRING) raises \"needs at least 2 points\"."
     sql: |-
@@ -121,6 +129,7 @@ cases:
         - ["3","LINESTRING(1 2, 2 3, 3 4, 4 5)"]
         - ["4","MULTILINESTRING((1 0, 5 0, 10 0), (5 0, 5 4))"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#43 L3779 ST_SIMPLIFY"
     pending: "driver_bug: ST_SIMPLIFY does not collapse degenerate results to a LINESTRING or POINT as the docs show."
     sql: |-
@@ -140,6 +149,7 @@ cases:
         - ["POLYGON((0 0, 0.1 0, 0.1 0.1, 0 0))",10000,"LINESTRING(0 0, 0.1 0.1)"]
         - ["POLYGON((0 0, 0.1 0, 0.1 0.1, 0 0))",100000,"POINT(0 0)"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "geography_functions#45 L3901 ST_UNION"
     pending: "driver_bug: ST_UNION of two touching linestrings returns a MULTILINESTRING; BigQuery merges them into one LINESTRING."
     sql: |-

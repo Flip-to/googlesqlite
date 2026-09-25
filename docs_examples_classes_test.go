@@ -81,11 +81,42 @@ func loadDocsClasses() (map[string]docsClass, error) {
 	return f.Cases, nil
 }
 
+// docsVerifiedFile lists the examples whose query was run on BigQuery
+// (with the bq CLI) and whose BigQuery answer agrees with the case's
+// expectation; each emitted case gets a "Verified on BigQuery" note.
+const docsVerifiedFile = "testdata/docs_examples/bigquery_verified.yaml"
+
+func loadDocsVerified() (map[string]string, error) {
+	data, err := os.ReadFile(docsVerifiedFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	var f struct {
+		Runs []struct {
+			Date string   `yaml:"date"`
+			IDs  []string `yaml:"ids"`
+		} `yaml:"runs"`
+	}
+	if err := yaml.Unmarshal(data, &f); err != nil {
+		return nil, fmt.Errorf("%s: %w", docsVerifiedFile, err)
+	}
+	out := map[string]string{}
+	for _, r := range f.Runs {
+		for _, id := range r.IDs {
+			out[id] = r.Date
+		}
+	}
+	return out, nil
+}
+
 // bigQueryCase replaces the documented expectation with BigQuery's
 // answer and reports whether the driver already produces it.
 func bigQueryCase(c yamlCase, cl docsClass, r *docsResult) (yamlCase, bool, error) {
 	bc := c
-	bc.Note = "Follows BigQuery, not the docs: " + cl.Reason
+	bc.Note = strings.TrimSpace("Follows BigQuery, not the docs: " + cl.Reason + "\n" + c.Note)
 	if cl.BigQueryError != "" {
 		// "*" accepts any error: BigQuery's wording differs from the
 		// driver's, but both reject the query.

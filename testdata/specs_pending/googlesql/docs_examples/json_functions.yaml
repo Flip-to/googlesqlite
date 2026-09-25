@@ -10,6 +10,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "json_functions#469 L8482 Non-validation of `STRING` inputs"
     pending: "driver_bug: JSON_VALUE on a STRING input does not validate the whole document: JSON_VALUE('{\"hello\": \"world\"', \"$.hello\") is 'world' on BigQuery (verified); the driver parses the full text and returns NULL."
     sql: |-

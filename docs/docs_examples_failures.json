@@ -364,7 +364,7 @@
         "NULL"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Array element access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>) [at 4:41]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Array element access is not allowed in the FROM clause without UNNEST; Use UNNEST(<expression>)",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "Array subscript on a FROM-clause path without UNNEST; BigQuery rejects it with \"Array element access is not allowed in the FROM clause without UNNEST\".",
@@ -1591,7 +1591,7 @@
     ],
     "ordered": false,
     "class": "driver_bug",
-    "class_reason": "ST_CONVEXHULL is planar: the docs' S2 hull keeps geodesic vertices (POINT(0.999999999999943 1), a curved LINESTRING) and orders polygon vertices differently.",
+    "class_reason": "ST_CONVEXHULL is planar: BigQuery's S2 hull of LINESTRING(1 1, 2 2) keeps the geodesic midpoint (LINESTRING(2 2, 1.49988573656168 1.5000570914792, 1 1)) and starts the polygon at another vertex. The docs print the hull of POINT(1 1) as POINT(0.999999999999943 1); BigQuery returns POINT(1 1), so the case waits for BigQuery's answer.",
     "googlesql_only": [],
     "dbt_constructs": []
   },
@@ -2025,7 +2025,7 @@
         "16"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \";\" or end of input but got keyword GRAPH [at 6:1]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \";\" or end of input but got keyword GRAPH",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "GQL graph query over the FinGraph property graph.",
@@ -2060,7 +2060,7 @@
         "3"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got keyword MATCH [at 4:3]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got keyword MATCH",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "GRAPH_TABLE over the FinGraph property graph.",
@@ -2097,7 +2097,7 @@
         "3"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got keyword MATCH [at 4:3]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got keyword MATCH",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "GRAPH_TABLE over the FinGraph property graph.",
@@ -2130,7 +2130,7 @@
         "{\"identifier\":\"mUZpbk...}"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got keyword MATCH [at 4:3]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got keyword MATCH",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "GRAPH_TABLE over the FinGraph property graph.",
@@ -3015,7 +3015,7 @@
         "{\"ut\": null}"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got end of statement [at 1:74]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" but got end of statement",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "SAFE_TO_JSON and the placeholder UNSUPPORTED_TYPE are not BigQuery features.",
@@ -3042,7 +3042,7 @@
         "null"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected \"]\" [at 5:5]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected \"]\"",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "SAFE_TO_JSON and the placeholder UNSUPPORTED_TYPE are not BigQuery features.",
@@ -3742,8 +3742,8 @@
       ]
     ],
     "ordered": false,
-    "class": "la_timezone",
-    "class_reason": "The docs print the zone-less TIMESTAMP literals as America/Los_Angeles times; the ranking also ties on 2:59:01.",
+    "class": "not_in_bigquery",
+    "class_reason": "IS_LAST; BigQuery raises \"Analytic function IS_LAST is not supported\". (The docs also print the zone-less TIMESTAMP literals as America/Los_Angeles times.)",
     "googlesql_only": [
       "IS_LAST"
     ],
@@ -4181,7 +4181,7 @@
         "NULL"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" or keyword FORMAT but got keyword FROM [at 3:1]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \")\" or keyword FORMAT but got keyword FROM",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "Protocol buffer map subscript on a proto type.",
@@ -4210,7 +4210,7 @@
         "NULL"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \";\" or end of input but got \":\" [at 2:8]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \";\" or end of input but got \":\"",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "The `::` cast operator; BigQuery raises \"CAST operators are not supported\".",
@@ -4241,7 +4241,7 @@
         "{a: 1, b: 2}"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \";\" or end of input but got \":\" [at 2:8]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Expected \";\" or end of input but got \":\"",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "The `::` cast operator; BigQuery raises \"CAST operators are not supported\".",
@@ -4662,7 +4662,7 @@
         "{title: \"The Hummingbird II\" details: {chapters: 11 }}"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected keyword PROTO [at 7:4]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected keyword PROTO",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "Protocol buffers (NEW Book, REPLACE_FIELDS).",
@@ -4692,7 +4692,7 @@
         "details: {chapters: 10 }}"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected keyword PROTO [at 5:4]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected keyword PROTO",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "Protocol buffers (NEW Book, REPLACE_FIELDS).",
@@ -4719,7 +4719,7 @@
         "{title: \"The Hummingbird\" }"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected keyword PROTO [at 5:4]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected keyword PROTO",
     "ordered": false,
     "class": "not_in_bigquery",
     "class_reason": "Protocol buffers (NEW Book, REPLACE_FIELDS).",
@@ -5364,7 +5364,7 @@
         "1"
       ]
     ],
-    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected end of statement [at 6:4]",
+    "emulator_error": "failed to parse statements: failed to parse statement: Syntax error: Unexpected end of statement",
     "ordered": false,
     "class": "docs_artifact",
     "class_reason": "The block is a WITH RECURSIVE fragment without a query; the table traces iterations.",
@@ -6131,6 +6131,41 @@
     "dbt_constructs": [
       "DATE/TIMESTAMP function"
     ]
+  },
+  {
+    "id": "timestamp_functions#38",
+    "page": "timestamp_functions",
+    "section": "UNIX_MICROS",
+    "line": 1330,
+    "new": true,
+    "status": "fail",
+    "kind": "silent",
+    "reason": "the driver does not match the BigQuery answer",
+    "sql": "SELECT UNIX_MICROS(TIMESTAMP \"1970-01-01 00:00:00.0000018+00\") AS micros",
+    "documented_columns": [
+      "micros"
+    ],
+    "documented_rows": [
+      [
+        "1"
+      ]
+    ],
+    "emulator_columns": [
+      "micros"
+    ],
+    "emulator_types": [
+      "INT64"
+    ],
+    "emulator_rows": [
+      [
+        "1"
+      ]
+    ],
+    "ordered": false,
+    "class": "bigquery",
+    "class_reason": "timestamp_functions.md, UNIX_MICROS, documents UNIX_MICROS(TIMESTAMP \"1970-01-01 00:00:00.0000018+00\") as 1. BigQuery keeps microsecond precision and rejects the seven-digit fraction: \"Invalid TIMESTAMP literal\". The driver accepts nanosecond literals (FEATURE_TIMESTAMP_NANOS is on), so the case stays pending. (the driver does not match the BigQuery answer yet)",
+    "googlesql_only": [],
+    "dbt_constructs": []
   },
   {
     "id": "user-defined-functions#6",

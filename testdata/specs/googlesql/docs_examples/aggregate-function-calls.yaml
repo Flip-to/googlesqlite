@@ -47,6 +47,7 @@ cases:
     expected:
       rows:
         - [4.25]
+  # Verified on BigQuery 2026-09-25.
   - desc: "aggregate-function-calls#5 L271 Aggregate function examples"
     sql: |-
       SELECT
@@ -67,6 +68,7 @@ cases:
     expected:
       rows:
         - [4,3,"apple","pear"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "aggregate-function-calls#6 L299 Aggregate function examples"
     sql: |-
       SELECT

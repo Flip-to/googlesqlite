@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#1 L32 Accessing array elements"
     sql: |-
       WITH
@@ -59,6 +60,7 @@ cases:
         - [[2,4,8,16,32],2,32]
         - [[5,10],5,10]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#4 L101 Accessing array elements"
     sql: |-
       WITH
@@ -96,6 +98,7 @@ cases:
         - [[2,4,8,16,32],32]
         - [[],null]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#6 L148 Finding lengths"
     sql: |-
       WITH Sequences AS
@@ -311,6 +314,7 @@ cases:
         - [null]
         - [null]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#15 L395 Converting elements in an array to rows in a table"
     sql: |-
       SELECT *
@@ -328,6 +332,7 @@ cases:
         - ["garply",5]
         - ["waldo",6]
         - ["fred",7]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#16 L434 Converting elements in an array to rows in a table"
     sql: |-
       WITH
@@ -355,6 +360,7 @@ cases:
         - [3,5]
         - [3,10]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#17 L469 Converting elements in an array to rows in a table"
     sql: |-
       WITH
@@ -381,6 +387,7 @@ cases:
         - [3,5]
         - [3,10]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#18 L513 Querying `STRUCT` elements in an array"
     sql: |-
       WITH
@@ -414,6 +421,7 @@ cases:
         - ["800M",["Kipketer",[23.2,26.1,27.3,29.4]]]
         - ["800M",["Berian",[23.7,26.1,27,29.3]]]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#19 L557 Querying `STRUCT` elements in an array"
     sql: |-
       WITH
@@ -443,6 +451,7 @@ cases:
     expected:
       rows:
         - ["800M","Rudisha"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#22 L691 Querying `ARRAY`-type fields in a struct"
     sql: |-
       WITH
@@ -472,6 +481,7 @@ cases:
     expected:
       rows:
         - ["800M","Kipketer"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#23 L728 Querying `ARRAY`-type fields in a struct"
     sql: |-
       WITH
@@ -547,6 +557,7 @@ cases:
     expected:
       rows:
         - ["[1, 2, 3]"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#28 L923 Creating arrays from subqueries"
     sql: |-
       WITH Sequences AS
@@ -563,6 +574,7 @@ cases:
         - [[2,4,8,16,32],[4,8,16,32,64]]
         - [[5,10],[10,20]]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#29 L958 Filtering arrays"
     sql: |-
       WITH Sequences AS
@@ -580,6 +592,7 @@ cases:
         - [[4,8]]
         - [[]]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#30 L985 Filtering arrays"
     sql: |-
       WITH Sequences AS
@@ -590,6 +603,7 @@ cases:
     expected:
       rows:
         - [[0,1,2,3,5]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#31 L1004 Filtering arrays"
     sql: |-
       WITH Sequences AS
@@ -607,12 +621,14 @@ cases:
         - [[2,4,8,16,32]]
         - [[]]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#32 L1042 Scanning for specific values"
     sql: |-
       SELECT 2 IN UNNEST([0, 1, 1, 2, 3, 5]) AS contains_value
     expected:
       rows:
         - [true]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#33 L1060 Scanning for specific values"
     sql: |-
       WITH Sequences AS
@@ -627,6 +643,7 @@ cases:
       rows:
         - [1]
         - [2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#37 L1166 Arrays and aggregation"
     sql: |-
       WITH Fruits AS
@@ -638,6 +655,7 @@ cases:
     expected:
       rows:
         - [["apple","banana","pear"]]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#38 L1185 Arrays and aggregation"
     sql: |-
       WITH Sequences AS
@@ -654,6 +672,7 @@ cases:
         - [[2,4,8,16,32],62]
         - [[5,10],15]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#40 L1238 Converting arrays to strings"
     sql: |-
       WITH Words AS
@@ -663,6 +682,7 @@ cases:
     expected:
       rows:
         - ["Hello World"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "arrays#41 L1262 Converting arrays to strings"
     sql: |-
       SELECT

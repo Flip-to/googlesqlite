@@ -7,12 +7,14 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#1 L1088 CBRT"
     sql: |-
       SELECT CBRT(27) AS cube_root
     expected:
       rows:
         - [3.0000000000000004]
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#5 L1418 COSINE_DISTANCE"
     sql: |-
       -- ERROR
@@ -20,6 +22,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#6 L1423 COSINE_DISTANCE"
     sql: |-
       -- ERROR
@@ -27,6 +30,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#7 L1432 COSINE_DISTANCE"
     sql: |-
       -- ERROR
@@ -34,6 +38,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#8 L1440 COSINE_DISTANCE"
     sql: |-
       -- ERROR
@@ -42,30 +47,35 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#9 L1498 COT"
     sql: |-
       SELECT COT(1) AS a, SAFE.COT(0) AS b
     expected:
       rows:
         - [0.6420926159343306,null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#10 L1560 COTH"
     sql: |-
       SELECT COTH(1) AS a, SAFE.COTH(0) AS b
     expected:
       rows:
         - [1.313035285499,null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#11 L1622 CSC"
     sql: |-
       SELECT CSC(100) AS a, CSC(-1) AS b, SAFE.CSC(0) AS c
     expected:
       rows:
         - [-1.97485753142,-1.188395105778,null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#12 L1684 CSCH"
     sql: |-
       SELECT CSCH(0.5) AS a, CSCH(-2) AS b, SAFE.CSCH(0) AS c
     expected:
       rows:
         - [1.919034751334,-0.27572056477,null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#16 L1978 EUCLIDEAN_DISTANCE"
     sql: |-
       -- ERROR
@@ -73,6 +83,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#17 L1986 EUCLIDEAN_DISTANCE"
     sql: |-
       -- ERROR
@@ -99,6 +110,7 @@ cases:
     expected:
       rows:
         - ["3.141592654"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#21 L2849 RANGE_BUCKET"
     sql: |-
       WITH students AS
@@ -119,12 +131,14 @@ cases:
         - [2,2]
         - [3,3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#22 L3310 SEC"
     sql: |-
       SELECT SEC(100) AS a, SEC(-1) AS b
     expected:
       rows:
         - [1.159663822905,1.85081571768]
+  # Verified on BigQuery 2026-09-25.
   - desc: "mathematical_functions#23 L3368 SECH"
     sql: |-
       SELECT SECH(0.5) AS a, SECH(-2) AS b, SECH(100) AS c

@@ -12,7 +12,7 @@ follows BigQuery's answer.
   (2026-09-15), 70 pages. The vendored snapshot under
   `docs/third_party/googlesql-docs/` is older (`36dd14a`); pass `--docs`
   to choose.
-- Driver: `flipto/main` at `4dd0bf5` plus the fixes in this change.
+- Driver: `flipto/main` at `fd9766a` plus the fixes in this change.
 - Tie-breaker for BigQuery applicability: the function list on the
   BigQuery "all functions" reference page (413 names), and, for syntax,
   the error BigQuery returns (for example "TABLE statements are not
@@ -38,16 +38,17 @@ next statement's comment, which paired "Throws an error" with `SAFE.`
 calls that return NULL. That merges or drops ten mis-built examples,
 hence 3227 instead of 3237.
 
-### Where the 171 new non-passing examples went
+### Where the 172 new non-passing examples went
 
 | class | disposition | examples |
 |---|---|---:|
-| `not_in_bigquery` | skipped in `testdata/specs` | 116 |
+| `not_in_bigquery` | skipped in `testdata/specs` | 117 |
 | `docs_artifact` | skipped in `testdata/specs` | 14 |
-| `la_timezone` | skipped in `testdata/specs` | 7 |
+| `la_timezone` | skipped in `testdata/specs` | 6 |
 | `nondeterministic` | skipped in `testdata/specs` | 5 |
 | `bigquery` | runs in `testdata/specs` with BigQuery's answer | 15 |
 | `driver_bug` | pending in `testdata/specs_pending` | 10 |
+| `bigquery` (driver does not match BigQuery yet) | pending in `testdata/specs_pending` | 1 |
 | `analyzer` | pending in `testdata/specs_pending` | 4 |
 
 Five more examples pass the typed comparison but are pinned to
@@ -56,14 +57,14 @@ BigQuery's exact output (`bigquery`, 20 in total): the numeric
 
 ### Regression tests emitted
 
-- `testdata/specs/googlesql/docs_examples/*.yaml`: 1341 cases in 47
-  files (was 1013). 1199 run under `TestSpec`: 1179 pass exactly as
+- `testdata/specs/googlesql/docs_examples/*.yaml`: 1340 cases in 47
+  files (was 1013). 1198 run under `TestSpec`: 1178 pass exactly as
   documented and 20 follow BigQuery, each with a comment citing the doc
   and the BigQuery answer. The other 142 carry a `skip:` reason and keep
   the documented expectation. The spec is
   `docs/specs/googlesql/syntax/docs_examples.md`.
-- `testdata/specs_pending/googlesql/docs_examples/*.yaml`: 14 cases in
-  4 files (was 367 in 33), each with a `pending:` reason. `TestSpec`
+- `testdata/specs_pending/googlesql/docs_examples/*.yaml`: 15 cases in
+  5 files (was 367 in 33), each with a `pending:` reason. `TestSpec`
   walks only `testdata/specs`, so these files don't run by default.
 - Not emitted although they pass the typed comparison: 7 whose
   documented floats are rounded for display (the spec runner compares to
@@ -74,6 +75,36 @@ BigQuery's exact output (`bigquery`, 20 in total): the numeric
   SQL, setup, documented result, driver result or exact error text,
   silent or loud, class and reason, BigQuery applicability, and dbt
   constructs.
+
+## Verification on BigQuery
+
+On 2026-09-25 every runnable case without a `CREATE TABLE` fixture was
+run on BigQuery with the `bq` CLI (literals and `UNNEST` only; batched as
+scripts of `EXECUTE IMMEDIATE ... INTO` with an `EXCEPTION` handler per
+case, each query wrapped as `TO_JSON_STRING(ARRAY(SELECT AS STRUCT *
+FROM (...)))`, plus direct runs for `WITH RECURSIVE`), and BigQuery's
+answer was compared with the driver's, rows as a multiset. The pending,
+`la_timezone` and `analyzer` cases were run directly. 936 cases carry a
+"Verified on BigQuery 2026-09-25" comment and are listed in
+`testdata/docs_examples/bigquery_verified.yaml`.
+
+| group | cases | verified, BigQuery agrees | BigQuery lacks the feature | BigQuery disagrees |
+|---|---:|---:|---:|---:|
+| runnable spec cases (pass as documented or `bigquery`) without fixtures | 1125 | 916 | 207 (functions or types absent from BigQuery: `ARRAY_AVG`, `INT32`, `DOUBLE`, `LAX_INT32`, `IFERROR`, `INTERSECT ALL`, `COLLATE` in an ORDER BY, ...) | 1 (timestamp_functions#38, now pending) |
+| `la_timezone` | 7 | 6 (BigQuery returns the UTC form the driver returns) | 1 (numbering_functions#7: `IS_LAST` is not supported; reclassified `not_in_bigquery`) | 0 |
+| `analyzer` pending | 4 | 4 (the documented results) | 0 | 0 |
+| `driver_bug` pending | 10 | 9 (the documented results) | 0 | 1 (geography_functions#10: the docs print `POINT(0.999999999999943 1)`, BigQuery `POINT(1 1)`; the case waits for BigQuery's answer) |
+
+One case of the 1125 was not sent (quoting). 66 cases need `CREATE
+TABLE` fixtures or scripts and were not run. In 33 verified cases the
+values agree but the driver's `TO_JSON_STRING` differs from BigQuery's:
+INTERVAL is not rendered in ISO 8601 (`P1Y2M3D`), RANGE is not rendered
+as `{"start":...,"end":...}`, and a STRING holding JSON text (the result
+of `JSON_EXTRACT` / `JSON_QUERY` on a STRING) is embedded as raw JSON
+instead of a quoted string. WKT is also printed with a space after the
+type name (`POINT (1 1)`, BigQuery `POINT(1 1)`); the spec runner treats
+both as equal. These rendering gaps are outside the docs examples'
+expectations and are left for a follow-up.
 
 ## Driver fixes in this change
 
@@ -104,7 +135,8 @@ query whose columns are all anonymous is read as the single row
 | example | class | reason |
 |---|---|---|
 | aggregate-function-calls#7, aggregate_functions#29, #30, #31 | analyzer | BigQuery supports the aggregate `WHERE` modifier (`COUNT(DISTINCT x WHERE x > 0)` is 3 there), but go-googlesql v0.4.0 exposes no `where_expr` accessor on `ResolvedAggregateFunctionCall`; enabling `FEATURE_AGGREGATE_FILTERING` makes the analyzer accept the modifier while the filter is silently dropped, so it stays off. |
-| geography_functions#10 | driver_bug | `ST_CONVEXHULL` is planar; the docs' S2 hull keeps geodesic vertices. |
+| geography_functions#10 | driver_bug | `ST_CONVEXHULL` is planar; BigQuery's S2 hull keeps geodesic vertices. Expectation: BigQuery's answer. |
+| timestamp_functions#38 | bigquery | BigQuery rejects the seven-digit fraction in `TIMESTAMP "1970-01-01 00:00:00.0000018+00"`; the driver accepts nanosecond literals. |
 | geography_functions#11 | driver_bug | `ST_COVERS` does not count a polygon vertex as covered. |
 | geography_functions#18, #19 | driver_bug | Polygon and ring vertex order is not normalised the way BigQuery does (`POLYGON((0 0, 0 2, 2 2, 2 0, 0 0))` prints as `POLYGON((2 0, 2 2, 0 2, 0 0, 2 0))` on BigQuery). |
 | geography_functions#23 | driver_bug | `ST_CONTAINS` of a point inside a polygon is FALSE; `oriented => TRUE` does not invert a clockwise ring. |

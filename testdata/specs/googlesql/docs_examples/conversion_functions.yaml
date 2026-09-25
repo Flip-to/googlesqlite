@@ -7,12 +7,14 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#5 L1404 CAST AS Integer"
     sql: |-
       SELECT '0x123' as hex_value, CAST('0x123' as INT64) as hex_to_int
     expected:
       rows:
         - ["0x123",291]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#6 L1414 CAST AS Integer"
     sql: |-
       SELECT '-0x123' as hex_value, CAST('-0x123' as INT64) as hex_to_int
@@ -41,6 +43,7 @@ cases:
     expected:
       rows:
         - [null,"{\"a\":1,\"b\":null}","[1,null,3]"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#9 L1564 CAST AS INTERVAL"
     sql: |-
       SELECT input, CAST(input AS INTERVAL) AS output
@@ -80,6 +83,7 @@ cases:
       rows:
         - ["{\"x\": \"\\x41\", \"y\": \"\\x42\"}"]
   # Follows BigQuery, not the docs: conversion_functions.md, CAST AS RANGE, prints bounds as typed literals ([DATE '2020-01-01', DATE '2020-01-02')). BigQuery returns [2020-01-01, 2020-01-02).
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#13 L1834 CAST AS RANGE"
     sql: |-
       SELECT CAST(
@@ -89,6 +93,7 @@ cases:
       rows:
         - ["[2020-01-01, 2020-01-02)"]
   # Follows BigQuery, not the docs: conversion_functions.md, CAST AS RANGE, prints bounds as typed literals with the input's precision. BigQuery's CAST(... AS STRING) of the result is [2014-09-27 12:30:00.450, 2016-10-17 11:15:00.330).
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#14 L1846 CAST AS RANGE"
     sql: |-
       SELECT CAST(
@@ -109,6 +114,7 @@ cases:
       rows:
         - ["[TIMESTAMP '2014-09-27 12:30:00+08', TIMESTAMP '2016-10-17 11:15:00+08')"]
   # Follows BigQuery, not the docs: conversion_functions.md, CAST AS RANGE, prints [UNBOUNDED, DATE '2020-01-02'). BigQuery returns [UNBOUNDED, 2020-01-02).
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#16 L1871 CAST AS RANGE"
     sql: |-
       SELECT CAST(
@@ -118,6 +124,7 @@ cases:
       rows:
         - ["[UNBOUNDED, 2020-01-02)"]
   # Follows BigQuery, not the docs: conversion_functions.md, CAST AS RANGE, prints [DATE '2020-01-01', UNBOUNDED). BigQuery returns [2020-01-01, UNBOUNDED).
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#17 L1883 CAST AS RANGE"
     sql: |-
       SELECT CAST(
@@ -126,6 +133,7 @@ cases:
     expected:
       rows:
         - ["[2020-01-01, UNBOUNDED)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#20 L2086 CAST AS STRING"
     skip: "la_timezone: The docs render TIMESTAMP '2008-12-25 00:00:00+00' as 2008-12-24 16:00:00 -08:00 (America/Los_Angeles); in UTC it is 2008-12-25 00:00:00 +00:00."
     sql: |-
@@ -137,6 +145,7 @@ cases:
     expected:
       rows:
         - ["2008-12-24 16:00:00 -08:00"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#21 L2099 CAST AS STRING"
     sql: |-
       SELECT CAST(
@@ -148,12 +157,14 @@ cases:
     expected:
       rows:
         - ["2008-12-25 05:30:00 +05:30"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#22 L2113 CAST AS STRING"
     sql: |-
       SELECT CAST(INTERVAL 3 DAY AS STRING) AS interval_to_string
     expected:
       rows:
         - ["0-0 3 0:0:0"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#23 L2123 CAST AS STRING"
     sql: |-
       SELECT CAST(
@@ -162,6 +173,7 @@ cases:
     expected:
       rows:
         - ["1-2 3 4:5:6.789"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#25 L2377 PARSE_BIGNUMERIC"
     sql: |-
       -- This example shows how a string with a decimal point is parsed.
@@ -170,6 +182,7 @@ cases:
       rows:
         - ["123.45"]
   # Follows BigQuery, not the docs: conversion_functions.md, PARSE_BIGNUMERIC, documents PARSE_BIGNUMERIC("123.456E37") as 1234 followed by 35 zeros, but 123.456E37 is 1.23456e39, above the BIGNUMERIC maximum. BigQuery raises "Invalid input to PARSE_BIGNUMERIC".
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#26 L2386 PARSE_BIGNUMERIC"
     sql: |-
       -- This example shows how a string with an exponent is parsed.
@@ -177,6 +190,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#27 L2395 PARSE_BIGNUMERIC"
     sql: |-
       -- This example shows the rounding when digits after the decimal point exceeds 38.
@@ -184,30 +198,35 @@ cases:
     expected:
       rows:
         - ["1.12345678901234567890123456789012345679"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#28 L2498 PARSE_BIGNUMERIC"
     sql: |-
       SELECT PARSE_BIGNUMERIC("  -  12.34 ") as parsed
     expected:
       rows:
         - ["-12.34"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#29 L2511 PARSE_BIGNUMERIC"
     sql: |-
       SELECT PARSE_BIGNUMERIC("12.34e-1-") as parsed
     expected:
       rows:
         - ["-1.234"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#30 L2524 PARSE_BIGNUMERIC"
     sql: |-
       SELECT PARSE_BIGNUMERIC("  1,2,,3,.45 + ") as parsed
     expected:
       rows:
         - ["123.45"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#31 L2537 PARSE_BIGNUMERIC"
     sql: |-
       SELECT PARSE_BIGNUMERIC(".1234  ") as parsed
     expected:
       rows:
         - ["0.1234"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#32 L2609 PARSE_NUMERIC"
     sql: |-
       -- This example shows how a string with a decimal point is parsed.
@@ -215,6 +234,7 @@ cases:
     expected:
       rows:
         - ["123.45"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#33 L2618 PARSE_NUMERIC"
     sql: |-
       -- This example shows how a string with an exponent is parsed.
@@ -222,6 +242,7 @@ cases:
     expected:
       rows:
         - ["12340000000000000000000000000"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#34 L2627 PARSE_NUMERIC"
     sql: |-
       -- This example shows the rounding when digits after the decimal point exceeds 9.
@@ -229,30 +250,35 @@ cases:
     expected:
       rows:
         - ["1.012345679"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#35 L2731 PARSE_NUMERIC"
     sql: |-
       SELECT PARSE_NUMERIC("  -  12.34 ") as parsed
     expected:
       rows:
         - ["-12.34"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#36 L2744 PARSE_NUMERIC"
     sql: |-
       SELECT PARSE_NUMERIC("12.34e-1-") as parsed
     expected:
       rows:
         - ["-1.234"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#37 L2757 PARSE_NUMERIC"
     sql: |-
       SELECT PARSE_NUMERIC("  1,2,,3,.45 + ") as parsed
     expected:
       rows:
         - ["123.45"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#38 L2770 PARSE_NUMERIC"
     sql: |-
       SELECT PARSE_NUMERIC(".1234  ") as parsed
     expected:
       rows:
         - ["0.1234"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "conversion_functions#39 L2846 SAFE_CAST"
     sql: |-
       SELECT SAFE_CAST("apple" AS INT64) AS not_a_number

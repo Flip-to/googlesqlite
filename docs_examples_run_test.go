@@ -1153,6 +1153,10 @@ func writeDocsOutputs(outDir string, results []*docsResult) error {
 	if err != nil {
 		return err
 	}
+	verified, err := loadDocsVerified()
+	if err != nil {
+		return err
+	}
 	var stale []string
 	defer func() {
 		if len(stale) > 0 {
@@ -1173,6 +1177,9 @@ func writeDocsOutputs(outDir string, results []*docsResult) error {
 			Desc:  fmt.Sprintf("%s L%d %s", r.ID, r.Line, r.Section),
 			Setup: r.Setup,
 			SQL:   r.SQL,
+		}
+		if d, ok := verified[r.ID]; ok {
+			c.Note = "Verified on BigQuery " + d + "."
 		}
 		if r.ExpectError {
 			c.Expected.Error = &yamlError{Contains: ""}
@@ -1251,6 +1258,15 @@ func writeDocsOutputs(outDir string, results []*docsResult) error {
 		}
 		r.Class, r.ClassReason = cl.Class, cl.Reason
 		disp := docsClassDisposition[cl.Class]
+		if disp == dispPending && (cl.BigQueryRows != nil || cl.BigQueryError != "") {
+			// A pending case whose docs disagree with BigQuery waits for
+			// BigQuery's answer, not the documented one.
+			bc, _, err := bigQueryCase(c, cl, r)
+			if err != nil {
+				return err
+			}
+			c = bc
+		}
 		if disp == dispBigQuery {
 			bc, agrees, err := bigQueryCase(c, cl, r)
 			if err != nil {

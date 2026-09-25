@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "hll_functions#1 L102 HLL_COUNT.EXTRACT"
     sql: |-
       SELECT

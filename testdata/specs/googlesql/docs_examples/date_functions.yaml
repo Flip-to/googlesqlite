@@ -28,6 +28,7 @@ cases:
     expected:
       rows:
         - ["2026-04-15"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#8 L353 DATE"
     sql: |-
       SELECT
@@ -37,18 +38,21 @@ cases:
     expected:
       rows:
         - ["2016-12-25","2016-12-25","2016-12-24"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#9 L397 DATE_ADD"
     sql: |-
       SELECT DATE_ADD(DATE '2008-12-25', INTERVAL 5 DAY) AS five_days_later
     expected:
       rows:
         - ["2008-12-30"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#10 L454 DATE_DIFF"
     sql: |-
       SELECT DATE_DIFF(DATE '2010-07-07', DATE '2008-12-25', DAY) AS days_diff
     expected:
       rows:
         - [559]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#11 L464 DATE_DIFF"
     sql: |-
       SELECT
@@ -57,6 +61,7 @@ cases:
     expected:
       rows:
         - [1,1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#13 L508 DATE_DIFF"
     sql: |-
       SELECT
@@ -66,24 +71,28 @@ cases:
     expected:
       rows:
         - [0,1,1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#14 L541 DATE_FROM_UNIX_DATE"
     sql: |-
       SELECT DATE_FROM_UNIX_DATE(14238) AS date_from_epoch
     expected:
       rows:
         - ["2008-12-25"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#15 L580 DATE_SUB"
     sql: |-
       SELECT DATE_SUB(DATE '2008-12-25', INTERVAL 5 DAY) AS five_days_ago
     expected:
       rows:
         - ["2008-12-20"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#16 L720 DATE_TRUNC"
     sql: |-
       SELECT DATE_TRUNC(DATE '2008-12-25', MONTH) AS month
     expected:
       rows:
         - ["2008-12-01"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#17 L734 DATE_TRUNC"
     sql: |-
       SELECT date AS original, DATE_TRUNC(date, WEEK(MONDAY)) AS truncated
@@ -91,6 +100,7 @@ cases:
     expected:
       rows:
         - ["2017-11-05","2017-10-30"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#18 L753 DATE_TRUNC"
     sql: |-
       SELECT
@@ -99,12 +109,14 @@ cases:
     expected:
       rows:
         - ["2014-12-29",2015]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#19 L814 EXTRACT"
     sql: |-
       SELECT EXTRACT(DAY FROM DATE '2013-12-25') AS the_day
     expected:
       rows:
         - [25]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#20 L827 EXTRACT"
     sql: |-
       SELECT
@@ -135,6 +147,7 @@ cases:
         - ["2016-01-07",2016,1,2016,1]
         - ["2016-01-08",2016,1,2016,1]
         - ["2016-01-09",2016,1,2016,1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#21 L865 EXTRACT"
     sql: |-
       WITH table AS (SELECT DATE('2017-11-05') AS date)
@@ -145,48 +158,56 @@ cases:
     expected:
       rows:
         - ["2017-11-05",45,44]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#22 L905 FORMAT_DATE"
     sql: |-
       SELECT FORMAT_DATE('%x', DATE '2008-12-25') AS US_format
     expected:
       rows:
         - ["12/25/08"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#23 L915 FORMAT_DATE"
     sql: |-
       SELECT FORMAT_DATE('%b-%d-%Y', DATE '2008-12-25') AS formatted
     expected:
       rows:
         - ["Dec-25-2008"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#24 L925 FORMAT_DATE"
     sql: |-
       SELECT FORMAT_DATE('%b %Y', DATE '2008-12-25') AS formatted
     expected:
       rows:
         - ["Dec 2008"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#25 L973 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATE '2008-11-25', MONTH) AS last_day
     expected:
       rows:
         - ["2008-11-30"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#26 L983 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATE '2008-11-25') AS last_day
     expected:
       rows:
         - ["2008-11-30"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#27 L995 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATE '2008-11-25', YEAR) AS last_day
     expected:
       rows:
         - ["2008-12-31"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#28 L1007 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATE '2008-11-10', WEEK(SUNDAY)) AS last_day
     expected:
       rows:
         - ["2008-11-15"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#29 L1019 LAST_DAY"
     sql: |-
       SELECT LAST_DAY(DATE '2008-11-10', WEEK(MONDAY)) AS last_day
@@ -221,6 +242,7 @@ cases:
     expected:
       rows:
         - ["2026-05-29"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#37 L1207 PARSE_DATE"
     sql: |-
       -- This produces an error because the year element is in different locations.
@@ -228,6 +250,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#38 L1207 PARSE_DATE"
     sql: |-
       -- This produces an error because one of the year elements is missing.
@@ -235,18 +258,21 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#39 L1258 PARSE_DATE"
     sql: |-
       SELECT PARSE_DATE('%x', '12/25/08') AS parsed
     expected:
       rows:
         - ["2008-12-25"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#40 L1270 PARSE_DATE"
     sql: |-
       SELECT PARSE_DATE('%Y%m%d', '20081225') AS parsed
     expected:
       rows:
         - ["2008-12-25"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "date_functions#41 L1298 UNIX_DATE"
     sql: |-
       SELECT UNIX_DATE(DATE '2008-12-25') AS days_from_epoch

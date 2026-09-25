@@ -288,9 +288,16 @@ cases:
   geography_functions#10:
     class: driver_bug
     reason: >-
-      ST_CONVEXHULL is planar: the docs' S2 hull keeps geodesic vertices
-      (POINT(0.999999999999943 1), a curved LINESTRING) and orders polygon
-      vertices differently.
+      ST_CONVEXHULL is planar: BigQuery's S2 hull of LINESTRING(1 1, 2 2)
+      keeps the geodesic midpoint (LINESTRING(2 2, 1.49988573656168
+      1.5000570914792, 1 1)) and starts the polygon at another vertex.
+      The docs print the hull of POINT(1 1) as POINT(0.999999999999943 1);
+      BigQuery returns POINT(1 1), so the case waits for BigQuery's
+      answer.
+    bigquery_rows:
+      - ["POINT(1 1)", "POINT(1 1)"]
+      - ["LINESTRING(1 1, 2 2)", "LINESTRING(2 2, 1.49988573656168 1.5000570914792, 1 1)"]
+      - ["MULTIPOINT(1 9, 4 12, 2 11, 1 12, 0 15)", "POLYGON((1 9, 4 12, 0 15, 1 9))"]
   geography_functions#11:
     class: driver_bug
     reason: >-
@@ -491,10 +498,11 @@ cases:
       times (2:51:45 shown as 09:51:45+00); the ranking also ties on
       2:59:01.
   numbering_functions#7:
-    class: la_timezone
+    class: not_in_bigquery
     reason: >-
-      The docs print the zone-less TIMESTAMP literals as America/Los_Angeles
-      times; the ranking also ties on 2:59:01.
+      IS_LAST; BigQuery raises "Analytic function IS_LAST is not
+      supported". (The docs also print the zone-less TIMESTAMP literals as
+      America/Los_Angeles times.)
   numbering_functions#8:
     class: la_timezone
     reason: >-
@@ -801,3 +809,14 @@ cases:
     reason: >-
       The example reads an `items` table the page defines for another
       section (three rows); the docs show one row.
+
+  # ---- found by the 2026-09-25 BigQuery verification run ---------------
+  timestamp_functions#38:
+    class: bigquery
+    reason: >-
+      timestamp_functions.md, UNIX_MICROS, documents UNIX_MICROS(TIMESTAMP
+      "1970-01-01 00:00:00.0000018+00") as 1. BigQuery keeps microsecond
+      precision and rejects the seven-digit fraction: "Invalid TIMESTAMP
+      literal". The driver accepts nanosecond literals
+      (FEATURE_TIMESTAMP_NANOS is on), so the case stays pending.
+    bigquery_error: "*"

@@ -32,6 +32,7 @@ cases:
         - ["[1, NULL]"]
         - ["[1, 2]"]
         - ["[3]"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "data-types#2 L496 NULL`s and the array type"
     sql: |-
       SELECT CAST(NULL AS ARRAY<INT64>) IS NULL AS array_is_null
@@ -51,6 +52,7 @@ cases:
         - [[],"Empty array in query",false]
         - [[],"NULL array in query",true]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "data-types#8 L1147 Geography type"
     sql: |-
       SELECT
@@ -59,6 +61,7 @@ cases:
     expected:
       rows:
         - ["GEOMETRYCOLLECTION EMPTY","GEOMETRYCOLLECTION EMPTY"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "data-types#9 L1164 Geography type"
     sql: |-
       SELECT
@@ -67,6 +70,7 @@ cases:
     expected:
       rows:
         - ["MULTIPOINT(1 1, 2 2)","MULTIPOINT(1 1, 2 2)"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "data-types#13 L3071 Daylight saving time"
     sql: |-
       SELECT
@@ -75,6 +79,7 @@ cases:
     expected:
       rows:
         - ["Sun Mar 10 10:30:00 2024 UTC","Sun Mar 10 10:30:00 2024 UTC"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "data-types#14 L3085 Daylight saving time"
     sql: |-
       SELECT
@@ -83,6 +88,7 @@ cases:
       rows:
         - ["Sun Mar 10 03:30:00 2024 UTC-7"]
   # Follows BigQuery, not the docs: data-types.md, Daylight saving time, prints "Sun Nov 3 08:30:00 2024 UTC". BigQuery's %c pads the day of month with a space, as C asctime does: "Sun Nov  3 08:30:00 2024 UTC".
+  # Verified on BigQuery 2026-09-25.
   - desc: "data-types#15 L3102 Daylight saving time"
     sql: |-
       SELECT

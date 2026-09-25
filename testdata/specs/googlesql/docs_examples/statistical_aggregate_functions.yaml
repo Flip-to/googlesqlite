@@ -7,6 +7,7 @@
 spec: docs/specs/googlesql/syntax/docs_examples.md
 dialect: googlesql
 cases:
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#1 L178 CORR"
     sql: |-
       SELECT CORR(y, x) AS results
@@ -19,6 +20,7 @@ cases:
     expected:
       rows:
         - [0.6546536707079772]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#2 L194 CORR"
     sql: |-
       SELECT CORR(y, x) AS results
@@ -31,6 +33,7 @@ cases:
     expected:
       rows:
         - [1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#3 L210 CORR"
     sql: |-
       SELECT CORR(y, x) AS results
@@ -38,6 +41,7 @@ cases:
     expected:
       rows:
         - [null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#4 L221 CORR"
     sql: |-
       SELECT CORR(y, x) AS results
@@ -59,6 +63,7 @@ cases:
     expected:
       rows:
         - ["NaN"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#6 L250 CORR"
     sql: |-
       SELECT CORR(x, y) AS results
@@ -71,6 +76,7 @@ cases:
     expected:
       rows:
         - ["NaN"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#7 L337 COVAR_POP"
     sql: |-
       SELECT COVAR_POP(y, x) AS results
@@ -85,6 +91,7 @@ cases:
     expected:
       rows:
         - [-1.6800000000000002]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#8 L355 COVAR_POP"
     sql: |-
       SELECT COVAR_POP(y, x) AS results
@@ -92,6 +99,7 @@ cases:
     expected:
       rows:
         - [0]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#9 L366 COVAR_POP"
     sql: |-
       SELECT COVAR_POP(y, x) AS results
@@ -99,6 +107,7 @@ cases:
     expected:
       rows:
         - [null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#10 L377 COVAR_POP"
     sql: |-
       SELECT COVAR_POP(y, x) AS results
@@ -127,6 +136,7 @@ cases:
     expected:
       rows:
         - ["NaN"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#12 L488 COVAR_SAMP"
     sql: |-
       SELECT COVAR_SAMP(y, x) AS results
@@ -141,6 +151,7 @@ cases:
     expected:
       rows:
         - [-2.1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#14 L524 COVAR_SAMP"
     sql: |-
       SELECT COVAR_SAMP(y, x) AS results
@@ -148,6 +159,7 @@ cases:
     expected:
       rows:
         - [null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#15 L535 COVAR_SAMP"
     sql: |-
       SELECT COVAR_SAMP(y, x) AS results
@@ -169,24 +181,28 @@ cases:
     expected:
       rows:
         - ["NaN"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#17 L669 STDDEV_POP"
     sql: |-
       SELECT STDDEV_POP(x) AS results FROM UNNEST([10, 14, 18]) AS x
     expected:
       rows:
         - [3.265986323710904]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#18 L679 STDDEV_POP"
     sql: |-
       SELECT STDDEV_POP(x) AS results FROM UNNEST([10, 14, NULL]) AS x
     expected:
       rows:
         - [2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#19 L689 STDDEV_POP"
     sql: |-
       SELECT STDDEV_POP(x) AS results FROM UNNEST([10, NULL]) AS x
     expected:
       rows:
         - [0]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#20 L699 STDDEV_POP"
     sql: |-
       SELECT STDDEV_POP(x) AS results FROM UNNEST([NULL]) AS x
@@ -199,24 +215,28 @@ cases:
     expected:
       rows:
         - ["NaN"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#22 L792 STDDEV_SAMP"
     sql: |-
       SELECT STDDEV_SAMP(x) AS results FROM UNNEST([10, 14, 18]) AS x
     expected:
       rows:
         - [4]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#23 L802 STDDEV_SAMP"
     sql: |-
       SELECT STDDEV_SAMP(x) AS results FROM UNNEST([10, 14, NULL]) AS x
     expected:
       rows:
         - [2.8284271247461903]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#24 L812 STDDEV_SAMP"
     sql: |-
       SELECT STDDEV_SAMP(x) AS results FROM UNNEST([10, NULL]) AS x
     expected:
       rows:
         - [null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#25 L822 STDDEV_SAMP"
     sql: |-
       SELECT STDDEV_SAMP(x) AS results FROM UNNEST([NULL]) AS x
@@ -229,24 +249,28 @@ cases:
     expected:
       rows:
         - ["NaN"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#27 L902 VAR_POP"
     sql: |-
       SELECT VAR_POP(x) AS results FROM UNNEST([10, 14, 18]) AS x
     expected:
       rows:
         - [10.666666666666666]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#28 L912 VAR_POP"
     sql: |-
       SELECT VAR_POP(x) AS results FROM UNNEST([10, 14, NULL]) AS x
     expected:
       rows:
         - [4]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#29 L922 VAR_POP"
     sql: |-
       SELECT VAR_POP(x) AS results FROM UNNEST([10, NULL]) AS x
     expected:
       rows:
         - [0]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#30 L932 VAR_POP"
     sql: |-
       SELECT VAR_POP(x) AS results FROM UNNEST([NULL]) AS x
@@ -259,24 +283,28 @@ cases:
     expected:
       rows:
         - ["NaN"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#32 L1025 VAR_SAMP"
     sql: |-
       SELECT VAR_SAMP(x) AS results FROM UNNEST([10, 14, 18]) AS x
     expected:
       rows:
         - [16]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#33 L1035 VAR_SAMP"
     sql: |-
       SELECT VAR_SAMP(x) AS results FROM UNNEST([10, 14, NULL]) AS x
     expected:
       rows:
         - [8]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#34 L1045 VAR_SAMP"
     sql: |-
       SELECT VAR_SAMP(x) AS results FROM UNNEST([10, NULL]) AS x
     expected:
       rows:
         - [null]
+  # Verified on BigQuery 2026-09-25.
   - desc: "statistical_aggregate_functions#35 L1055 VAR_SAMP"
     sql: |-
       SELECT VAR_SAMP(x) AS results FROM UNNEST([NULL]) AS x

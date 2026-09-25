@@ -142,6 +142,7 @@ cases:
         - ["bananas",5,"fruit",14]
         - ["carrots",8,"vegetable",8]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#8 L636 EXTEND` pipe operator"
     sql: |-
       (
@@ -155,6 +156,7 @@ cases:
         - ["apples",2,false]
         - ["bananas",8,true]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#9 L652 EXTEND` pipe operator"
     sql: |-
       -- Window function, with `OVER`
@@ -197,6 +199,7 @@ cases:
         - ["bananas","fruit","14"]
         - ["carrots","vegetable","8"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#11 L713 SET` pipe operator"
     sql: |-
       (
@@ -210,6 +213,7 @@ cases:
         - [1,3]
         - [4,3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#12 L729 SET` pipe operator"
     sql: |-
       FROM (SELECT 2 AS x, 3 AS y) AS t
@@ -218,6 +222,7 @@ cases:
     expected:
       rows:
         - [2,4,8]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#13 L766 DROP` pipe operator"
     sql: |-
       SELECT 'apples' AS item, 2 AS sales, 'fruit' AS category
@@ -225,6 +230,7 @@ cases:
     expected:
       rows:
         - ["apples"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#14 L777 DROP` pipe operator"
     sql: |-
       FROM (SELECT 1 AS x, 2 AS y) AS t
@@ -233,6 +239,7 @@ cases:
     expected:
       rows:
         - [1,2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#15 L813 RENAME` pipe operator"
     sql: |-
       SELECT 1 AS x, 2 AS y, 3 AS z
@@ -242,6 +249,7 @@ cases:
     expected:
       rows:
         - [1,2,3,2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#16 L848 AS` pipe operator"
     sql: |-
       (
@@ -259,6 +267,7 @@ cases:
     expected:
       rows:
         - [456,5,"yellow"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#17 L898 WHERE` pipe operator"
     sql: |-
       (
@@ -274,6 +283,7 @@ cases:
         - ["bananas",5]
         - ["carrots",8]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#18 L1009 AGGREGATE` pipe operator"
     sql: |-
       -- Full-table aggregation
@@ -288,6 +298,7 @@ cases:
     expected:
       rows:
         - [3,14]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#19 L1027 AGGREGATE` pipe operator"
     sql: |-
       -- Aggregation with grouping
@@ -349,6 +360,7 @@ cases:
         - ["bananas","fruit",5]
         - ["apples","fruit",9]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#22 L1178 DISTINCT` pipe operator"
     sql: |-
       (
@@ -427,6 +439,7 @@ cases:
     expected:
       error:
         contains: ""
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#26 L1262 DISTINCT` pipe operator"
     sql: |-
       SELECT AS STRUCT 1 x, 2 y
@@ -434,6 +447,7 @@ cases:
     expected:
       rows:
         - [1,2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#27 L1326 JOIN` pipe operator"
     sql: |-
       (
@@ -453,6 +467,7 @@ cases:
         - ["apples",2,123]
         - ["bananas",5,null]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#28 L1475 ORDER BY` pipe operator"
     sql: |-
       (
@@ -468,6 +483,7 @@ cases:
         - [3]
         - [2]
         - [1]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#29 L1516 LIMIT` pipe operator"
     sql: |-
       (
@@ -482,6 +498,7 @@ cases:
     expected:
       rows:
         - ["apples",2]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#30 L1534 LIMIT` pipe operator"
     sql: |-
       (
@@ -496,6 +513,7 @@ cases:
     expected:
       rows:
         - ["carrots",8]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#31 L1596 UNION` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3]) AS number
@@ -507,6 +525,7 @@ cases:
         - [3]
         - [1]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#32 L1610 UNION` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3]) AS number
@@ -517,6 +536,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#33 L1626 UNION` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3]) AS number
@@ -529,6 +549,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#34 L1645 UNION` pipe operator"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit
@@ -539,6 +560,7 @@ cases:
         - [1,10]
         - [2,20]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#35 L1662 UNION` pipe operator"
     sql: |-
       SELECT 1 AS one_digit, 10 AS two_digit
@@ -599,6 +621,7 @@ cases:
         - [3]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#39 L1918 INTERSECT` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -609,6 +632,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#40 L1934 INTERSECT` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -629,6 +653,7 @@ cases:
         - [3]
         - [4]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#44 L2084 EXCEPT` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -639,6 +664,7 @@ cases:
         - [3]
         - [4]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#45 L2100 EXCEPT` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -648,6 +674,7 @@ cases:
     expected:
       rows:
         - [3]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#46 L2117 EXCEPT` pipe operator"
     sql: |-
       SELECT * FROM UNNEST(ARRAY<INT64>[1, 2, 3, 3, 4]) AS number
@@ -663,6 +690,7 @@ cases:
         - [3]
         - [4]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#49 L2229 WITH` pipe operator"
     sql: |-
       SELECT 1 AS key
@@ -673,6 +701,7 @@ cases:
     expected:
       rows:
         - [1,"my_value"]
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#50 L2243 WITH` pipe operator"
     sql: |-
       SELECT 1 AS key
@@ -689,6 +718,7 @@ cases:
         - [2]
         - [3]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#51 L2264 WITH` pipe operator"
     sql: |-
       SELECT 1 AS key
@@ -723,6 +753,7 @@ cases:
         - [3]
         - [4]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#53 L2334 PIVOT` pipe operator"
     sql: |-
       (
@@ -742,6 +773,7 @@ cases:
         - ["kale",55,45]
         - ["apple",8,10]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#54 L2361 PIVOT` pipe operator"
     sql: |-
       (
@@ -762,6 +794,7 @@ cases:
         - ["kale",55,45]
         - ["apple",8,10]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#55 L2400 UNPIVOT` pipe operator"
     sql: |-
       (
@@ -777,6 +810,7 @@ cases:
         - ["apple",8,"Q1"]
         - ["apple",10,"Q2"]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#56 L2445 WINDOW` pipe operator (DEPRECATED)"
     sql: |-
       (
@@ -793,6 +827,7 @@ cases:
         - ["bananas",5,15]
         - ["carrots",8,15]
       unordered: true
+  # Verified on BigQuery 2026-09-25.
   - desc: "pipe-syntax#58 L2616 DESCRIBE` pipe operator"
     sql: |-
       -- Baseline example without DESCRIBE.
