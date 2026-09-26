@@ -102,6 +102,10 @@ func runFile(t *testing.T, root, rel, path string) {
 	}
 
 	subName := strings.TrimSuffix(filepath.ToSlash(rel), ".yaml")
+	// Reference-docs examples compare WKT text exactly: the driver
+	// writes it the way BigQuery does (verified on BigQuery
+	// 2026-09-25), so the spacing relaxation is not needed there.
+	exactWKT := strings.HasPrefix(subName, "googlesql/docs_examples/")
 	t.Run(subName, func(t *testing.T) {
 		t.Parallel()
 		for i, c := range td.Cases {
@@ -117,7 +121,7 @@ func runFile(t *testing.T, root, rel, path string) {
 				if c.Skip != "" {
 					t.Skip(c.Skip)
 				}
-				runCase(t, td.Dialect, c)
+				runCase(t, td.Dialect, c, exactWKT)
 			})
 		}
 	})
@@ -132,7 +136,7 @@ func loadSpecFrontmatter(root, specPath string) (specmeta.Frontmatter, error) {
 	return specmeta.ParseFrontmatter(data)
 }
 
-func runCase(t *testing.T, dialect string, c specmeta.Case) {
+func runCase(t *testing.T, dialect string, c specmeta.Case, exactWKT bool) {
 	t.Helper()
 	if c.SQL == "" {
 		t.Fatalf("case has empty sql")
@@ -234,6 +238,11 @@ func runCase(t *testing.T, dialect string, c specmeta.Case) {
 		_ = want
 		return
 	}
+	if exactWKT {
+		if g, w, ok := wktTextMismatch(got, want); ok {
+			t.Errorf("WKT text mismatch: got %q, want %q\n  sql:  %s", g, w, c.SQL)
+		}
+	}
 	if c.Expected.Unordered {
 		if !rowsEqualUnordered(got, want) {
 			t.Errorf("rows mismatch (unordered)\n  got:  %s\n  want: %s\n  sql:  %s",
@@ -245,6 +254,46 @@ func runCase(t *testing.T, dialect string, c specmeta.Case) {
 		t.Errorf("rows mismatch\n  got:  %s\n  want: %s\n  sql:  %s",
 			formatRows(got), formatRows(want), c.SQL)
 	}
+}
+
+// wktTextMismatch reports the first expected WKT cell whose text the
+// driver does not reproduce exactly. Rows are matched by position
+// when the row counts agree; an unordered result whose WKT cells are
+// only reordered is compared as a multiset of WKT texts.
+func wktTextMismatch(got, want [][]any) (string, string, bool) {
+	var gotWKT, wantWKT []string
+	for i := range want {
+		for j := range want[i] {
+			w, ok := want[i][j].(string)
+			if !ok || !looksLikeWKT(strings.TrimSpace(w)) {
+				continue
+			}
+			wantWKT = append(wantWKT, w)
+			if i < len(got) && j < len(got[i]) {
+				switch g := got[i][j].(type) {
+				case string:
+					gotWKT = append(gotWKT, g)
+				case []byte:
+					gotWKT = append(gotWKT, string(g))
+				}
+			}
+		}
+	}
+	remaining := map[string]int{}
+	for _, g := range gotWKT {
+		remaining[g]++
+	}
+	for _, w := range wantWKT {
+		if remaining[w] == 0 {
+			first := ""
+			if len(gotWKT) > 0 {
+				first = gotWKT[0]
+			}
+			return first, w, true
+		}
+		remaining[w]--
+	}
+	return "", "", false
 }
 
 // rowsEqualUnordered compares two row sets as multisets — every row in

@@ -196,12 +196,10 @@ func (r *RangeValue) ToStruct() (*StructValue, error) {
 	return nil, fmt.Errorf("unsupported struct cast for range value")
 }
 
+// ToJSON renders the range as {"start":...,"end":...}, the form
+// TO_JSON_STRING uses (verified on BigQuery 2026-09-25).
 func (r *RangeValue) ToJSON() (string, error) {
-	s, err := r.ToString()
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%q", s), nil
+	return EncodeJSONString(r)
 }
 
 func (r *RangeValue) ToTime() (time.Time, error) {
@@ -219,9 +217,38 @@ func (r *RangeValue) Format(verb rune) string {
 	}
 	switch verb {
 	case 'T':
+		// RANGE<DATE> "[2020-01-01, 2020-01-02)" (verified on BigQuery
+		// 2026-09-25).
+		if elem := r.elemTypeName(); elem != "" {
+			return fmt.Sprintf("RANGE<%s> %q", elem, s)
+		}
 		return fmt.Sprintf("RANGE %q", s)
 	}
 	return s
+}
+
+// elemTypeName returns the SQL name of the element type, from a bound
+// when one is set and from ElemHeader otherwise.
+func (r *RangeValue) elemTypeName() string {
+	for _, b := range []Value{r.Start, r.End} {
+		switch b.(type) {
+		case DateValue:
+			return "DATE"
+		case DatetimeValue:
+			return "DATETIME"
+		case TimestampValue:
+			return "TIMESTAMP"
+		}
+	}
+	switch r.ElemHeader {
+	case DateValueType:
+		return "DATE"
+	case DatetimeValueType:
+		return "DATETIME"
+	case TimestampValueType:
+		return "TIMESTAMP"
+	}
+	return ""
 }
 
 func (r *RangeValue) Interface() any {

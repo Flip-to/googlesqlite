@@ -80,9 +80,10 @@ SELECT 14, interval '-4:5:6.789' hour to second)`
 		// interval.test sum_handles_intermediate_overflow.
 		{"sum_intermediate_overflow", `SELECT ` + s(`SUM(i)`) + ` FROM UNNEST([interval '10000' year, interval '10000' year, interval '10000' year, interval '-120000' month, interval '-120000' month]) i`,
 			[][]string{{"10000-0 0 0:0:0"}}},
-		// interval.test avg.
+		// interval.test avg: the fixture prints 5:0:0.200 (the fraction
+		// in groups of three digits, as BigQuery does).
 		{"avg", `SELECT ` + s(`AVG(i)`) + ` FROM UNNEST([interval 1 year, interval 1 month, interval 1 day, NULL, interval 1 hour, interval 1 second, NULL]) i`,
-			[][]string{{"0-2 18 5:0:0.2"}}},
+			[][]string{{"0-2 18 5:0:0.200"}}},
 		// interval.test avg_1_element.
 		{"avg_1_element", `SELECT ` + s(`AVG(i)`) + ` FROM UNNEST([interval '1-2 3 4:5:6.789' year to second]) i`,
 			[][]string{{"1-2 3 4:5:6.789"}}},

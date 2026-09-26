@@ -4,6 +4,8 @@ cases:
   - desc: union of two distinct points
     sql: |-
       SELECT ST_ASGEOJSON(ST_UNION(ST_GEOGFROMTEXT('POINT(0 0)'), ST_GEOGFROMTEXT('POINT(1 1)')))
+    # Expected: BigQuery's ST_ASGEOJSON output, verified on BigQuery
+    # 2026-09-25 (spaces inside braces and around nested arrays).
     expected:
       rows:
-        - ['{"type":"MultiPoint","coordinates":[[0,0],[1,1]]}']
+        - ['{ "type": "MultiPoint", "coordinates": [ [0, 0], [1, 1] ] } ']

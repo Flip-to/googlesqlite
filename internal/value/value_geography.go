@@ -220,7 +220,8 @@ func (g *GeographyValue) Format(verb rune) string {
 	case 't':
 		return str
 	case 'T':
-		return fmt.Sprintf(`GEOGRAPHY %q`, str)
+		// ST_GeogFromText("POINT(1 1)") (verified on BigQuery 2026-09-25).
+		return fmt.Sprintf(`ST_GeogFromText(%q)`, str)
 	}
 	return str
 }
@@ -421,7 +422,7 @@ func (g *geographyPoint) ToWKT() (string, error) {
 		// (data-types.md, Geography type; verified on BigQuery).
 		return "GEOMETRYCOLLECTION EMPTY", nil
 	}
-	return fmt.Sprintf("POINT (%s %s)", formatCoord(g.longitude), formatCoord(g.latitude)), nil
+	return fmt.Sprintf("POINT(%s %s)", formatCoord(g.longitude), formatCoord(g.latitude)), nil
 }
 func (g *geographyPoint) equal(o geographyType) bool {
 	other, ok := o.(*geographyPoint)
@@ -443,7 +444,10 @@ type geographyLineString struct {
 
 func (g *geographyLineString) Kind() string { return "LINESTRING" }
 func (g *geographyLineString) ToWKT() (string, error) {
-	return "LINESTRING " + formatCoordList(g.points), nil
+	if len(g.points) == 0 {
+		return emptyWKT, nil
+	}
+	return "LINESTRING" + formatCoordList(g.points), nil
 }
 func (g *geographyLineString) equal(o geographyType) bool {
 	other, ok := o.(*geographyLineString)
@@ -485,13 +489,13 @@ func (g *GeographyValue) MarkInverted() {
 func (g *geographyPolygon) Kind() string { return "POLYGON" }
 func (g *geographyPolygon) ToWKT() (string, error) {
 	if len(g.rings) == 0 {
-		return "POLYGON EMPTY", nil
+		return emptyWKT, nil
 	}
 	parts := make([]string, len(g.rings))
 	for i, r := range g.rings {
 		parts[i] = formatCoordList(r)
 	}
-	return "POLYGON (" + strings.Join(parts, ", ") + ")", nil
+	return "POLYGON(" + strings.Join(parts, ", ") + ")", nil
 }
 func (g *geographyPolygon) equal(o geographyType) bool {
 	other, ok := o.(*geographyPolygon)
@@ -512,7 +516,13 @@ type geographyMultiPoint struct {
 
 func (g *geographyMultiPoint) Kind() string { return "MULTIPOINT" }
 func (g *geographyMultiPoint) ToWKT() (string, error) {
-	return "MULTIPOINT " + formatCoordList(g.points), nil
+	switch len(g.points) {
+	case 0:
+		return emptyWKT, nil
+	case 1:
+		return "POINT" + formatCoordList(g.points), nil
+	}
+	return "MULTIPOINT" + formatCoordList(g.points), nil
 }
 func (g *geographyMultiPoint) equal(o geographyType) bool {
 	other, ok := o.(*geographyMultiPoint)
@@ -533,13 +543,16 @@ func (g *geographyMultiLineString) ToWKT() (string, error) {
 		// the literal "EMPTY" sentinel instead of an empty paren list.
 		// The downstream WKT parser only accepts the spec form, so
 		// emitting "MULTILINESTRING ()" round-trips as a parse error.
-		return "MULTILINESTRING EMPTY", nil
+		return emptyWKT, nil
+	}
+	if len(g.lines) == 1 {
+		return "LINESTRING" + formatCoordList(g.lines[0]), nil
 	}
 	parts := make([]string, len(g.lines))
 	for i, ls := range g.lines {
 		parts[i] = formatCoordList(ls)
 	}
-	return "MULTILINESTRING (" + strings.Join(parts, ", ") + ")", nil
+	return "MULTILINESTRING(" + strings.Join(parts, ", ") + ")", nil
 }
 func (g *geographyMultiLineString) equal(o geographyType) bool {
 	other, ok := o.(*geographyMultiLineString)
@@ -561,7 +574,10 @@ type geographyMultiPolygon struct {
 func (g *geographyMultiPolygon) Kind() string { return "MULTIPOLYGON" }
 func (g *geographyMultiPolygon) ToWKT() (string, error) {
 	if len(g.polys) == 0 {
-		return "MULTIPOLYGON EMPTY", nil
+		return emptyWKT, nil
+	}
+	if len(g.polys) == 1 {
+		return (&geographyPolygon{rings: g.polys[0]}).ToWKT()
 	}
 	parts := make([]string, len(g.polys))
 	for i, poly := range g.polys {
@@ -571,7 +587,7 @@ func (g *geographyMultiPolygon) ToWKT() (string, error) {
 		}
 		parts[i] = "(" + strings.Join(ringStrs, ", ") + ")"
 	}
-	return "MULTIPOLYGON (" + strings.Join(parts, ", ") + ")", nil
+	return "MULTIPOLYGON(" + strings.Join(parts, ", ") + ")", nil
 }
 func (g *geographyMultiPolygon) equal(o geographyType) bool {
 	other, ok := o.(*geographyMultiPolygon)
@@ -597,6 +613,9 @@ type geographyCollection struct {
 
 func (g *geographyCollection) Kind() string { return "GEOMETRYCOLLECTION" }
 func (g *geographyCollection) ToWKT() (string, error) {
+	if len(g.parts) == 1 {
+		return g.parts[0].ToWKT()
+	}
 	parts := make([]string, len(g.parts))
 	for i, p := range g.parts {
 		s, err := p.ToWKT()
@@ -610,7 +629,7 @@ func (g *geographyCollection) ToWKT() (string, error) {
 		// back; BigQuery prints GEOMETRYCOLLECTION EMPTY.
 		return "GEOMETRYCOLLECTION EMPTY", nil
 	}
-	return "GEOMETRYCOLLECTION (" + strings.Join(parts, ", ") + ")", nil
+	return "GEOMETRYCOLLECTION(" + strings.Join(parts, ", ") + ")", nil
 }
 func (g *geographyCollection) equal(o geographyType) bool {
 	other, ok := o.(*geographyCollection)
@@ -627,22 +646,22 @@ func (g *geographyCollection) equal(o geographyType) bool {
 
 // ---- WKT formatting helpers ----
 
+// emptyWKT is how BigQuery prints every empty geography, and a
+// multi-geometry or collection with one member prints as that member
+// (MULTIPOINT(1 1) is POINT(1 1); verified on BigQuery 2026-09-25).
+const emptyWKT = "GEOMETRYCOLLECTION EMPTY"
+
 func formatCoord(f float64) string {
-	// Use %.15g so a 1-ULP-below-1.0 value (0.9999999999999998) folds
-	// to "1" the way BigQuery prints it. -1 precision gives Go's
-	// "shortest unique" form which exposes that ULP and breaks
-	// upstream-display compatibility.
-	s := strconv.FormatFloat(f, 'g', 15, 64)
-	// `g` may produce values like "1e+02" for 100; coerce back to a
-	// plain fixed-point shape (`100`) to match the upstream WKT
-	// renderer's appearance.
-	if !strings.ContainsAny(s, "eE") {
-		return s
-	}
-	return strconv.FormatFloat(f, 'f', -1, 64)
+	// %.15g, as BigQuery prints WKT coordinates: a 1-ULP-below-1.0 value
+	// (0.9999999999999998) folds to "1", and a coordinate below 1e-4
+	// uses an exponent ("POINT(0.1 1e-07)"; verified on BigQuery
+	// 2026-09-25). Coordinates never reach 1e15, so no positive
+	// exponent appears.
+	return strconv.FormatFloat(f, 'g', 15, 64)
 }
 
-// formatCoordList returns "(lon lat, lon lat, ...)".
+// formatCoordList returns "(lon lat, lon lat, ...)"; BigQuery writes
+// no space between the type name and the list ("LINESTRING(0 0, 1 1)").
 func formatCoordList(points [][2]float64) string {
 	parts := make([]string, len(points))
 	for i, p := range points {

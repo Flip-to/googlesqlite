@@ -929,11 +929,14 @@ func docValueEqual(got, want any, ty *docsType) bool {
 		if !ok {
 			return false
 		}
-		gn, wn := normaliseWKTLiteral(g), normaliseWKTLiteral(string(w))
-		if gn != "" && wn != "" {
-			return gn == wn
-		}
-		return wsRe.ReplaceAllString(g, " ") == wsRe.ReplaceAllString(string(w), " ")
+		// The text is compared as written: the driver writes WKT the
+		// way BigQuery does (`POINT(1 1)`, no space after the type
+		// name; verified on BigQuery 2026-09-25), so no spacing is
+		// forgiven. Only the MULTIPOINT vertex order (S2 cell order on
+		// BigQuery) and the spelling of an empty geography are
+		// normalised, as the spec runner does.
+		canon := func(s string) string { return canonicaliseMultiPointWKT(canonicaliseEmptyWKT(strings.TrimSpace(s))) }
+		return canon(g) == canon(string(w))
 	case docText:
 		g := renderGot(got)
 		return wsRe.ReplaceAllString(strings.TrimSpace(g), " ") == wsRe.ReplaceAllString(string(w), " ")

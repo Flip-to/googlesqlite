@@ -6,6 +6,8 @@ dialect: googlesql
 cases:
   - desc: closest point of single-point geometry
     sql: SELECT ST_ASTEXT(ST_CLOSESTPOINT(ST_GEOGFROMTEXT('POINT(0 0)'), ST_GEOGFROMTEXT('POINT(3 4)'))) AS s
+    # Verified on BigQuery 2026-09-25: BigQuery writes WKT with no space
+    # after the type name.
     expected:
       rows:
-        - ['POINT (0 0)']
+        - ['POINT(0 0)']

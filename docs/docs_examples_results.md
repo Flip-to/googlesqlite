@@ -96,15 +96,17 @@ answer was compared with the driver's, rows as a multiset. The pending,
 | `driver_bug` pending | 10 | 9 (the documented results) | 0 | 1 (geography_functions#10: the docs print `POINT(0.999999999999943 1)`, BigQuery `POINT(1 1)`; the case waits for BigQuery's answer) |
 
 One case of the 1125 was not sent (quoting). 66 cases need `CREATE
-TABLE` fixtures or scripts and were not run. In 33 verified cases the
-values agree but the driver's `TO_JSON_STRING` differs from BigQuery's:
-INTERVAL is not rendered in ISO 8601 (`P1Y2M3D`), RANGE is not rendered
-as `{"start":...,"end":...}`, and a STRING holding JSON text (the result
-of `JSON_EXTRACT` / `JSON_QUERY` on a STRING) is embedded as raw JSON
-instead of a quoted string. WKT is also printed with a space after the
-type name (`POINT (1 1)`, BigQuery `POINT(1 1)`); the spec runner treats
-both as equal. These rendering gaps are outside the docs examples'
-expectations and are left for a follow-up.
+TABLE` fixtures or scripts and were not run. The comparison found
+text the driver rendered differently from BigQuery: INTERVAL was not
+written in ISO 8601 by `TO_JSON_STRING` (`P1Y2M3D`), RANGE was not
+written as `{"start":...,"end":...}`, WKT had a space after the type
+name (`POINT (1 1)`, BigQuery `POINT(1 1)`), and a STRING holding JSON
+text (the result of `JSON_EXTRACT` / `JSON_QUERY` on a STRING) was
+embedded as raw JSON instead of a quoted string. 47 cases (29 where the
+values agreed and 18 JSON-text cases counted as disagreeing) now match
+BigQuery's text exactly (`text_rendering_bigquery_test.go`), and the
+docs-examples runner and the `docs_examples` spec cases compare WKT
+text without the spacing relaxation.
 
 ## Driver fixes in this change
 

@@ -85,10 +85,67 @@ func (iv *IntervalValue) String() string {
 		ymSign, int32abs(src.Years), int32abs(src.Months), src.Days,
 		timeSign, int32abs(src.Hours), int32abs(src.Minutes), int32abs(src.Seconds))
 	if src.SubSecondNanos != 0 {
-		mantStr := strings.TrimRight(fmt.Sprintf("%09d", int32abs(src.SubSecondNanos)), "0")
-		out = fmt.Sprintf("%s.%s", out, mantStr)
+		out += "." + fractionDigits(int32abs(src.SubSecondNanos))
 	}
 	return out
+}
+
+// fractionDigits renders a sub-second part in nanoseconds with 3, 6 or
+// 9 digits, the fewest that hold it: BigQuery prints 6.5 seconds as
+// 6.500 and 0.000001 seconds as 0.000001 (CAST(interval AS STRING) and
+// FORMAT('%t'), verified on BigQuery 2026-09-25).
+func fractionDigits(nanos int32) string {
+	s := fmt.Sprintf("%09d", nanos)
+	switch {
+	case nanos%1000000 == 0:
+		return s[:3]
+	case nanos%1000 == 0:
+		return s[:6]
+	}
+	return s
+}
+
+// ISO8601 returns the interval as an ISO 8601 duration, the form
+// TO_JSON_STRING and TO_JSON use: each non-zero field carries its own
+// sign (P1Y2M-3DT4H, PT-1H-30M, PT-1.5S), the fraction drops trailing
+// zeros, and the zero interval is P0Y (verified on BigQuery
+// 2026-09-25).
+func (iv *IntervalValue) ISO8601() string {
+	src := iv
+	if !iv.IsCanonical() {
+		src = iv.Canonicalize()
+	}
+	var b strings.Builder
+	b.WriteByte('P')
+	field := func(v int32, unit byte) {
+		if v != 0 {
+			b.WriteString(strconv.FormatInt(int64(v), 10))
+			b.WriteByte(unit)
+		}
+	}
+	field(src.Years, 'Y')
+	field(src.Months, 'M')
+	field(src.Days, 'D')
+	if src.Hours != 0 || src.Minutes != 0 || src.Seconds != 0 || src.SubSecondNanos != 0 {
+		b.WriteByte('T')
+		field(src.Hours, 'H')
+		field(src.Minutes, 'M')
+		if src.Seconds != 0 || src.SubSecondNanos != 0 {
+			if src.Seconds < 0 || src.SubSecondNanos < 0 {
+				b.WriteByte('-')
+			}
+			b.WriteString(strconv.FormatInt(int64(int32abs(src.Seconds)), 10))
+			if src.SubSecondNanos != 0 {
+				b.WriteByte('.')
+				b.WriteString(strings.TrimRight(fmt.Sprintf("%09d", int32abs(src.SubSecondNanos)), "0"))
+			}
+			b.WriteByte('S')
+		}
+	}
+	if b.Len() == 1 {
+		return "P0Y"
+	}
+	return b.String()
 }
 
 // intervalPart is used for parsing string representations.

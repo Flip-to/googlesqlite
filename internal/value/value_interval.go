@@ -227,12 +227,11 @@ func (iv *IntervalValue) ToStruct() (*StructValue, error) {
 	return nil, fmt.Errorf("unsupported struct cast for interval value")
 }
 
+// ToJSON renders the interval as a quoted ISO 8601 duration, as
+// TO_JSON_STRING does ("P1Y2M3DT4H5M6.789S"; verified on BigQuery
+// 2026-09-25).
 func (iv *IntervalValue) ToJSON() (string, error) {
-	s, err := iv.ToString()
-	if err != nil {
-		return "", err
-	}
-	return strconv.Quote(s), nil
+	return strconv.Quote(iv.ISO8601()), nil
 }
 
 func (iv *IntervalValue) ToTime() (time.Time, error) {

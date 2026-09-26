@@ -9,6 +9,9 @@ import (
 	"testing"
 )
 
+// WKT expectations in this file use BigQuery's spelling, with no space
+// after the type name (POINT(1 2); verified on BigQuery 2026-09-25).
+
 // ---- from tests/parity/regression_test.go ----
 
 // TestRegression_DefaultTimezoneIsUTC asserts that naive TIMESTAMP literals
@@ -399,8 +402,8 @@ func TestW_GeographyExtra(t *testing.T) {
 				if err := row.Scan(&got); err != nil {
 					t.Fatal(err)
 				}
-				if got != "POINT (1 2)" {
-					t.Errorf("got %q want %q", got, "POINT (1 2)")
+				if got != "POINT(1 2)" {
+					t.Errorf("got %q want %q", got, "POINT(1 2)")
 				}
 			},
 		},
@@ -747,11 +750,11 @@ func TestW_GeographyNonPoint(t *testing.T) {
 		name string
 		wkt  string
 	}{
-		{"linestring", "LINESTRING (0 0, 1 1, 2 2)"},
-		{"polygon", "POLYGON ((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"},
-		{"multipoint", "MULTIPOINT (0 0, 1 1, 2 2)"},
-		{"multilinestring", "MULTILINESTRING ((0 0, 1 1), (2 2, 3 3))"},
-		{"multipolygon", "MULTIPOLYGON (((0 0, 1 0, 1 1, 0 1, 0 0)), ((2 2, 3 2, 3 3, 2 3, 2 2)))"},
+		{"linestring", "LINESTRING(0 0, 1 1, 2 2)"},
+		{"polygon", "POLYGON((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"},
+		{"multipoint", "MULTIPOINT(0 0, 1 1, 2 2)"},
+		{"multilinestring", "MULTILINESTRING((0 0, 1 1), (2 2, 3 3))"},
+		{"multipolygon", "MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)), ((2 2, 3 2, 3 3, 2 3, 2 2)))"},
 	}
 	for _, tc := range cases {
 		t.Run("round-trip "+tc.name, func(t *testing.T) {

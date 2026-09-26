@@ -140,9 +140,11 @@ func TestRangeValue(t *testing.T) {
 		if string(b) != "[2020-01-01, 2020-01-05)" {
 			t.Fatalf("ToBytes: %s", b)
 		}
+		// TO_JSON_STRING of a RANGE is an object with start / end
+		// members (verified on BigQuery 2026-09-25).
 		j, _ := r.ToJSON()
-		if !strings.HasPrefix(j, `"`) || !strings.HasSuffix(j, `"`) {
-			t.Fatalf("ToJSON unquoted: %s", j)
+		if j != `{"start":"2020-01-01","end":"2020-01-05"}` {
+			t.Fatalf("ToJSON: %s", j)
 		}
 	})
 
@@ -176,7 +178,9 @@ func TestRangeValue(t *testing.T) {
 		if got := r.Format('t'); got != "[2020-01-01, 2020-01-05)" {
 			t.Fatalf("Format t: %s", got)
 		}
-		if got := r.Format('T'); got != `RANGE "[2020-01-01, 2020-01-05)"` {
+		// FORMAT('%T') names the element type (verified on BigQuery
+		// 2026-09-25).
+		if got := r.Format('T'); got != `RANGE<DATE> "[2020-01-01, 2020-01-05)"` {
 			t.Fatalf("Format T: %s", got)
 		}
 		if r.Interface() == nil {

@@ -7,6 +7,9 @@ import (
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
+// WKT expectations in this file use BigQuery's spelling, with no space
+// after the type name (POINT(1 2); verified on BigQuery 2026-09-25).
+
 func Test_FunctionGeography_ST_GEOGPOINT(t *testing.T) {
 	t.Parallel()
 
@@ -23,7 +26,7 @@ func Test_FunctionGeography_ST_GEOGPOINT(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if res != "POINT (10 20)" {
+		if res != "POINT(10 20)" {
 			t.Fatalf("unexpected result: %s", res)
 		}
 	})
@@ -78,7 +81,7 @@ func Test_FunctionGeography_ST_GEOGPOINT(t *testing.T) {
 		}
 
 		// 190 -> -170
-		if res != "POINT (-170 0)" {
+		if res != "POINT(-170 0)" {
 			t.Fatalf("unexpected result: %s", res)
 		}
 	})
@@ -100,7 +103,7 @@ func Test_FunctionGeography_ST_GEOGFROMTEXT(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if res != "POINT (10 24.3)" {
+		if res != "POINT(10 24.3)" {
 			t.Fatalf("unexpected result: %s", res)
 		}
 	})
@@ -119,7 +122,7 @@ func Test_FunctionGeography_ST_GEOGFROMTEXT(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got != "LINESTRING (0 0, 1 1, 2 2)" {
+		if got != "LINESTRING(0 0, 1 1, 2 2)" {
 			t.Fatalf("unexpected WKT: %s", got)
 		}
 	})

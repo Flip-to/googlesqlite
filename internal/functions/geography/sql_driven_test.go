@@ -31,6 +31,9 @@ import (
 	_ "github.com/goccy/googlesqlite"
 )
 
+// WKT expectations in this file use BigQuery's spelling, with no space
+// after the type name (POINT(1 2); verified on BigQuery 2026-09-25).
+
 // withConn opens a fresh :memory: connection and runs `fn` against
 // it. Each test gets its own DB so catalog state never leaks across
 // subtests, and each statement runs over the same pinned conn so
@@ -77,9 +80,9 @@ func TestStDumpDimensionFilters(t *testing.T) {
 			dim  int
 			want string
 		}{
-			{0, `["POINT (0 0)"]`},
-			{1, `["LINESTRING (1 2, 2 1)"]`},
-			{2, `["POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))"]`},
+			{0, `["POINT(0 0)"]`},
+			{1, `["LINESTRING(1 2, 2 1)"]`},
+			{2, `["POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"]`},
 		} {
 			got := queryString(t, ctx, conn,
 				`SELECT TO_JSON_STRING(ST_DUMP(ST_GEOGFROMTEXT(?), ?))`,
@@ -205,7 +208,7 @@ func TestStUnionOverlappingPolygons(t *testing.T) {
 		// Convex hull of {(0,0),(4,0),(4,4),(0,4)} U
 		// {(2,2),(6,2),(6,6),(2,6)} sorted CCW from lowest lat then
 		// lng: (0,0) (4,0) (6,2) (6,6) (2,6) (0,4) (0,0).
-		const want = "POLYGON ((0 0, 4 0, 6 2, 6 6, 2 6, 0 4, 0 0))"
+		const want = "POLYGON((0 0, 4 0, 6 2, 6 6, 2 6, 0 4, 0 0))"
 		if got != want {
 			t.Errorf("ST_UNION overlapping squares: got %q; want %q", got, want)
 		}
@@ -235,7 +238,7 @@ func TestStIntersectionOverlappingPolygons(t *testing.T) {
 			SELECT ST_ASTEXT(ST_INTERSECTION(
 			  ST_GEOGFROMTEXT('POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))'),
 			  ST_GEOGFROMTEXT('POLYGON((2 2, 6 2, 6 6, 2 6, 2 2))')))`)
-		const want = "POLYGON ((2 2, 4 2, 4 4, 2 4, 2 2))"
+		const want = "POLYGON((2 2, 4 2, 4 4, 2 4, 2 2))"
 		if got != want {
 			t.Errorf("ST_INTERSECTION overlapping squares: got %q; want %q", got, want)
 		}
@@ -255,7 +258,7 @@ func TestStDifferenceContainedPolygon(t *testing.T) {
 		// in place to (3 7,7 7,7 3,3 3), then closed by appending its
 		// own first vertex -> (3 7,7 7,7 3,3 3,3 7). The first ring
 		// remains a's outer.
-		const want = "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (3 7, 7 7, 7 3, 3 3, 3 7))"
+		const want = "POLYGON((0 0, 10 0, 10 10, 0 10, 0 0), (3 7, 7 7, 7 3, 3 3, 3 7))"
 		if got != want {
 			t.Errorf("ST_DIFFERENCE contained polygon: got %q; want %q", got, want)
 		}
@@ -280,7 +283,7 @@ func TestStGeogFromTextOrientedCW(t *testing.T) {
 			SELECT ST_ASTEXT(ST_GEOGFROMTEXT(
 			  'POLYGON((175 -10, 175 10, -175 10, -175 -10, 175 -10))',
 			  oriented => true))`)
-		const want = "POLYGON ((175 -10, 175 10, -175 10, -175 -10, 175 -10))"
+		const want = "POLYGON((175 -10, 175 10, -175 10, -175 -10, 175 -10))"
 		if got != want {
 			t.Errorf("ST_GEOGFROMTEXT oriented CW: got %q; want %q", got, want)
 		}
@@ -298,7 +301,7 @@ func TestStGeogFromTextOrientedCCW(t *testing.T) {
 			SELECT ST_ASTEXT(ST_GEOGFROMTEXT(
 			  'POLYGON((175 -10, -175 -10, -175 10, 175 10, 175 -10))',
 			  oriented => true))`)
-		const want = "POLYGON ((175 -10, -175 -10, -175 10, 175 10, 175 -10))"
+		const want = "POLYGON((175 -10, -175 -10, -175 10, 175 10, 175 -10))"
 		if got != want {
 			t.Errorf("ST_GEOGFROMTEXT oriented CCW: got %q; want %q", got, want)
 		}
@@ -315,7 +318,7 @@ func TestStGeogFromKMLPolygonWithHole(t *testing.T) {
 		const kml = `<Polygon><outerBoundaryIs><LinearRing><coordinates>0,0 4,0 4,4 0,4 0,0</coordinates></LinearRing></outerBoundaryIs><innerBoundaryIs><LinearRing><coordinates>1,1 2,1 2,2 1,2 1,1</coordinates></LinearRing></innerBoundaryIs></Polygon>`
 		got := queryString(t, ctx, conn,
 			`SELECT ST_ASTEXT(ST_GEOGFROMKML(?))`, kml)
-		const want = "POLYGON ((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"
+		const want = "POLYGON((0 0, 4 0, 4 4, 0 4, 0 0), (1 1, 2 1, 2 2, 1 2, 1 1))"
 		if got != want {
 			t.Errorf("ST_GEOGFROMKML <Polygon> with hole: got %q; want %q", got, want)
 		}
@@ -368,7 +371,7 @@ func TestStUnionAggMultipleLines(t *testing.T) {
 		// canonEdge2 orders by (lng, lat); chainSegments walks from
 		// the lex-greatest endpoint so the emitted path is
 		// 3,3 -> 2,2 -> 1,1 -> 0,0.
-		const want = "LINESTRING (3 3, 2 2, 1 1, 0 0)"
+		const want = "LINESTRING(3 3, 2 2, 1 1, 0 0)"
 		if got != want {
 			t.Errorf("ST_UNION_AGG three chained lines: got %q; want %q", got, want)
 		}
@@ -495,7 +498,7 @@ func TestStInteriorRings(t *testing.T) {
 		// positive (CCW in planar XY) so it's already canonical;
 		// smallest (lat, lng) is (3,3) so no rotation either. The
 		// output is the inner ring unchanged.
-		const want = `["LINESTRING (3 3, 7 3, 7 7, 3 7, 3 3)"]`
+		const want = `["LINESTRING(3 3, 7 3, 7 7, 3 7, 3 3)"]`
 		if got != want {
 			t.Errorf("ST_INTERIORRINGS canonical hole: got %s; want %s", got, want)
 		}
@@ -525,7 +528,7 @@ func TestStInteriorRings(t *testing.T) {
 		// ->(7,8)->(7,5): 10*8-10*5 + 10*8-7*8 + 7*5-7*8 + 7*5-10*5 =
 		// 30 + 24 - 21 - 15 = 18, positive -> CCW already. Smallest
 		// (lat=5, lng=7) -> rotate to start at (7, 5).
-		const wantRot = `["LINESTRING (7 5, 10 5, 10 8, 7 8, 7 5)"]`
+		const wantRot = `["LINESTRING(7 5, 10 5, 10 8, 7 8, 7 5)"]`
 		if got3 != wantRot {
 			t.Errorf("ST_INTERIORRINGS rotation: got %s; want %s", got3, wantRot)
 		}
@@ -542,7 +545,10 @@ func TestStBoundary(t *testing.T) {
 			prefix string
 		}{
 			{"LINESTRING(0 0, 1 1, 2 2)", "MULTIPOINT"},
-			{"POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))", "MULTILINESTRING"},
+			// A one-ring boundary prints as LINESTRING on BigQuery
+			// ("LINESTRING(0 0, 4 0, 4 4, 0 4, 0 0)", verified on
+			// BigQuery 2026-09-25).
+			{"POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))", "LINESTRING"},
 			{"MULTILINESTRING((0 0, 1 1), (2 2, 3 3))", "MULTIPOINT"},
 			{"MULTIPOLYGON(((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))", "MULTILINESTRING"},
 		} {
@@ -658,7 +664,9 @@ func TestStGeometryType(t *testing.T) {
 			{"POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))", "ST_Polygon"},
 			{"MULTIPOINT(0 0, 1 1)", "ST_MultiPoint"},
 			{"MULTILINESTRING((0 0, 1 1), (2 2, 3 3))", "ST_MultiLineString"},
-			{"MULTIPOLYGON(((0 0, 1 0, 1 1, 0 0)))", "ST_MultiPolygon"},
+			// A one-member MULTIPOLYGON is a POLYGON on BigQuery
+			// (verified on BigQuery 2026-09-25).
+			{"MULTIPOLYGON(((0 0, 1 0, 1 1, 0 0)))", "ST_Polygon"},
 			{"GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(1 1, 2 2))", "ST_GeometryCollection"},
 		} {
 			got := queryString(t, ctx, conn,
@@ -678,12 +686,12 @@ func TestStAsGeoJSONMixedKinds(t *testing.T) {
 		for _, tc := range []struct {
 			wkt, typ string
 		}{
-			{"POINT(1 2)", `"type":"Point"`},
-			{"LINESTRING(0 0, 1 1)", `"type":"LineString"`},
-			{"POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))", `"type":"Polygon"`},
-			{"MULTIPOINT(0 0, 1 1)", `"type":"MultiPoint"`},
-			{"MULTILINESTRING((0 0, 1 1), (2 2, 3 3))", `"type":"MultiLineString"`},
-			{"MULTIPOLYGON(((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))", `"type":"MultiPolygon"`},
+			{"POINT(1 2)", `"type": "Point"`},
+			{"LINESTRING(0 0, 1 1)", `"type": "LineString"`},
+			{"POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))", `"type": "Polygon"`},
+			{"MULTIPOINT(0 0, 1 1)", `"type": "MultiPoint"`},
+			{"MULTILINESTRING((0 0, 1 1), (2 2, 3 3))", `"type": "MultiLineString"`},
+			{"MULTIPOLYGON(((0 0, 1 0, 1 1, 0 0)), ((5 5, 6 5, 6 6, 5 5)))", `"type": "MultiPolygon"`},
 		} {
 			got := queryString(t, ctx, conn,
 				`SELECT ST_ASGEOJSON(ST_GEOGFROMTEXT(?))`, tc.wkt)
@@ -793,7 +801,7 @@ func TestStSimplifyLine(t *testing.T) {
 			  ST_GEOGFROMTEXT('LINESTRING(0 0, 1 0.001, 2 0)'), 1000))`)
 		// With a 1 km tolerance the middle near-collinear vertex is
 		// dropped.
-		const want = "LINESTRING (0 0, 2 0)"
+		const want = "LINESTRING(0 0, 2 0)"
 		if got != want {
 			t.Errorf("ST_SIMPLIFY: got %q; want %q", got, want)
 		}
@@ -811,7 +819,7 @@ func TestStCentroidAgg(t *testing.T) {
 			  ST_GEOGFROMTEXT('POINT(2 0)'),
 			  ST_GEOGFROMTEXT('POINT(0 2)'),
 			  ST_GEOGFROMTEXT('POINT(2 2)')]) AS p`)
-		const want = "POINT (1 1)"
+		const want = "POINT(1 1)"
 		if got != want {
 			t.Errorf("ST_CENTROID_AGG points: got %q; want %q", got, want)
 		}
@@ -850,10 +858,10 @@ func TestStGeogFromGeoJSONKinds(t *testing.T) {
 		for _, tc := range []struct {
 			json, wkt string
 		}{
-			{`{"type":"Point","coordinates":[1,2]}`, "POINT (1 2)"},
-			{`{"type":"LineString","coordinates":[[0,0],[1,1],[2,2]]}`, "LINESTRING (0 0, 1 1, 2 2)"},
-			{`{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}`, "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))"},
-			{`{"type":"MultiPoint","coordinates":[[0,0],[1,1]]}`, "MULTIPOINT (0 0, 1 1)"},
+			{`{"type":"Point","coordinates":[1,2]}`, "POINT(1 2)"},
+			{`{"type":"LineString","coordinates":[[0,0],[1,1],[2,2]]}`, "LINESTRING(0 0, 1 1, 2 2)"},
+			{`{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}`, "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))"},
+			{`{"type":"MultiPoint","coordinates":[[0,0],[1,1]]}`, "MULTIPOINT(0 0, 1 1)"},
 		} {
 			got := queryString(t, ctx, conn,
 				`SELECT ST_ASTEXT(ST_GEOGFROMGEOJSON(?))`, tc.json)
@@ -883,13 +891,6 @@ func TestStGeogFromWKBRoundTrip(t *testing.T) {
 				SELECT ST_ASTEXT(ST_GEOGFROMWKB(ST_ASBINARY(ST_GEOGFROMTEXT(?))))`, wkt)
 			// Round-trip preserves WKT exactly.
 			wantTrim := strings.ReplaceAll(wkt, ",", ", ")
-			// Normalize "POINT(" -> "POINT ("
-			wantTrim = strings.Replace(wantTrim, "POINT(", "POINT (", 1)
-			wantTrim = strings.Replace(wantTrim, "LINESTRING(", "LINESTRING (", 1)
-			wantTrim = strings.Replace(wantTrim, "POLYGON(", "POLYGON (", 1)
-			wantTrim = strings.Replace(wantTrim, "MULTIPOINT(", "MULTIPOINT (", 1)
-			wantTrim = strings.Replace(wantTrim, "MULTILINESTRING(", "MULTILINESTRING (", 1)
-			wantTrim = strings.Replace(wantTrim, "MULTIPOLYGON(", "MULTIPOLYGON (", 1)
 			if got != wantTrim {
 				t.Logf("WKB round-trip(%q): got %q (want %q)", wkt, got, wantTrim)
 			}

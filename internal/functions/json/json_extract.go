@@ -49,5 +49,8 @@ var BindJsonExtract = helper.Scalar2(func(a, b value.Value) (value.Value, error)
 			return value.JsonValue("null"), nil
 		}
 	}
-	return ret, err
+	if err != nil || ret == nil {
+		return ret, err
+	}
+	return stringResultForStringInput(a, ret), nil
 })

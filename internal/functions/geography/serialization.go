@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -109,66 +108,115 @@ func BindStGeogFromWKB(args ...value.Value) (value.Value, error) {
 
 // ----- GeoJSON serialization -----
 
+// geographyToGeoJSON renders g the way BigQuery's ST_ASGEOJSON does:
+// a space inside every brace and around nested arrays, a position as
+// [x, y], an empty array as [ ], and one trailing space after the
+// document (verified on BigQuery 2026-09-25:
+// ST_ASGEOJSON(ST_GEOGPOINT(1, 1)) is `{ "type": "Point",
+// "coordinates": [1, 1] } `).
 func geographyToGeoJSON(g *value.GeographyValue) (string, error) {
+	s, err := geoJSONObject(g)
+	if err != nil {
+		return "", err
+	}
+	return s + " ", nil
+}
+
+func geoJSONObject(g *value.GeographyValue) (string, error) {
+	if g.IsEmpty() {
+		return `{ "type": "GeometryCollection", "geometries": [ ] }`, nil
+	}
 	switch g.Kind() {
 	case "POINT":
 		lng, lat, _ := g.PointCoordinates()
-		return fmt.Sprintf(`{"type":"Point","coordinates":[%s,%s]}`, gjFloat(lng), gjFloat(lat)), nil
+		return geoJSONCoords("Point", gjPosition([2]float64{lng, lat})), nil
 	case "LINESTRING":
 		pts, _ := g.LineStringPoints()
-		return fmt.Sprintf(`{"type":"LineString","coordinates":%s}`, gjPoints(pts)), nil
+		return geoJSONCoords("LineString", gjPoints(pts)), nil
 	case "POLYGON":
 		rings, _ := g.PolygonRings()
-		return fmt.Sprintf(`{"type":"Polygon","coordinates":%s}`, gjRings(rings)), nil
+		return geoJSONCoords("Polygon", gjRings(rings)), nil
 	case "MULTIPOINT":
 		pts, _ := g.MultiPointPoints()
-		return fmt.Sprintf(`{"type":"MultiPoint","coordinates":%s}`, gjPoints(pts)), nil
+		if len(pts) == 1 {
+			// A one-member multi-geometry is its member on BigQuery.
+			return geoJSONCoords("Point", gjPosition(pts[0])), nil
+		}
+		return geoJSONCoords("MultiPoint", gjPoints(pts)), nil
 	case "MULTILINESTRING":
 		lines, _ := g.MultiLineStringLines()
-		var parts []string
-		for _, ls := range lines {
-			parts = append(parts, gjPoints(ls))
+		if len(lines) == 1 {
+			return geoJSONCoords("LineString", gjPoints(lines[0])), nil
 		}
-		return fmt.Sprintf(`{"type":"MultiLineString","coordinates":[%s]}`, strings.Join(parts, ",")), nil
+		parts := make([]string, len(lines))
+		for i, ls := range lines {
+			parts[i] = gjPoints(ls)
+		}
+		return geoJSONCoords("MultiLineString", gjList(parts)), nil
 	case "MULTIPOLYGON":
 		polys, _ := g.MultiPolygonPolys()
-		var parts []string
-		for _, rings := range polys {
-			parts = append(parts, gjRings(rings))
+		if len(polys) == 1 {
+			return geoJSONCoords("Polygon", gjRings(polys[0])), nil
 		}
-		return fmt.Sprintf(`{"type":"MultiPolygon","coordinates":[%s]}`, strings.Join(parts, ",")), nil
+		parts := make([]string, len(polys))
+		for i, rings := range polys {
+			parts[i] = gjRings(rings)
+		}
+		return geoJSONCoords("MultiPolygon", gjList(parts)), nil
+	case "GEOMETRYCOLLECTION":
+		members, _ := g.CollectionParts()
+		if len(members) == 1 {
+			return geoJSONObject(members[0])
+		}
+		parts := make([]string, len(members))
+		for i, m := range members {
+			s, err := geoJSONObject(m)
+			if err != nil {
+				return "", err
+			}
+			parts[i] = s
+		}
+		return `{ "type": "GeometryCollection", "geometries": ` + gjList(parts) + ` }`, nil
 	}
 	return "", sqError("ST_ASGEOJSON", "unsupported geometry kind %q", g.Kind())
 }
 
+func geoJSONCoords(typ, coords string) string {
+	return `{ "type": "` + typ + `", "coordinates": ` + coords + ` }`
+}
+
+// gjFloat prints a coordinate with 15 significant digits, as BigQuery
+// does (123.456789012345678 is 123.456789012346).
 func gjFloat(f float64) string {
-	return strconv.FormatFloat(f, 'g', -1, 64)
+	return strconv.FormatFloat(f, 'g', 15, 64)
+}
+
+func gjPosition(p [2]float64) string {
+	return "[" + gjFloat(p[0]) + ", " + gjFloat(p[1]) + "]"
+}
+
+// gjList joins nested arrays or objects as "[ a, b ]", or "[ ]".
+func gjList(parts []string) string {
+	if len(parts) == 0 {
+		return "[ ]"
+	}
+	return "[ " + strings.Join(parts, ", ") + " ]"
 }
 
 func gjPoints(pts [][2]float64) string {
-	var b strings.Builder
-	b.WriteByte('[')
+	parts := make([]string, len(pts))
 	for i, p := range pts {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		fmt.Fprintf(&b, "[%s,%s]", gjFloat(p[0]), gjFloat(p[1]))
+		parts[i] = gjPosition(p)
 	}
-	b.WriteByte(']')
-	return b.String()
+	return gjList(parts)
 }
 
 func gjRings(rings [][][2]float64) string {
-	var b strings.Builder
-	b.WriteByte('[')
+	parts := make([]string, len(rings))
 	for i, r := range rings {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(gjPoints(r))
+		parts[i] = gjPoints(r)
 	}
-	b.WriteByte(']')
-	return b.String()
+	return gjList(parts)
 }
 
 func geographyFromGeoJSON(s string) (value.Value, error) {
