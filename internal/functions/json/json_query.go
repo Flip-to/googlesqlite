@@ -50,8 +50,11 @@ var BindJsonQuery = helper.Scalar2(func(a, b value.Value) (value.Value, error) {
 		return nil, err
 	}
 	out, err := JSON_QUERY(v, path)
-	if err != nil || out != nil {
-		return out, err
+	if err != nil {
+		return nil, err
+	}
+	if out != nil {
+		return stringResultForStringInput(a, out), nil
 	}
 	// For JSON input a matched JSON null is JSON 'null', not SQL NULL
 	// (json_functions.md JSON_QUERY); STRING input maps it to NULL.
@@ -72,4 +75,20 @@ func jsonPathMatchesNull(v, path string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(extracted[0])) == "null"
+}
+
+// stringResultForStringInput turns the JSON text extracted from a
+// STRING argument into a STRING value: JSON_QUERY / JSON_EXTRACT of a
+// STRING return STRING, so TO_JSON_STRING quotes the text and
+// FORMAT('%T') prints a string literal (verified on BigQuery
+// 2026-09-25: TO_JSON_STRING(JSON_QUERY('{"a":"x"}', '$.a')) is
+// "\"x\"").
+func stringResultForStringInput(input, out value.Value) value.Value {
+	if _, isJSON := input.(value.JsonValue); isJSON {
+		return out
+	}
+	if j, ok := out.(value.JsonValue); ok {
+		return value.StringValue(j)
+	}
+	return out
 }

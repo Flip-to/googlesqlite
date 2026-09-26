@@ -217,6 +217,22 @@ func rangeValueFromLiteral(v googlesql.Value) (value.Value, error) {
 		return nil, fmt.Errorf("range End: %w", err)
 	}
 	rv := &value.RangeValue{}
+	// Keep the element type for a range with no bounds, so FORMAT('%T')
+	// can still print RANGE<DATE> "[UNBOUNDED, UNBOUNDED)".
+	if t, err := v.Type(); err == nil {
+		if rt, ok := t.(*googlesql.RangeType); ok {
+			if e, err := rt.ElementType(); err == nil && e != nil {
+				switch m1(e.Kind()) {
+				case googlesql.TypeKindTypeDate:
+					rv.ElemHeader = value.DateValueType
+				case googlesql.TypeKindTypeDatetime:
+					rv.ElemHeader = value.DatetimeValueType
+				case googlesql.TypeKindTypeTimestamp:
+					rv.ElemHeader = value.TimestampValueType
+				}
+			}
+		}
+	}
 	if startV != nil && !m1(startV.IsNull()) {
 		start, err := valueFromGoogleSQLValue(*startV)
 		if err != nil {

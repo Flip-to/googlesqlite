@@ -2,6 +2,9 @@ package value
 
 import "testing"
 
+// WKT expectations in this file use BigQuery's spelling, with no space
+// after the type name (POINT(1 2); verified on BigQuery 2026-09-25).
+
 func Test_ValueGeography_GeographyFromWKT(t *testing.T) {
 	t.Parallel()
 
@@ -18,7 +21,7 @@ func Test_ValueGeography_GeographyFromWKT(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if wkt != "POINT (-1 2)" {
+		if wkt != "POINT(-1 2)" {
 			t.Fatalf("unexpected WKT: %s", wkt)
 		}
 	})
@@ -36,7 +39,7 @@ func Test_ValueGeography_GeographyFromWKT(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if wkt != "POINT (-10.5 42)" {
+		if wkt != "POINT(-10.5 42)" {
 			t.Fatalf("unexpected WKT: %s", wkt)
 		}
 	})

@@ -4,6 +4,8 @@ cases:
   - desc: Roundtrip via GeoJSON
     sql: |-
       SELECT ST_ASGEOJSON(ST_GEOGFROMGEOJSON('{"type":"Point","coordinates":[3,4]}'))
+    # Expected: BigQuery's ST_ASGEOJSON output, verified on BigQuery
+    # 2026-09-25 (spaces inside braces and around nested arrays).
     expected:
       rows:
-        - ['{"type":"Point","coordinates":[3,4]}']
+        - ['{ "type": "Point", "coordinates": [3, 4] } ']

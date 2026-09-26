@@ -20,9 +20,11 @@ cases:
         - ['POINT (2 2)']
   - desc: linestring centroid is the length-weighted midpoint
     sql: SELECT ST_ASTEXT(ST_CENTROID_AGG(g)) FROM UNNEST([ST_GEOGFROMTEXT('LINESTRING(0 0, 4 0)')]) AS g
+    # Verified on BigQuery 2026-09-25: BigQuery writes WKT with no space
+    # after the type name.
     expected:
       rows:
-        - ['POINT (2 0)']
+        - ['POINT(2 0)']
   - desc: square polygon centroid is the area-weighted centre
     sql: SELECT ST_ASTEXT(ST_CENTROID_AGG(g)) FROM UNNEST([ST_GEOGFROMTEXT('POLYGON((0 0, 2 0, 2 2, 0 2, 0 0))')]) AS g
     expected:

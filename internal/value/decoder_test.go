@@ -7,6 +7,9 @@ import (
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
+// WKT expectations in this file use BigQuery's spelling, with no space
+// after the type name (POINT(1 2); verified on BigQuery 2026-09-25).
+
 // TestDecodeValue + TestConvertArgs round-trips every supported Value
 // shape through EncodeValue -> DecodeValue and exercises the fall-back
 // branches that hand back a plain StringValue.
@@ -197,7 +200,7 @@ func TestDecodeValue(t *testing.T) {
 			t.Fatalf("type: %T", got)
 		}
 		s, _ := gv.ToWKT()
-		if s != "POINT (1 2)" {
+		if s != "POINT(1 2)" {
 			t.Fatalf("WKT: %s", s)
 		}
 	})

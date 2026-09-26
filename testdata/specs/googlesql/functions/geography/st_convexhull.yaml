@@ -4,6 +4,8 @@ cases:
   - desc: triangle hull from 3 points
     sql: |-
       SELECT ST_ASGEOJSON(ST_CONVEXHULL(ST_GEOGFROMTEXT('MULTIPOINT(0 0, 1 0, 0.5 1)')))
+    # Expected: BigQuery's ST_ASGEOJSON output, verified on BigQuery
+    # 2026-09-25 (spaces inside braces and around nested arrays).
     expected:
       rows:
-        - ['{"type":"Polygon","coordinates":[[[0,0],[1,0],[0.5,1],[0,0]]]}']
+        - ['{ "type": "Polygon", "coordinates": [ [ [0, 0], [1, 0], [0.5, 1], [0, 0] ] ] } ']

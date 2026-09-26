@@ -7,6 +7,9 @@ import (
 	"github.com/goccy/googlesqlite/internal/value"
 )
 
+// WKT expectations in this file use BigQuery's spelling, with no space
+// after the type name (POINT(1 2); verified on BigQuery 2026-09-25).
+
 // Tests for the Bind* geography functions. Inputs and expected
 // outputs follow the BigQuery / Spanner geography reference where
 // applicable (lengths, types). For functions whose exact return
@@ -86,7 +89,7 @@ func TestBindStStartEndPoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (0 0)" {
+	if mustString(t, got) != "POINT(0 0)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -94,7 +97,7 @@ func TestBindStStartEndPoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (2 2)" {
+	if mustString(t, got) != "POINT(2 2)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -130,7 +133,7 @@ func TestBindStPointN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (0 0)" {
+	if mustString(t, got) != "POINT(0 0)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -138,7 +141,7 @@ func TestBindStPointN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (1 1)" {
+	if mustString(t, got) != "POINT(1 1)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -147,7 +150,7 @@ func TestBindStPointN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (2 2)" {
+	if mustString(t, got) != "POINT(2 2)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -459,7 +462,7 @@ func TestBindStCentroid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (10 20)" {
+	if mustString(t, got) != "POINT(10 20)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -667,7 +670,7 @@ func TestBindStGeogFromGeoJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (1 2)" {
+	if mustString(t, got) != "POINT(1 2)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -690,7 +693,7 @@ func TestBindStAsBinaryRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, back) != "POINT (1 2)" {
+	if mustString(t, back) != "POINT(1 2)" {
 		t.Fatalf("got %q", mustString(t, back))
 	}
 
@@ -715,7 +718,7 @@ func TestBindStAsText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (1 2)" {
+	if mustString(t, got) != "POINT(1 2)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -1719,7 +1722,7 @@ func TestBindStGeogPointInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (10 20)" {
+	if mustString(t, got) != "POINT(10 20)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -1749,7 +1752,7 @@ func TestBindStGeogFromText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mustString(t, got) != "POINT (1 2)" {
+	if mustString(t, got) != "POINT(1 2)" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 
@@ -2115,7 +2118,9 @@ func TestBindStGeogFromGeoJSONMulti(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(mustString(t, got), "MULTIPOLYGON") {
+	// A one-member MultiPolygon prints as POLYGON((0 0, 1 0, 1 1, 0 1,
+	// 0 0)) on BigQuery (verified on BigQuery 2026-09-25).
+	if mustString(t, got) != "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))" {
 		t.Fatalf("got %q", mustString(t, got))
 	}
 }

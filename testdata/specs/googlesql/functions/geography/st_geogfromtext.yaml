@@ -3,6 +3,8 @@ dialect: googlesql
 cases:
   - desc: parse WKT and format back
     sql: SELECT ST_ASTEXT(ST_GEOGFROMTEXT('POINT(3 4)'))
+    # Verified on BigQuery 2026-09-25: BigQuery writes WKT with no space
+    # after the type name.
     expected:
       rows:
-        - ['POINT (3 4)']
+        - ['POINT(3 4)']

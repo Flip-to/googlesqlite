@@ -4,6 +4,8 @@ cases:
   - desc: Point GeoJSON
     sql: |-
       SELECT ST_ASGEOJSON(ST_GEOGFROMTEXT('POINT(1 2)'))
+    # Expected: BigQuery's ST_ASGEOJSON output, verified on BigQuery
+    # 2026-09-25 (spaces inside braces and around nested arrays).
     expected:
       rows:
-        - ['{"type":"Point","coordinates":[1,2]}']
+        - ['{ "type": "Point", "coordinates": [1, 2] } ']

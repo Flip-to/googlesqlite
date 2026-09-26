@@ -89,6 +89,27 @@ func encodeJSON(v Value, opts jsonEncodeOpts) (string, error) {
 			}
 			return s, nil
 		}
+	case *IntervalValue:
+		return strconv.Quote(vv.ISO8601()), nil
+	case *RangeValue:
+		// {"start":...,"end":...} with null for an unbounded side
+		// (verified on BigQuery 2026-09-25:
+		// TO_JSON_STRING(RANGE<DATE> '[2020-01-01, UNBOUNDED)') is
+		// {"start":"2020-01-01","end":null}).
+		start, err := encodeJSON(vv.Start, opts)
+		if err != nil {
+			return "", err
+		}
+		end, err := encodeJSON(vv.End, opts)
+		if err != nil {
+			return "", err
+		}
+		if !opts.canonical {
+			// A JSON value lists members by name, so TO_JSON puts
+			// "end" first (TO_JSON_STRING(TO_JSON(range)) on BigQuery).
+			return `{"end":` + end + `,"start":` + start + `}`, nil
+		}
+		return `{"start":` + start + `,"end":` + end + `}`, nil
 	case *ArrayValue:
 		elems := make([]string, 0, len(vv.Values))
 		for _, e := range vv.Values {
