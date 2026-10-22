@@ -3470,7 +3470,9 @@ func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
 	// the counts down so WithEntryNode.FormatSQL can decide whether
 	// to emit `MATERIALIZED`.
 	refCounts := map[string]int{}
+	var inlineCost *cteInlineCost
 	if conn := connFromContext(ctx); conn == nil || conn.MaterializeCTE() {
+		inlineCost = newCteInlineCost(n.node)
 		query, _ := n.node.Query()
 		if query != nil {
 			collectCteRefCounts(query, refCounts)
@@ -3483,7 +3485,7 @@ func (n *WithScanNode) FormatSQL(ctx context.Context) (string, error) {
 			collectCteRefCounts(sub, refCounts)
 		}
 	}
-	subCtx := withCteRefCounts(ctx, refCounts)
+	subCtx := withCteInlineCost(withCteRefCounts(ctx, refCounts), inlineCost)
 	// Inside a recursive CTE body the entries move up next to the
 	// recursive entry: SQLite rejects a WITH clause that starts a
 	// compound-select term (with_recursive.test).
@@ -3580,6 +3582,12 @@ func (n *WithEntryNode) FormatSQL(ctx context.Context) (string, error) {
 		// MATERIALIZED SQLite may inline the body and evaluate a
 		// volatile call once per reference
 		// (aead.test encrypt_with_clause).
+		hint = " MATERIALIZED"
+	}
+	if hint == "" && subKind != googlesql.ResolvedNodeKindResolvedRecursiveScan &&
+		cteInlineCostFrom(ctx).materialize(queryName, len(subquery)) {
+		// Inlining would make SQLite copy this body into every
+		// column reference of its consumer; see cteInlineBudget.
 		hint = " MATERIALIZED"
 	}
 	if subKind == googlesql.ResolvedNodeKindResolvedRecursiveScan {
