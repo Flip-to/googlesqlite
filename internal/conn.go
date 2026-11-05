@@ -42,10 +42,22 @@ func (f *ChangedTableFunction) Changed() bool {
 // embedding layer owns datasets and applies the request.
 type ChangedSchema struct {
 	Added []*SchemaSpec
+	// Dropped lists the DROP SCHEMA statements: the embedding layer drops the dataset (and, with
+	// Cascade, its tables).
+	Dropped []*DroppedSchema
 }
 
 func (s *ChangedSchema) Changed() bool {
-	return len(s.Added) != 0
+	return len(s.Added) != 0 || len(s.Dropped) != 0
+}
+
+// DroppedSchema is a DROP SCHEMA [IF EXISTS] statement.
+type DroppedSchema struct {
+	// NamePath is [dataset] or [project, dataset].
+	NamePath []string `json:"namePath"`
+	IfExists bool     `json:"ifExists"`
+	// Cascade is set for DROP SCHEMA ... CASCADE; otherwise a schema that still holds tables is not dropped.
+	Cascade bool `json:"cascade"`
 }
 
 type ChangedTable struct {
@@ -247,6 +259,10 @@ func filterTVFs(specs []*TVFSpec, drop *TVFSpec) []*TVFSpec {
 
 func (c *Conn) addSchema(spec *SchemaSpec) {
 	c.cc.Schema.Added = append(c.cc.Schema.Added, spec)
+}
+
+func (c *Conn) dropSchema(spec *DroppedSchema) {
+	c.cc.Schema.Dropped = append(c.cc.Schema.Dropped, spec)
 }
 
 func (c *Conn) deleteTable(spec *TableSpec) {

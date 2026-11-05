@@ -2036,6 +2036,13 @@ func (c *Catalog) tableHasPrimaryKey(table googlesql.TableNode) bool {
 	return ok && len(spec.PrimaryKey) > 0
 }
 
+// tableSpecByName returns the spec of the table stored under `name`, or nil.
+func (c *Catalog) tableSpecByName(name string) *TableSpec {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tableMap[name]
+}
+
 func (c *Catalog) hasTableSpec(name string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
