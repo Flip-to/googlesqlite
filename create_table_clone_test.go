@@ -85,3 +85,37 @@ func TestCreateTableIfNotExistsAsSelect(t *testing.T) {
 		t.Fatalf("IF NOT EXISTS replaced the existing table: x=%d, want 1", x)
 	}
 }
+
+// TestTableAndViewOptionsReported: the OPTIONS of CREATE VIEW (they were dropped) and of CREATE TABLE ... AS SELECT
+// reach the table spec the embedding layer receives, with accessors for the description and the labels.
+func TestTableAndViewOptionsReported(t *testing.T) {
+	t.Parallel()
+	db, ctx := openGapsDB(t)
+	mustExecGaps(t, ctx, db, "CREATE TABLE `p.d.t` (x INT64)")
+
+	view := changedCatalogOf(t, ctx, db,
+		"CREATE OR REPLACE VIEW `p.d.v` OPTIONS(description='it\\'s \"quoted\"; fine', labels=[('team','data'),('tier','gold')]) AS SELECT * FROM `p.d.t`")
+	if len(view.Table.Added) != 1 {
+		t.Fatalf("view not reported as added: %+v", view.Table)
+	}
+	spec := view.Table.Added[0]
+	if got, _ := spec.Option("description"); got != "it's \"quoted\"; fine" {
+		t.Fatalf("view description = %q", got)
+	}
+	if got := spec.Labels(); len(got) != 2 || got["team"] != "data" || got["tier"] != "gold" {
+		t.Fatalf("view labels = %v", got)
+	}
+	if _, ok := spec.Option("friendly_name"); ok {
+		t.Fatal("an option that was not set must not be reported")
+	}
+
+	ctas := changedCatalogOf(t, ctx, db,
+		"CREATE TABLE `p.d.t2` OPTIONS(description=\"table doc\", labels=[('a','b')]) AS SELECT 1 AS x")
+	spec = ctas.Table.Added[0]
+	if got, _ := spec.Option("description"); got != "table doc" {
+		t.Fatalf("table description = %q", got)
+	}
+	if got := spec.Labels(); len(got) != 1 || got["a"] != "b" {
+		t.Fatalf("table labels = %v", got)
+	}
+}

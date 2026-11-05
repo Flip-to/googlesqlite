@@ -233,6 +233,75 @@ func (s *SchemaSpec) Option(name string) (string, bool) {
 	return "", false
 }
 
+// Option returns the value of the named CREATE TABLE / VIEW option (case-insensitive) with the
+// quotes of a STRING literal removed.
+func (s *TableSpec) Option(name string) (string, bool) {
+	for _, opt := range s.Options {
+		if opt == nil || !strings.EqualFold(opt.Name, name) {
+			continue
+		}
+		if strs := sqlStringLiterals(opt.Value); len(strs) == 1 && isSQLStringLiteral(opt.Value) {
+			return strs[0], true
+		}
+		return opt.Value, true
+	}
+	return "", false
+}
+
+// Labels returns the `labels=[(key, value), ...]` option as a map, or nil.
+func (s *TableSpec) Labels() map[string]string {
+	for _, opt := range s.Options {
+		if opt == nil || !strings.EqualFold(opt.Name, "labels") {
+			continue
+		}
+		strs := sqlStringLiterals(opt.Value)
+		labels := make(map[string]string, len(strs)/2)
+		for i := 0; i+1 < len(strs); i += 2 {
+			labels[strs[i]] = strs[i+1]
+		}
+		return labels
+	}
+	return nil
+}
+
+func isSQLStringLiteral(v string) bool {
+	return len(v) >= 2 && (v[0] == '\'' || v[0] == '"') && v[len(v)-1] == v[0]
+}
+
+// sqlStringLiterals lists, in order, the values of the quoted string literals in a rendered SQL
+// literal such as `'abc'` or `[("a", "b"), ("c", "d")]`. Backslash escapes and a doubled quote
+// inside a literal are resolved.
+func sqlStringLiterals(v string) []string {
+	var out []string
+	for i := 0; i < len(v); i++ {
+		quote := v[i]
+		if quote != '\'' && quote != '"' {
+			continue
+		}
+		var b strings.Builder
+		i++
+		for ; i < len(v); i++ {
+			c := v[i]
+			if c == '\\' && i+1 < len(v) {
+				i++
+				b.WriteByte(v[i])
+				continue
+			}
+			if c == quote {
+				if i+1 < len(v) && v[i+1] == quote {
+					b.WriteByte(quote)
+					i++
+					continue
+				}
+				break
+			}
+			b.WriteByte(c)
+		}
+		out = append(out, b.String())
+	}
+	return out
+}
+
 func (s *TableSpec) Column(name string) *ColumnSpec {
 	for _, col := range s.Columns {
 		if col.Name == name {
@@ -1149,6 +1218,7 @@ func newTableAsViewSpec(namePath *NamePath, query string, stmt *googlesql.Resolv
 		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
 		Columns:    newColumnsFromOutputColumns(m1(stmt.OutputColumnList())),
 		CreateMode: m1(stmt.CreateMode()),
+		Options:    newTableOptionsFromResolved(m1(stmt.OptionList())),
 		Query:      fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
 		UpdatedAt:  now,
 		CreatedAt:  now,
@@ -1173,6 +1243,7 @@ func newTableAsSelectSpec(ctx context.Context, namePath *NamePath, query string,
 		Columns:     newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
 		PrimaryKey:  newPrimaryKey(m1(stmt.PrimaryKey())),
 		CreateMode:  m1(stmt.CreateMode()),
+		Options:     newTableOptionsFromResolved(m1(stmt.OptionList())),
 		PartitionBy: partitionExprFromContext(ctx, m1(stmt.NamePath())),
 		Query:       fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
 		UpdatedAt:   now,
