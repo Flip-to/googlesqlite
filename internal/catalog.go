@@ -2935,6 +2935,7 @@ func (c *Catalog) copyTableSpec(spec *TableSpec, newNamePath []string) *TableSpe
 		CreateMode:  spec.CreateMode,
 		Options:     spec.Options,
 		PartitionBy: spec.PartitionBy,
+		ClusterBy:   spec.ClusterBy,
 	}
 }
 

@@ -44,3 +44,6 @@ func ChangedCatalogFromRows(rows *sql.Rows) (*ChangedCatalog, error) {
 	googlesqliteRows := (*internal.Rows)(driverValue.UnsafePointer())
 	return googlesqliteRows.ChangedCatalog(), nil
 }
+
+// PartitionInfo is the PARTITION BY of a table; see TableSpec.Partitioning.
+type PartitionInfo = internal.PartitionInfo

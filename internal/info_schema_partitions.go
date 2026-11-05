@@ -298,3 +298,35 @@ func (p *partitionSpec) id(raw any) string {
 	}
 	return t.Format(p.layout)
 }
+
+// PartitionInfo is the PARTITION BY of a table in the shape BigQuery's tables.get reports it.
+type PartitionInfo struct {
+	// Field is the partitioning column.
+	Field string
+	// Range is true for RANGE_BUCKET partitioning; Type is then unused.
+	Range bool
+	// Type is the time granularity of time partitioning: DAY, HOUR, MONTH or YEAR.
+	Type string
+	// RangeStart, RangeEnd and RangeInterval describe RANGE_BUCKET(col, GENERATE_ARRAY(start, end, step)).
+	RangeStart, RangeEnd, RangeInterval int64
+}
+
+// Partitioning parses PartitionBy: a column, DATE(col), TIMESTAMP_TRUNC / DATETIME_TRUNC / DATE_TRUNC(col, unit) or
+// RANGE_BUCKET(col, GENERATE_ARRAY(...)). It returns nil when the table is not partitioned by one of those
+// (no PARTITION BY, ingestion time, any other expression).
+func (t *TableSpec) Partitioning() *PartitionInfo {
+	ps := partitionSpecFromExpr(t.PartitionBy)
+	if ps == nil {
+		return nil
+	}
+	if ps.kind == "range" {
+		return &PartitionInfo{Field: ps.column, Range: true, RangeStart: ps.start, RangeEnd: ps.end, RangeInterval: ps.interval}
+	}
+	typ := "DAY"
+	for name, layout := range map[string]string{"HOUR": "2006010215", "MONTH": "200601", "YEAR": "2006"} {
+		if ps.layout == layout {
+			typ = name
+		}
+	}
+	return &PartitionInfo{Field: ps.column, Type: typ}
+}
