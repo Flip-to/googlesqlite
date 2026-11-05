@@ -36,8 +36,23 @@ func RegisterInfoSchemaModules(conn *sqlite3.Conn, catalog *Catalog) error {
 // carries the dataset filter that the formatter pushes down via
 // `WHERE __schema = '<dataset>'`.
 type infoSchemaTable struct {
+	conn    *sqlite3.Conn
 	view    *infoSchemaView
 	catalog *Catalog
+}
+
+// countRows counts the rows of a SQLite table on the connection the virtual
+// table belongs to.
+func (t *infoSchemaTable) countRows(sqliteTable string) (int64, bool) {
+	stmt, _, err := t.conn.Prepare("SELECT COUNT(*) FROM `" + strings.ReplaceAll(sqliteTable, "`", "``") + "`")
+	if err != nil {
+		return 0, false
+	}
+	defer stmt.Close()
+	if !stmt.Step() {
+		return 0, false
+	}
+	return stmt.ColumnInt64(0), true
 }
 
 func newInfoSchemaTable(conn *sqlite3.Conn, view *infoSchemaView, catalog *Catalog) (*infoSchemaTable, error) {
@@ -50,7 +65,7 @@ func newInfoSchemaTable(conn *sqlite3.Conn, view *infoSchemaView, catalog *Catal
 	if err := conn.DeclareVTab(declSQL); err != nil {
 		return nil, err
 	}
-	return &infoSchemaTable{view: view, catalog: catalog}, nil
+	return &infoSchemaTable{conn: conn, view: view, catalog: catalog}, nil
 }
 
 // schemaConstraintColumn is the index (0-based) of the hidden
@@ -103,7 +118,7 @@ func (c *infoSchemaCursor) Filter(_ int, _ string, args ...sqlite3.Value) error 
 		schema = args[0].Text()
 	}
 	c.table.catalog.mu.Lock()
-	rows := c.table.view.BuildRows(c.table.catalog, schema)
+	rows := c.table.view.BuildRows(c.table.catalog, schema, c.table.countRows)
 	c.table.catalog.mu.Unlock()
 	c.rows = rows
 	return nil
