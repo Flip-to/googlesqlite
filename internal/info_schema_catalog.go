@@ -48,6 +48,14 @@ func (c *Catalog) ensureInfoSchemaForDataset(project, dataset string) error {
 // formatter can identify the scan later.
 func (c *Catalog) registerInfoSchemaView(project, dataset string, view *infoSchemaView) error {
 	storageName := fmt.Sprintf("%s.%s.INFORMATION_SCHEMA.%s", project, dataset, view.Name)
+	// Path is [project, dataset, "INFORMATION_SCHEMA", view.Name], or
+	// [project, dataset, view.Name] for a view that lives in the dataset
+	// itself (__TABLES__).
+	path := []string{project, dataset, "INFORMATION_SCHEMA", view.Name}
+	if view.TopLevel {
+		storageName = fmt.Sprintf("%s.%s.%s", project, dataset, view.Name)
+		path = []string{project, dataset, view.Name}
+	}
 	columns := []googlesql.Googlesql_ColumnNode{}
 	for _, col := range view.Columns {
 		typ, err := infoSchemaSimpleTypeForColumn(col)
@@ -69,9 +77,7 @@ func (c *Catalog) registerInfoSchemaView(project, dataset string, view *infoSche
 	// so name-keyed lookups stay stable across analyzer descents.
 	c.infoSchemaTables[storageName] = &infoSchemaTableMeta{view: view, dataset: dataset}
 	// Alias the same handle through every catalog level the analyzer
-	// can descend through, mirroring addTableSpecRecursiveImpl. Path
-	// is [project, dataset, "INFORMATION_SCHEMA", view.Name].
-	path := []string{project, dataset, "INFORMATION_SCHEMA", view.Name}
+	// can descend through, mirroring addTableSpecRecursiveImpl.
 	return c.aliasInfoSchemaTable(c.catalog, path, tbl)
 }
 

@@ -189,6 +189,10 @@ type TableSpec struct {
 	// INFORMATION_SCHEMA.TABLE_OPTIONS view surfaces them
 	// one-row-per-(table, option).
 	Options []*tableOptionSpec `json:"options,omitempty"`
+	// PartitionBy is the CREATE TABLE ... PARTITION BY expression, as
+	// written. Storage is not partitioned; it only feeds
+	// INFORMATION_SCHEMA.PARTITIONS.
+	PartitionBy string `json:"partitionBy,omitempty"`
 }
 
 // TableOptionSpec captures a single CREATE TABLE OPTIONS entry. Type
@@ -198,6 +202,35 @@ type tableOptionSpec struct {
 	Name  string `json:"name"`
 	Type  string `json:"type"`
 	Value string `json:"value"`
+}
+
+// SchemaSpec is a CREATE SCHEMA [IF NOT EXISTS] statement. A schema is a
+// BigQuery dataset: the driver reports the request through the
+// ChangedCatalog and leaves creating the dataset to the embedding layer.
+type SchemaSpec struct {
+	// NamePath is [dataset] or [project, dataset].
+	NamePath    []string `json:"namePath"`
+	IfNotExists bool     `json:"ifNotExists"`
+	// OrReplace is set for CREATE OR REPLACE SCHEMA.
+	OrReplace bool `json:"orReplace"`
+	// Options carries the OPTIONS(...) clause; Value is the SQL literal.
+	Options []*tableOptionSpec `json:"options,omitempty"`
+}
+
+// Option returns the value of the named option (case-insensitive) with
+// the quotes of a STRING literal removed.
+func (s *SchemaSpec) Option(name string) (string, bool) {
+	for _, opt := range s.Options {
+		if opt == nil || !strings.EqualFold(opt.Name, name) {
+			continue
+		}
+		v := opt.Value
+		if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+			v = strings.ReplaceAll(v[1:len(v)-1], "''", "'")
+		}
+		return v, true
+	}
+	return "", false
 }
 
 func (s *TableSpec) Column(name string) *ColumnSpec {
@@ -945,14 +978,15 @@ func newPrimaryKey(key *googlesql.ResolvedPrimaryKey) []string {
 func newTableSpecWithQuery(ctx context.Context, namePath *NamePath, query string, stmt *googlesql.ResolvedCreateTableStmt) *TableSpec {
 	now := time.Now()
 	return &TableSpec{
-		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
-		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
-		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
-		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
-		CreateMode: m1(stmt.CreateMode()),
-		Options:    newTableOptionsFromResolved(m1(stmt.OptionList())),
-		UpdatedAt:  now,
-		CreatedAt:  now,
+		IsTemp:      resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+		NamePath:    namePath.mergePath(m1(stmt.NamePath())),
+		Columns:     newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
+		PrimaryKey:  newPrimaryKey(m1(stmt.PrimaryKey())),
+		CreateMode:  m1(stmt.CreateMode()),
+		Options:     newTableOptionsFromResolved(m1(stmt.OptionList())),
+		PartitionBy: partitionExprFromContext(ctx, m1(stmt.NamePath())),
+		UpdatedAt:   now,
+		CreatedAt:   now,
 	}
 }
 
@@ -1134,14 +1168,15 @@ func newTableAsSelectSpec(ctx context.Context, namePath *NamePath, query string,
 	}
 	now := time.Now()
 	return &TableSpec{
-		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
-		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
-		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
-		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
-		CreateMode: m1(stmt.CreateMode()),
-		Query:      fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
-		UpdatedAt:  now,
-		CreatedAt:  now,
+		IsTemp:      resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+		NamePath:    namePath.mergePath(m1(stmt.NamePath())),
+		Columns:     newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
+		PrimaryKey:  newPrimaryKey(m1(stmt.PrimaryKey())),
+		CreateMode:  m1(stmt.CreateMode()),
+		PartitionBy: partitionExprFromContext(ctx, m1(stmt.NamePath())),
+		Query:       fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
+		UpdatedAt:   now,
+		CreatedAt:   now,
 	}
 }
 

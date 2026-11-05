@@ -1854,6 +1854,7 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
 	// calls in their exact positions relative to the uniform pipeline
 	// steps.
 	query, args = applyMixedParameterRewrite(query, args)
+	ctx = withPartitionExprs(ctx, extractPartitionByExprs(query))
 	query = applySQLRewritePipeline(query, sqlRewritePipelinePreScriptVars)
 	query = applyScriptVariables(ctx, query, conn)
 	query = applySQLRewritePipeline(query, sqlRewritePipelinePostScriptVars)
@@ -2304,9 +2305,11 @@ func (a *Analyzer) newStmtAction(ctx context.Context, query string, args []drive
 		return a.newAssertStmtAction(ctx, node.(*googlesql.ResolvedAssertStmt))
 	case googlesql.ResolvedNodeKindResolvedCreatePropertyGraphStmt:
 		return a.newCreatePropertyGraphStmtAction(ctx, node.(*googlesql.ResolvedCreatePropertyGraphStmt))
+	case googlesql.ResolvedNodeKindResolvedAlterTableStmt:
+		return a.newAlterTableStmtAction(ctx, node.(*googlesql.ResolvedAlterTableStmt))
+	case googlesql.ResolvedNodeKindResolvedCreateSchemaStmt:
+		return a.newCreateSchemaStmtAction(node.(*googlesql.ResolvedCreateSchemaStmt))
 	case
-		googlesql.ResolvedNodeKindResolvedAlterTableStmt,
-		googlesql.ResolvedNodeKindResolvedCreateSchemaStmt,
 		googlesql.ResolvedNodeKindResolvedGrantStmt,
 		googlesql.ResolvedNodeKindResolvedRevokeStmt,
 		googlesql.ResolvedNodeKindResolvedExecuteImmediateStmt,

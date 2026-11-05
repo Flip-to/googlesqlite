@@ -12,6 +12,13 @@ type (
 	ChangedCatalog  = internal.ChangedCatalog
 	ChangedTable    = internal.ChangedTable
 	ChangedFunction = internal.ChangedFunction
+	// ChangedTableFunction lists the CREATE TABLE FUNCTION / DROP TABLE
+	// FUNCTION statements of a query.
+	ChangedTableFunction = internal.ChangedTableFunction
+	// ChangedSchema lists the CREATE SCHEMA statements of a query.
+	ChangedSchema = internal.ChangedSchema
+	TVFSpec       = internal.TVFSpec
+	SchemaSpec    = internal.SchemaSpec
 	TableSpec       = internal.TableSpec
 	FunctionSpec    = internal.FunctionSpec
 	NameWithType    = internal.NameWithType
