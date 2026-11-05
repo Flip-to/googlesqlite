@@ -373,6 +373,12 @@ func (a *DropStmtAction) exec(ctx context.Context, conn *Conn) error {
 			delete(a.tvfMap, spec.TVFName())
 		}
 		conn.deleteTVF(spec)
+	case "PROCEDURE":
+		// CREATE PROCEDURE is a metadata-only no-op (NoopStmtAction), so no
+		// procedure is ever registered and there is nothing to remove. Succeed,
+		// with or without IF EXISTS: scripts such as dbt-bigquery's
+		// `DROP PROCEDURE IF EXISTS` before a table-function deploy rely on it.
+		return nil
 	default:
 		return fmt.Errorf("currently unsupported DROP %s statement", a.objectType)
 	}
