@@ -193,6 +193,8 @@ type TableSpec struct {
 	// written. Storage is not partitioned; it only feeds
 	// INFORMATION_SCHEMA.PARTITIONS.
 	PartitionBy string `json:"partitionBy,omitempty"`
+	// ClusterBy is the CREATE TABLE ... CLUSTER BY column list. Like PartitionBy it is metadata only.
+	ClusterBy []string `json:"clusterBy,omitempty"`
 }
 
 // TableOptionSpec captures a single CREATE TABLE OPTIONS entry. Type
@@ -1036,6 +1038,26 @@ func newColumnsFromOutputColumns(def []*googlesql.ResolvedOutputColumn) []*Colum
 	return columns
 }
 
+// newClusterBy returns the column names of a CLUSTER BY list. BigQuery only clusters by columns, so
+// anything else is skipped.
+func newClusterBy(list []googlesql.ResolvedExprNode) []string {
+	var cols []string
+	for _, e := range list {
+		ref, ok := e.(*googlesql.ResolvedColumnRef)
+		if !ok {
+			continue
+		}
+		col, err := ref.Column()
+		if err != nil || col == nil {
+			continue
+		}
+		if name, err := col.Name(); err == nil && name != "" {
+			cols = append(cols, name)
+		}
+	}
+	return cols
+}
+
 func newPrimaryKey(key *googlesql.ResolvedPrimaryKey) []string {
 	if key == nil {
 		return nil
@@ -1054,6 +1076,7 @@ func newTableSpecWithQuery(ctx context.Context, namePath *NamePath, query string
 		CreateMode:  m1(stmt.CreateMode()),
 		Options:     newTableOptionsFromResolved(m1(stmt.OptionList())),
 		PartitionBy: partitionExprFromContext(ctx, m1(stmt.NamePath())),
+		ClusterBy:   newClusterBy(m1(stmt.ClusterByList())),
 		UpdatedAt:   now,
 		CreatedAt:   now,
 	}
@@ -1245,6 +1268,7 @@ func newTableAsSelectSpec(ctx context.Context, namePath *NamePath, query string,
 		CreateMode:  m1(stmt.CreateMode()),
 		Options:     newTableOptionsFromResolved(m1(stmt.OptionList())),
 		PartitionBy: partitionExprFromContext(ctx, m1(stmt.NamePath())),
+		ClusterBy:   newClusterBy(m1(stmt.ClusterByList())),
 		Query:       fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
 		UpdatedAt:   now,
 		CreatedAt:   now,

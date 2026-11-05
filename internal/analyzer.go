@@ -2452,6 +2452,7 @@ func (a *Analyzer) newCreateTableCloneStmtAction(ctx context.Context, args []dri
 	}
 	if source != nil {
 		spec.PartitionBy = source.PartitionBy
+		spec.ClusterBy = source.ClusterBy
 	}
 	queryArgs, err := getArgsFromParams(args, params)
 	if err != nil {
