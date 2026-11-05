@@ -17,6 +17,8 @@ type (
 	ChangedTableFunction = internal.ChangedTableFunction
 	// ChangedSchema lists the CREATE SCHEMA statements of a query.
 	ChangedSchema = internal.ChangedSchema
+	// DroppedSchema is a DROP SCHEMA statement of a query.
+	DroppedSchema = internal.DroppedSchema
 	TVFSpec       = internal.TVFSpec
 	SchemaSpec    = internal.SchemaSpec
 	TableSpec       = internal.TableSpec

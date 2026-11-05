@@ -2275,7 +2275,11 @@ func (a *Analyzer) newStmtAction(ctx context.Context, query string, args []drive
 		ctx = withUseColumnID(ctx)
 		return a.newCreateViewStmtAction(ctx, query, args, node.(*googlesql.ResolvedCreateViewStmt))
 	case googlesql.ResolvedNodeKindResolvedDropStmt:
-		return a.newDropStmtAction(ctx, query, args, node.(*googlesql.ResolvedDropStmt))
+		dropStmt := node.(*googlesql.ResolvedDropStmt)
+		if objectType, _ := dropStmt.ObjectType(); strings.EqualFold(objectType, "SCHEMA") {
+			return a.newDropSchemaStmtAction(dropStmt)
+		}
+		return a.newDropStmtAction(ctx, query, args, dropStmt)
 	case googlesql.ResolvedNodeKindResolvedDropFunctionStmt:
 		return a.newDropFunctionStmtAction(ctx, query, args, node.(*googlesql.ResolvedDropFunctionStmt))
 	case googlesql.ResolvedNodeKindResolvedDropTableFunctionStmt:

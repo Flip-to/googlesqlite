@@ -119,3 +119,23 @@ func TestTableAndViewOptionsReported(t *testing.T) {
 		t.Fatalf("table labels = %v", got)
 	}
 }
+
+// TestDropSchemaIsReported: DROP SCHEMA [IF EXISTS] ... [CASCADE] is reported through the ChangedCatalog so the embedding layer
+// can drop the dataset (it used to fail with "currently unsupported DROP SCHEMA statement").
+func TestDropSchemaIsReported(t *testing.T) {
+	t.Parallel()
+	db, ctx := openGapsDB(t)
+	cc := changedCatalogOf(t, ctx, db, "DROP SCHEMA IF EXISTS `p`.`env_pr_1` CASCADE")
+	if len(cc.Schema.Dropped) != 1 {
+		t.Fatalf("expected one dropped schema, got %+v", cc.Schema)
+	}
+	dropped := cc.Schema.Dropped[0]
+	if strings.Join(dropped.NamePath, ".") != "p.env_pr_1" || !dropped.IfExists || !dropped.Cascade {
+		t.Fatalf("dropped = %+v", dropped)
+	}
+	cc = changedCatalogOf(t, ctx, db, "DROP SCHEMA `env_pr_2`")
+	dropped = cc.Schema.Dropped[0]
+	if strings.Join(dropped.NamePath, ".") != "env_pr_2" || dropped.IfExists || dropped.Cascade {
+		t.Fatalf("dropped = %+v", dropped)
+	}
+}
