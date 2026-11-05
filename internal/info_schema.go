@@ -30,12 +30,16 @@ type infoSchemaView struct {
 	// BuildRows synthesises rows for the view limited to the given
 	// dataset. An empty schema (no constraint) means all datasets.
 	// countRows reports the number of rows stored in a SQLite table.
-	BuildRows func(c *Catalog, schema string, countRows rowCounter) []map[string]value.Value
+	BuildRows func(c *Catalog, schema string, countRows rowCounter, scan tableScanner) []map[string]value.Value
 }
 
 // rowCounter returns the number of rows of the SQLite table with the given
 // name, or false when it cannot be counted.
 type rowCounter func(sqliteTable string) (int64, bool)
+
+// tableScanner returns every value of one column of the SQLite table with the
+// given name, in the over-the-wire encoding the table stores.
+type tableScanner func(sqliteTable, column string) ([]any, bool)
 
 // timestampOrNull converts a time to a TIMESTAMP value; the zero time (an
 // object whose creation time was not recorded) is NULL.
@@ -157,6 +161,7 @@ var infoSchemaViews = []*infoSchemaView{
 			{Name: "partition_id", Type: "STRING"},
 			{Name: "total_rows", Type: "INT64"},
 			{Name: "total_logical_bytes", Type: "INT64"},
+			{Name: "total_billing_bytes", Type: "INT64"},
 			{Name: "last_modified_time", Type: "TIMESTAMP"},
 			{Name: "storage_tier", Type: "STRING"},
 		},
@@ -248,7 +253,7 @@ func matchesSchema(namePath []string, filter string) (catalog, schema string, ok
 	return cat, sch, true
 }
 
-func buildSchemataRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
+func buildSchemataRows(c *Catalog, schema string, _ rowCounter, _ tableScanner) []map[string]value.Value {
 	pairs := catalogProjectAndSchemas(c)
 	out := make([]map[string]value.Value, 0, len(pairs))
 	for _, p := range pairs {
@@ -267,7 +272,7 @@ func buildSchemataRows(c *Catalog, schema string, _ rowCounter) []map[string]val
 	return out
 }
 
-func buildTablesRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
+func buildTablesRows(c *Catalog, schema string, _ rowCounter, _ tableScanner) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0, len(c.tables))
 	for _, t := range c.tables {
 		cat, sch, ok := matchesSchema(t.NamePath, schema)
@@ -296,7 +301,7 @@ func buildTablesRows(c *Catalog, schema string, _ rowCounter) []map[string]value
 	return out
 }
 
-func buildColumnsRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
+func buildColumnsRows(c *Catalog, schema string, _ rowCounter, _ tableScanner) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0)
 	for _, t := range c.tables {
 		cat, sch, ok := matchesSchema(t.NamePath, schema)
@@ -326,7 +331,7 @@ func buildColumnsRows(c *Catalog, schema string, _ rowCounter) []map[string]valu
 	return out
 }
 
-func buildTableOptionsRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
+func buildTableOptionsRows(c *Catalog, schema string, _ rowCounter, _ tableScanner) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0)
 	for _, t := range c.tables {
 		cat, sch, ok := matchesSchema(t.NamePath, schema)
@@ -396,7 +401,7 @@ func infoSchemaDataType(typ *Type) string {
 // buildRoutinesRows lists the persistent SQL / JavaScript functions and the
 // table functions of the catalog. Temporary functions have no dataset and
 // are not listed, as in BigQuery.
-func buildRoutinesRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
+func buildRoutinesRows(c *Catalog, schema string, _ rowCounter, _ tableScanner) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0, len(c.functions)+len(c.tvfs))
 	for _, f := range c.functions {
 		if f.IsTemp {
@@ -460,10 +465,16 @@ func routineRow(cat, sch, name, routineType, dataType, language, code string, cr
 	return row
 }
 
-// buildPartitionsRows reports one row per base table. The emulator does not
-// partition storage, so a table is a single unpartitioned partition: its
-// partition_id is NULL. total_logical_bytes is not tracked and reported as 0.
-func buildPartitionsRows(c *Catalog, schema string, countRows rowCounter) []map[string]value.Value {
+// buildPartitionsRows reports one row per partition of every base table. A
+// table created with a supported `PARTITION BY` expression (see
+// partitionSpecFromExpr) gets one row per distinct partition, with
+// partition_id 'YYYYMMDD' (or YYYYMMDDHH, YYYYMM, YYYY, or the range start of an
+// integer-range partition) and '__NULL__' for NULL values. A table without a
+// partition expression, or with one the emulator cannot evaluate (ingestion
+// time), is a single unpartitioned row with a NULL partition_id. Bytes are not
+// tracked and reported as 0; last_modified_time is the table's, not the
+// partition's.
+func buildPartitionsRows(c *Catalog, schema string, countRows rowCounter, scan tableScanner) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0, len(c.tables))
 	for _, t := range c.tables {
 		if t.IsView || t.IsTemp {
@@ -473,17 +484,32 @@ func buildPartitionsRows(c *Catalog, schema string, countRows rowCounter) []map[
 		if !ok {
 			continue
 		}
+		row := func(id value.Value, rows int64) map[string]value.Value {
+			return map[string]value.Value{
+				"table_catalog":       value.StringValue(cat),
+				"table_schema":        value.StringValue(sch),
+				"table_name":          value.StringValue(t.NamePath[len(t.NamePath)-1]),
+				"partition_id":        id,
+				"total_rows":          value.IntValue(rows),
+				"total_logical_bytes": value.IntValue(0),
+				"total_billing_bytes": value.IntValue(0),
+				"last_modified_time":  timestampOrNull(lastModified(t)),
+				"storage_tier":        value.StringValue("ACTIVE"),
+			}
+		}
+		if ps := partitionSpecFromExpr(t.PartitionBy); ps != nil {
+			if vals, ok := scan(t.TableName(), ps.column); ok {
+				counts, order := ps.count(vals)
+				for _, id := range order {
+					out = append(out, row(value.StringValue(id), counts[id]))
+				}
+				if len(order) > 0 {
+					continue
+				}
+			}
+		}
 		rows, _ := countRows(t.TableName())
-		out = append(out, map[string]value.Value{
-			"table_catalog":       value.StringValue(cat),
-			"table_schema":        value.StringValue(sch),
-			"table_name":          value.StringValue(t.NamePath[len(t.NamePath)-1]),
-			"partition_id":        nil,
-			"total_rows":          value.IntValue(rows),
-			"total_logical_bytes": value.IntValue(0),
-			"last_modified_time":  timestampOrNull(lastModified(t)),
-			"storage_tier":        value.StringValue("ACTIVE"),
-		})
+		out = append(out, row(nil, rows))
 	}
 	return out
 }
@@ -497,7 +523,7 @@ func lastModified(t *TableSpec) time.Time {
 
 // buildLegacyTablesRows backs `<dataset>.__TABLES__`. type is 1 for a table
 // and 2 for a view; size_bytes is not tracked and reported as 0.
-func buildLegacyTablesRows(c *Catalog, schema string, countRows rowCounter) []map[string]value.Value {
+func buildLegacyTablesRows(c *Catalog, schema string, countRows rowCounter, _ tableScanner) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0, len(c.tables))
 	for _, t := range c.tables {
 		if t.IsTemp {

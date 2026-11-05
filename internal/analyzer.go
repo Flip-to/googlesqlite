@@ -1854,6 +1854,7 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
 	// calls in their exact positions relative to the uniform pipeline
 	// steps.
 	query, args = applyMixedParameterRewrite(query, args)
+	ctx = withPartitionExprs(ctx, extractPartitionByExprs(query))
 	query = applySQLRewritePipeline(query, sqlRewritePipelinePreScriptVars)
 	query = applyScriptVariables(ctx, query, conn)
 	query = applySQLRewritePipeline(query, sqlRewritePipelinePostScriptVars)

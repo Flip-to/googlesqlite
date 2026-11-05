@@ -189,6 +189,10 @@ type TableSpec struct {
 	// INFORMATION_SCHEMA.TABLE_OPTIONS view surfaces them
 	// one-row-per-(table, option).
 	Options []*tableOptionSpec `json:"options,omitempty"`
+	// PartitionBy is the CREATE TABLE ... PARTITION BY expression, as
+	// written. Storage is not partitioned; it only feeds
+	// INFORMATION_SCHEMA.PARTITIONS.
+	PartitionBy string `json:"partitionBy,omitempty"`
 }
 
 // TableOptionSpec captures a single CREATE TABLE OPTIONS entry. Type
@@ -974,14 +978,15 @@ func newPrimaryKey(key *googlesql.ResolvedPrimaryKey) []string {
 func newTableSpecWithQuery(ctx context.Context, namePath *NamePath, query string, stmt *googlesql.ResolvedCreateTableStmt) *TableSpec {
 	now := time.Now()
 	return &TableSpec{
-		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
-		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
-		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
-		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
-		CreateMode: m1(stmt.CreateMode()),
-		Options:    newTableOptionsFromResolved(m1(stmt.OptionList())),
-		UpdatedAt:  now,
-		CreatedAt:  now,
+		IsTemp:      resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+		NamePath:    namePath.mergePath(m1(stmt.NamePath())),
+		Columns:     newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
+		PrimaryKey:  newPrimaryKey(m1(stmt.PrimaryKey())),
+		CreateMode:  m1(stmt.CreateMode()),
+		Options:     newTableOptionsFromResolved(m1(stmt.OptionList())),
+		PartitionBy: partitionExprFromContext(ctx, m1(stmt.NamePath())),
+		UpdatedAt:   now,
+		CreatedAt:   now,
 	}
 }
 
@@ -1163,14 +1168,15 @@ func newTableAsSelectSpec(ctx context.Context, namePath *NamePath, query string,
 	}
 	now := time.Now()
 	return &TableSpec{
-		IsTemp:     resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
-		NamePath:   namePath.mergePath(m1(stmt.NamePath())),
-		Columns:    newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
-		PrimaryKey: newPrimaryKey(m1(stmt.PrimaryKey())),
-		CreateMode: m1(stmt.CreateMode()),
-		Query:      fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
-		UpdatedAt:  now,
-		CreatedAt:  now,
+		IsTemp:      resolvedCreateScope(stmt) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+		NamePath:    namePath.mergePath(m1(stmt.NamePath())),
+		Columns:     newColumnsFromDef(ctx, m1(stmt.ColumnDefinitionList())),
+		PrimaryKey:  newPrimaryKey(m1(stmt.PrimaryKey())),
+		CreateMode:  m1(stmt.CreateMode()),
+		PartitionBy: partitionExprFromContext(ctx, m1(stmt.NamePath())),
+		Query:       fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
+		UpdatedAt:   now,
+		CreatedAt:   now,
 	}
 }
 

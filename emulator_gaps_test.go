@@ -304,3 +304,64 @@ func TestInformationSchemaCreationTimeIsTimestamp(t *testing.T) {
 		t.Fatalf("creation_time is not a TIMESTAMP: %s", typ)
 	}
 }
+
+// TestInformationSchemaPartitionsPerPartition: a PARTITION BY table reports one
+// row per distinct partition, like BigQuery.
+func TestInformationSchemaPartitionsPerPartition(t *testing.T) {
+	t.Parallel()
+	db, ctx := openGapsDB(t)
+	mustExecGaps(t, ctx, db,
+		"CREATE TABLE `p.ds.by_date` (d DATE, v INT64) PARTITION BY d",
+		"INSERT INTO `p.ds.by_date` VALUES (DATE '2026-10-01', 1), (DATE '2026-10-01', 2), (DATE '2026-10-02', 3), (NULL, 4)",
+		"CREATE TABLE `p.ds.by_func` (ts TIMESTAMP, v INT64) PARTITION BY DATE(ts) OPTIONS (description = 'x')",
+		"INSERT INTO `p.ds.by_func` VALUES (TIMESTAMP '2026-10-01 23:59:59+00', 1), (TIMESTAMP '2026-10-02 00:00:01+00', 2)",
+		"CREATE TABLE `p.ds.by_trunc` (ts TIMESTAMP) PARTITION BY TIMESTAMP_TRUNC(ts, MONTH)",
+		"INSERT INTO `p.ds.by_trunc` VALUES (TIMESTAMP '2026-10-05 00:00:00+00'), (TIMESTAMP '2026-10-20 00:00:00+00'), (TIMESTAMP '2026-11-01 00:00:00+00')",
+		"CREATE TABLE `p.ds.by_hour` (ts TIMESTAMP) PARTITION BY TIMESTAMP_TRUNC(ts, HOUR)",
+		"INSERT INTO `p.ds.by_hour` VALUES (TIMESTAMP '2026-10-05 07:10:00+00'), (TIMESTAMP '2026-10-05 07:50:00+00')",
+		"CREATE TABLE `p.ds.by_range` (n INT64) PARTITION BY RANGE_BUCKET(n, GENERATE_ARRAY(0, 100, 10))",
+		"INSERT INTO `p.ds.by_range` VALUES (1), (9), (10), (55), (500)",
+		"CREATE TABLE `p.ds.ctas` PARTITION BY d AS SELECT DATE '2026-10-03' AS d",
+		"CREATE TABLE `p.ds.plain` (id INT64)",
+		"INSERT INTO `p.ds.plain` VALUES (1), (2)",
+	)
+	rows, err := db.QueryContext(ctx, "SELECT table_name, partition_id, total_rows, total_billing_bytes FROM `p`.`ds`.INFORMATION_SCHEMA.PARTITIONS ORDER BY table_name, partition_id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var name string
+		var id sql.NullString
+		var total, billing int64
+		if err := rows.Scan(&name, &id, &total, &billing); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, fmt.Sprintf("%s/%s=%d", name, id.String+map[bool]string{true: "NULL"}[!id.Valid], total))
+	}
+	want := "by_date/20261001=2,by_date/20261002=1,by_date/__NULL__=1," +
+		"by_func/20261001=1,by_func/20261002=1," +
+		"by_hour/2026100507=2," +
+		"by_range/0=2,by_range/10=1,by_range/50=1,by_range/__UNPARTITIONED__=1," +
+		"by_trunc/202610=2,by_trunc/202611=1," +
+		"ctas/20261003=1," +
+		"plain/NULL=2"
+	if strings.Join(got, ",") != want {
+		t.Fatalf("PARTITIONS =\n%s\nwant\n%s", strings.Join(got, ","), want)
+	}
+
+	// The consumer pattern: partitions missing from the candidate.
+	mustExecGaps(t, ctx, db,
+		"CREATE TABLE `p.ds.cand` (d DATE) PARTITION BY d",
+		"INSERT INTO `p.ds.cand` VALUES (DATE '2026-10-01')",
+		"CREATE TABLE `p.ds.base` (d DATE) PARTITION BY d",
+		"INSERT INTO `p.ds.base` VALUES (DATE '2026-10-01'), (DATE '2026-10-02')",
+	)
+	var missing string
+	err = db.QueryRowContext(ctx, "SELECT STRING_AGG(b.partition_id) FROM `p`.`ds`.INFORMATION_SCHEMA.PARTITIONS b "+
+		"WHERE b.table_name = 'base' AND b.partition_id NOT IN (SELECT partition_id FROM `p`.`ds`.INFORMATION_SCHEMA.PARTITIONS WHERE table_name = 'cand')").Scan(&missing)
+	if err != nil || missing != "20261002" {
+		t.Fatalf("missing partitions = %q, %v", missing, err)
+	}
+}

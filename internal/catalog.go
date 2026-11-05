@@ -2930,10 +2930,11 @@ func (c *Catalog) existsFunction(cat *googlesql.SimpleCatalog, name string) bool
 
 func (c *Catalog) copyTableSpec(spec *TableSpec, newNamePath []string) *TableSpec {
 	return &TableSpec{
-		NamePath:   newNamePath,
-		Columns:    spec.Columns,
-		CreateMode: spec.CreateMode,
-		Options:    spec.Options,
+		NamePath:    newNamePath,
+		Columns:     spec.Columns,
+		CreateMode:  spec.CreateMode,
+		Options:     spec.Options,
+		PartitionBy: spec.PartitionBy,
 	}
 }
 
