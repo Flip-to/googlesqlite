@@ -178,6 +178,48 @@ func (a *Analyzer) newCreateSchemaStmtAction(node *googlesql.ResolvedCreateSchem
 	}}, nil
 }
 
+// DropSchemaStmtAction reports DROP SCHEMA through the ChangedCatalog; the driver has no schema
+// objects of its own, the embedding layer drops the dataset.
+type DropSchemaStmtAction struct {
+	spec *DroppedSchema
+}
+
+func (a *Analyzer) newDropSchemaStmtAction(node *googlesql.ResolvedDropStmt) (StmtAction, error) {
+	path, err := node.NamePath()
+	if err != nil {
+		return nil, err
+	}
+	path = a.namePath.normalizePath(path)
+	if len(path) == 0 || len(path) > 2 {
+		return nil, fmt.Errorf("DROP SCHEMA: invalid schema name %q", strings.Join(path, "."))
+	}
+	ifExists, _ := node.IsIfExists()
+	mode, _ := node.DropMode()
+	return &DropSchemaStmtAction{spec: &DroppedSchema{
+		NamePath: path,
+		IfExists: ifExists,
+		Cascade:  mode == googlesql.ResolvedDropStmtEnums_DropModeCascade,
+	}}, nil
+}
+
+func (a *DropSchemaStmtAction) Prepare(ctx context.Context, conn *Conn) (driver.Stmt, error) {
+	return nil, nil
+}
+
+func (a *DropSchemaStmtAction) ExecContext(ctx context.Context, conn *Conn) (driver.Result, error) {
+	conn.dropSchema(a.spec)
+	return &Result{conn: conn}, nil
+}
+
+func (a *DropSchemaStmtAction) QueryContext(ctx context.Context, conn *Conn) (*Rows, error) {
+	conn.dropSchema(a.spec)
+	return &Rows{conn: conn}, nil
+}
+
+func (a *DropSchemaStmtAction) Args() []any { return nil }
+
+func (a *DropSchemaStmtAction) Cleanup(ctx context.Context, conn *Conn) error { return nil }
+
 func (a *CreateSchemaStmtAction) Prepare(ctx context.Context, conn *Conn) (driver.Stmt, error) {
 	return nil, nil
 }
