@@ -176,6 +176,8 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureCreateTableAsSelectColumnList,
 	googlesql.LanguageFeatureFeatureCreateTablePartitionBy,
 	googlesql.LanguageFeatureFeatureCreateTableClusterBy,
+	// CREATE TABLE ... CLONE <table> (a table clone is a copy here: SQLite has no copy-on-write).
+	googlesql.LanguageFeatureFeatureCreateTableClone,
 	googlesql.LanguageFeatureFeatureColumnDefaultValue,
 	// Function-set feature flags. Enable the families we have
 	// runtime support for so the analyzer recognises the new
@@ -2255,7 +2257,12 @@ func (a *Analyzer) newStmtAction(ctx context.Context, query string, args []drive
 	kind, _ := node.NodeKind()
 	switch kind {
 	case googlesql.ResolvedNodeKindResolvedCreateTableStmt:
-		return a.newCreateTableStmtAction(ctx, query, args, node.(*googlesql.ResolvedCreateTableStmt))
+		createTable := node.(*googlesql.ResolvedCreateTableStmt)
+		if cloneFrom, _ := createTable.CloneFrom(); cloneFrom != nil {
+			ctx = withUseColumnID(ctx)
+			return a.newCreateTableCloneStmtAction(ctx, args, createTable, cloneFrom)
+		}
+		return a.newCreateTableStmtAction(ctx, query, args, createTable)
 	case googlesql.ResolvedNodeKindResolvedCreateTableAsSelectStmt:
 		ctx = withUseColumnID(ctx)
 		return a.newCreateTableAsSelectStmtAction(ctx, query, args, node.(*googlesql.ResolvedCreateTableAsSelectStmt))
@@ -2385,6 +2392,64 @@ func (a *noopStmtAction) Cleanup(ctx context.Context, conn *Conn) error { return
 func (a *Analyzer) newCreateTableStmtAction(ctx context.Context, query string, args []driver.NamedValue, node *googlesql.ResolvedCreateTableStmt) (*CreateTableStmtAction, error) {
 	spec := newTableSpecWithQuery(ctx, a.namePath, query, node)
 	queryArgs, err := getArgsFromParams(args, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &CreateTableStmtAction{
+		query:           query,
+		spec:            spec,
+		args:            queryArgs,
+		catalog:         a.catalog,
+		isAutoIndexMode: a.isAutoIndexMode,
+	}, nil
+}
+
+// newCreateTableCloneStmtAction handles CREATE [OR REPLACE] TABLE [IF NOT EXISTS] <t> CLONE <source>.
+// SQLite cannot share storage, so the clone is a copy of the source rows with the source's column
+// definitions (NOT NULL, defaults, collation) and PARTITION BY expression.
+func (a *Analyzer) newCreateTableCloneStmtAction(ctx context.Context, args []driver.NamedValue, node *googlesql.ResolvedCreateTableStmt, cloneFrom googlesql.ResolvedScanNode) (*CreateTableStmtAction, error) {
+	query, params, err := collectFormatParams(ctx, cloneFrom)
+	if err != nil {
+		return nil, err
+	}
+	tableScan, ok := cloneFrom.(*googlesql.ResolvedTableScan)
+	if !ok {
+		return nil, fmt.Errorf("CREATE TABLE CLONE: the source must be a table")
+	}
+	var source *TableSpec
+	if table, err := tableScan.Table(); err == nil {
+		source = a.catalog.tableSpecByName(a.catalog.StorageNameForTable(table))
+	}
+	var (
+		outputColumns []string
+		columns       []*ColumnSpec
+	)
+	for _, column := range m1(tableScan.ColumnList()) {
+		name, _ := column.Name()
+		id, _ := column.ColumnId()
+		outputColumns = append(outputColumns, fmt.Sprintf("`%s#%d` AS `%s`", name, id, name))
+		if source != nil {
+			if sourceColumn := source.Column(name); sourceColumn != nil {
+				columns = append(columns, sourceColumn)
+				continue
+			}
+		}
+		columns = append(columns, &ColumnSpec{Name: name, Type: newType(m1(column.Type()))})
+	}
+	spec := &TableSpec{
+		IsTemp:     resolvedCreateScope(node) == googlesql.ResolvedCreateStatementEnums_CreateScopeCreateTemp,
+		NamePath:   a.namePath.mergePath(m1(node.NamePath())),
+		Columns:    columns,
+		CreateMode: m1(node.CreateMode()),
+		Options:    newTableOptionsFromResolved(m1(node.OptionList())),
+		Query:      fmt.Sprintf("SELECT %s FROM (%s)", strings.Join(outputColumns, ","), query),
+		UpdatedAt:  time.Now(),
+		CreatedAt:  time.Now(),
+	}
+	if source != nil {
+		spec.PartitionBy = source.PartitionBy
+	}
+	queryArgs, err := getArgsFromParams(args, params)
 	if err != nil {
 		return nil, err
 	}

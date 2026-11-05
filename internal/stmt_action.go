@@ -67,6 +67,12 @@ func (a *CreateTableStmtAction) createIndexAutomatically(ctx context.Context, co
 }
 
 func (a *CreateTableStmtAction) exec(ctx context.Context, conn *Conn) error {
+	// CREATE TABLE IF NOT EXISTS ... AS SELECT / CLONE leaves an existing table alone (it used to
+	// fail with "table already exists" and, were it to succeed, would replace the table's spec).
+	if a.spec.CreateMode == googlesql.ResolvedCreateStatementEnums_CreateModeCreateIfNotExists &&
+		a.spec.Query != "" && !a.spec.IsTemp && a.catalog.hasTableSpec(a.spec.TableName()) {
+		return nil
+	}
 	// TEMP tables have "replace-on-recreate" semantics: re-running a
 	// `CREATE TEMP TABLE foo` is expected to overwrite the previous
 	// temp definition, not error out. The analyzer treats CREATE OR
