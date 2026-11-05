@@ -2336,7 +2336,7 @@ func (c *Catalog) addTVFSpec(spec *TVFSpec) error {
 	if err := c.addTVFSpecRecursive(c.catalog, spec); err != nil {
 		return err
 	}
-	return nil
+	return c.ensureInfoSchemaForRoutine(spec.NamePath, spec.IsTemp)
 }
 
 func (c *Catalog) addFunctionSpec(spec *FunctionSpec) error {
@@ -2350,7 +2350,21 @@ func (c *Catalog) addFunctionSpec(spec *FunctionSpec) error {
 	if err := c.addFunctionSpecRecursive(c.catalog, spec); err != nil {
 		return err
 	}
-	return nil
+	return c.ensureInfoSchemaForRoutine(spec.NamePath, spec.IsTemp)
+}
+
+// ensureInfoSchemaForRoutine makes INFORMATION_SCHEMA resolvable for the
+// dataset of a persistent routine, so ROUTINES can be queried even for a
+// dataset that holds no table.
+func (c *Catalog) ensureInfoSchemaForRoutine(path []string, isTemp bool) error {
+	if isTemp || len(path) < 2 {
+		return nil
+	}
+	project, dataset := "", path[len(path)-2]
+	if len(path) >= 3 {
+		project = path[len(path)-3]
+	}
+	return c.ensureInfoSchemaForDataset(project, dataset)
 }
 
 func (c *Catalog) addTableSpec(spec *TableSpec) error {

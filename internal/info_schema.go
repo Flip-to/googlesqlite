@@ -2,6 +2,7 @@ package internal
 
 import (
 	"strings"
+	"time"
 
 	googlesql "github.com/goccy/go-googlesql"
 	"github.com/goccy/googlesqlite/internal/value"
@@ -23,9 +24,35 @@ type infoSchemaView struct {
 	// trailing hidden `__schema` column carries the dataset
 	// constraint passed by the formatter.
 	Columns []*infoSchemaColumn
+	// TopLevel marks a view that lives directly in the dataset
+	// (`<dataset>.__TABLES__`) instead of under INFORMATION_SCHEMA.
+	TopLevel bool
 	// BuildRows synthesises rows for the view limited to the given
 	// dataset. An empty schema (no constraint) means all datasets.
-	BuildRows func(c *Catalog, schema string) []map[string]value.Value
+	// countRows reports the number of rows stored in a SQLite table.
+	BuildRows func(c *Catalog, schema string, countRows rowCounter) []map[string]value.Value
+}
+
+// rowCounter returns the number of rows of the SQLite table with the given
+// name, or false when it cannot be counted.
+type rowCounter func(sqliteTable string) (int64, bool)
+
+// timestampOrNull converts a time to a TIMESTAMP value; the zero time (an
+// object whose creation time was not recorded) is NULL.
+func timestampOrNull(t time.Time) value.Value {
+	if t.IsZero() {
+		return nil
+	}
+	return value.TimestampValue(t.UTC())
+}
+
+// millisOrNull converts a time to epoch milliseconds, the form __TABLES__
+// uses for creation_time and last_modified_time.
+func millisOrNull(t time.Time) value.Value {
+	if t.IsZero() {
+		return nil
+	}
+	return value.IntValue(t.UnixMilli())
 }
 
 // InfoSchemaColumn declares one virtual-table column.
@@ -48,8 +75,8 @@ var infoSchemaViews = []*infoSchemaView{
 			{Name: "catalog_name", Type: "STRING"},
 			{Name: "schema_name", Type: "STRING"},
 			{Name: "schema_owner", Type: "STRING"},
-			{Name: "creation_time", Type: "STRING"},
-			{Name: "last_modified_time", Type: "STRING"},
+			{Name: "creation_time", Type: "TIMESTAMP"},
+			{Name: "last_modified_time", Type: "TIMESTAMP"},
 			{Name: "location", Type: "STRING"},
 		},
 		BuildRows: buildSchemataRows,
@@ -64,7 +91,7 @@ var infoSchemaViews = []*infoSchemaView{
 			{Name: "table_type", Type: "STRING"},
 			{Name: "is_insertable_into", Type: "STRING"},
 			{Name: "is_typed", Type: "STRING"},
-			{Name: "creation_time", Type: "STRING"},
+			{Name: "creation_time", Type: "TIMESTAMP"},
 		},
 		BuildRows: buildTablesRows,
 	},
@@ -97,6 +124,60 @@ var infoSchemaViews = []*infoSchemaView{
 			{Name: "option_value", Type: "STRING"},
 		},
 		BuildRows: buildTableOptionsRows,
+	},
+	{
+		Name:   "ROUTINES",
+		Module: "googlesqlite_info_schema_routines",
+		Columns: []*infoSchemaColumn{
+			{Name: "specific_catalog", Type: "STRING"},
+			{Name: "specific_schema", Type: "STRING"},
+			{Name: "specific_name", Type: "STRING"},
+			{Name: "routine_catalog", Type: "STRING"},
+			{Name: "routine_schema", Type: "STRING"},
+			{Name: "routine_name", Type: "STRING"},
+			{Name: "routine_type", Type: "STRING"},
+			{Name: "data_type", Type: "STRING"},
+			{Name: "routine_body", Type: "STRING"},
+			{Name: "routine_definition", Type: "STRING"},
+			{Name: "external_language", Type: "STRING"},
+			{Name: "is_deterministic", Type: "STRING"},
+			{Name: "security_type", Type: "STRING"},
+			{Name: "created", Type: "TIMESTAMP"},
+			{Name: "last_altered", Type: "TIMESTAMP"},
+		},
+		BuildRows: buildRoutinesRows,
+	},
+	{
+		Name:   "PARTITIONS",
+		Module: "googlesqlite_info_schema_partitions",
+		Columns: []*infoSchemaColumn{
+			{Name: "table_catalog", Type: "STRING"},
+			{Name: "table_schema", Type: "STRING"},
+			{Name: "table_name", Type: "STRING"},
+			{Name: "partition_id", Type: "STRING"},
+			{Name: "total_rows", Type: "INT64"},
+			{Name: "total_logical_bytes", Type: "INT64"},
+			{Name: "last_modified_time", Type: "TIMESTAMP"},
+			{Name: "storage_tier", Type: "STRING"},
+		},
+		BuildRows: buildPartitionsRows,
+	},
+	{
+		// `<dataset>.__TABLES__`, the legacy table listing.
+		Name:     "__TABLES__",
+		Module:   "googlesqlite_info_schema_legacy_tables",
+		TopLevel: true,
+		Columns: []*infoSchemaColumn{
+			{Name: "project_id", Type: "STRING"},
+			{Name: "dataset_id", Type: "STRING"},
+			{Name: "table_id", Type: "STRING"},
+			{Name: "creation_time", Type: "INT64"},
+			{Name: "last_modified_time", Type: "INT64"},
+			{Name: "row_count", Type: "INT64"},
+			{Name: "size_bytes", Type: "INT64"},
+			{Name: "type", Type: "INT64"},
+		},
+		BuildRows: buildLegacyTablesRows,
 	},
 }
 
@@ -167,7 +248,7 @@ func matchesSchema(namePath []string, filter string) (catalog, schema string, ok
 	return cat, sch, true
 }
 
-func buildSchemataRows(c *Catalog, schema string) []map[string]value.Value {
+func buildSchemataRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
 	pairs := catalogProjectAndSchemas(c)
 	out := make([]map[string]value.Value, 0, len(pairs))
 	for _, p := range pairs {
@@ -186,7 +267,7 @@ func buildSchemataRows(c *Catalog, schema string) []map[string]value.Value {
 	return out
 }
 
-func buildTablesRows(c *Catalog, schema string) []map[string]value.Value {
+func buildTablesRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0, len(c.tables))
 	for _, t := range c.tables {
 		cat, sch, ok := matchesSchema(t.NamePath, schema)
@@ -208,17 +289,14 @@ func buildTablesRows(c *Catalog, schema string) []map[string]value.Value {
 			"table_type":         value.StringValue(tableType),
 			"is_insertable_into": value.StringValue(insertable),
 			"is_typed":           value.StringValue("NO"),
-			"creation_time":      nil,
-		}
-		if !t.CreatedAt.IsZero() {
-			row["creation_time"] = value.StringValue(t.CreatedAt.UTC().Format("2006-01-02 15:04:05.999999 MST"))
+			"creation_time":      timestampOrNull(t.CreatedAt),
 		}
 		out = append(out, row)
 	}
 	return out
 }
 
-func buildColumnsRows(c *Catalog, schema string) []map[string]value.Value {
+func buildColumnsRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0)
 	for _, t := range c.tables {
 		cat, sch, ok := matchesSchema(t.NamePath, schema)
@@ -248,7 +326,7 @@ func buildColumnsRows(c *Catalog, schema string) []map[string]value.Value {
 	return out
 }
 
-func buildTableOptionsRows(c *Catalog, schema string) []map[string]value.Value {
+func buildTableOptionsRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
 	out := make([]map[string]value.Value, 0)
 	for _, t := range c.tables {
 		cat, sch, ok := matchesSchema(t.NamePath, schema)
@@ -313,4 +391,138 @@ func infoSchemaDataType(typ *Type) string {
 		return "STRUCT<" + strings.Join(fields, ", ") + ">"
 	}
 	return typeKindToSQLName(googlesql.TypeKind(typ.Kind))
+}
+
+// buildRoutinesRows lists the persistent SQL / JavaScript functions and the
+// table functions of the catalog. Temporary functions have no dataset and
+// are not listed, as in BigQuery.
+func buildRoutinesRows(c *Catalog, schema string, _ rowCounter) []map[string]value.Value {
+	out := make([]map[string]value.Value, 0, len(c.functions)+len(c.tvfs))
+	for _, f := range c.functions {
+		if f.IsTemp {
+			continue
+		}
+		cat, sch, ok := matchesSchema(f.NamePath, schema)
+		if !ok {
+			continue
+		}
+		routineType := "FUNCTION"
+		if f.IsAggregate {
+			routineType = "AGGREGATE FUNCTION"
+		}
+		out = append(out, routineRow(cat, sch, f.NamePath[len(f.NamePath)-1], routineType,
+			infoSchemaDataType(f.Return), f.Language, f.Code, f.CreatedAt, f.UpdatedAt))
+	}
+	for _, t := range c.tvfs {
+		if t.IsTemp {
+			continue
+		}
+		cat, sch, ok := matchesSchema(t.NamePath, schema)
+		if !ok {
+			continue
+		}
+		out = append(out, routineRow(cat, sch, t.NamePath[len(t.NamePath)-1], "TABLE FUNCTION",
+			"", "SQL", t.Code, t.CreatedAt, t.UpdatedAt))
+	}
+	return out
+}
+
+func routineRow(cat, sch, name, routineType, dataType, language, code string, created, updated time.Time) map[string]value.Value {
+	body := "SQL"
+	var externalLanguage value.Value
+	if strings.EqualFold(language, "js") || strings.EqualFold(language, "javascript") {
+		body = "EXTERNAL"
+		externalLanguage = value.StringValue("JAVASCRIPT")
+	}
+	row := map[string]value.Value{
+		"specific_catalog":   value.StringValue(cat),
+		"specific_schema":    value.StringValue(sch),
+		"specific_name":      value.StringValue(name),
+		"routine_catalog":    value.StringValue(cat),
+		"routine_schema":     value.StringValue(sch),
+		"routine_name":       value.StringValue(name),
+		"routine_type":       value.StringValue(routineType),
+		"data_type":          nil,
+		"routine_body":       value.StringValue(body),
+		"routine_definition": nil,
+		"external_language":  externalLanguage,
+		"is_deterministic":   nil,
+		"security_type":      nil,
+		"created":            timestampOrNull(created),
+		"last_altered":       timestampOrNull(updated),
+	}
+	if dataType != "" {
+		row["data_type"] = value.StringValue(dataType)
+	}
+	if code != "" {
+		row["routine_definition"] = value.StringValue(code)
+	}
+	return row
+}
+
+// buildPartitionsRows reports one row per base table. The emulator does not
+// partition storage, so a table is a single unpartitioned partition: its
+// partition_id is NULL. total_logical_bytes is not tracked and reported as 0.
+func buildPartitionsRows(c *Catalog, schema string, countRows rowCounter) []map[string]value.Value {
+	out := make([]map[string]value.Value, 0, len(c.tables))
+	for _, t := range c.tables {
+		if t.IsView || t.IsTemp {
+			continue
+		}
+		cat, sch, ok := matchesSchema(t.NamePath, schema)
+		if !ok {
+			continue
+		}
+		rows, _ := countRows(t.TableName())
+		out = append(out, map[string]value.Value{
+			"table_catalog":       value.StringValue(cat),
+			"table_schema":        value.StringValue(sch),
+			"table_name":          value.StringValue(t.NamePath[len(t.NamePath)-1]),
+			"partition_id":        nil,
+			"total_rows":          value.IntValue(rows),
+			"total_logical_bytes": value.IntValue(0),
+			"last_modified_time":  timestampOrNull(lastModified(t)),
+			"storage_tier":        value.StringValue("ACTIVE"),
+		})
+	}
+	return out
+}
+
+func lastModified(t *TableSpec) time.Time {
+	if !t.UpdatedAt.IsZero() {
+		return t.UpdatedAt
+	}
+	return t.CreatedAt
+}
+
+// buildLegacyTablesRows backs `<dataset>.__TABLES__`. type is 1 for a table
+// and 2 for a view; size_bytes is not tracked and reported as 0.
+func buildLegacyTablesRows(c *Catalog, schema string, countRows rowCounter) []map[string]value.Value {
+	out := make([]map[string]value.Value, 0, len(c.tables))
+	for _, t := range c.tables {
+		if t.IsTemp {
+			continue
+		}
+		cat, sch, ok := matchesSchema(t.NamePath, schema)
+		if !ok {
+			continue
+		}
+		tableType, rows := int64(1), int64(0)
+		if t.IsView {
+			tableType = 2
+		} else {
+			rows, _ = countRows(t.TableName())
+		}
+		out = append(out, map[string]value.Value{
+			"project_id":         value.StringValue(cat),
+			"dataset_id":         value.StringValue(sch),
+			"table_id":           value.StringValue(t.NamePath[len(t.NamePath)-1]),
+			"creation_time":      millisOrNull(t.CreatedAt),
+			"last_modified_time": millisOrNull(lastModified(t)),
+			"row_count":          value.IntValue(rows),
+			"size_bytes":         value.IntValue(0),
+			"type":               value.IntValue(tableType),
+		})
+	}
+	return out
 }

@@ -7,19 +7,45 @@ import (
 )
 
 type ChangedCatalog struct {
-	Table    *ChangedTable
-	Function *ChangedFunction
+	Table         *ChangedTable
+	Function      *ChangedFunction
+	TableFunction *ChangedTableFunction
+	Schema        *ChangedSchema
 }
 
 func newChangedCatalog() *ChangedCatalog {
 	return &ChangedCatalog{
-		Table:    &ChangedTable{},
-		Function: &ChangedFunction{},
+		Table:         &ChangedTable{},
+		Function:      &ChangedFunction{},
+		TableFunction: &ChangedTableFunction{},
+		Schema:        &ChangedSchema{},
 	}
 }
 
 func (c *ChangedCatalog) Changed() bool {
-	return c.Table.Changed() || c.Function.Changed()
+	return c.Table.Changed() || c.Function.Changed() || c.TableFunction.Changed() || c.Schema.Changed()
+}
+
+// ChangedTableFunction lists the table-valued functions (CREATE TABLE
+// FUNCTION) created or dropped by a statement.
+type ChangedTableFunction struct {
+	Added   []*TVFSpec
+	Deleted []*TVFSpec
+}
+
+func (f *ChangedTableFunction) Changed() bool {
+	return len(f.Added) != 0 || len(f.Deleted) != 0
+}
+
+// ChangedSchema lists the schemas (BigQuery datasets) requested by CREATE
+// SCHEMA statements. The driver keeps no state for a schema itself; the
+// embedding layer owns datasets and applies the request.
+type ChangedSchema struct {
+	Added []*SchemaSpec
+}
+
+func (s *ChangedSchema) Changed() bool {
+	return len(s.Added) != 0
 }
 
 type ChangedTable struct {
@@ -182,9 +208,45 @@ func (c *Conn) addTable(spec *TableSpec) {
 	c.cc.Table.Added = append(c.cc.Table.Added, spec)
 }
 
-//nolint:unused
 func (c *Conn) updateTable(spec *TableSpec) {
+	c.removeFromUpdatedTablesIfExists(spec)
 	c.cc.Table.Updated = append(c.cc.Table.Updated, spec)
+}
+
+func (c *Conn) removeFromUpdatedTablesIfExists(spec *TableSpec) {
+	tables := make([]*TableSpec, 0, len(c.cc.Table.Updated))
+	for _, table := range c.cc.Table.Updated {
+		if table.TableName() == spec.TableName() {
+			continue
+		}
+		tables = append(tables, table)
+	}
+	c.cc.Table.Updated = tables
+}
+
+func (c *Conn) addTVF(spec *TVFSpec) {
+	c.cc.TableFunction.Deleted = filterTVFs(c.cc.TableFunction.Deleted, spec)
+	c.cc.TableFunction.Added = append(c.cc.TableFunction.Added, spec)
+}
+
+func (c *Conn) deleteTVF(spec *TVFSpec) {
+	c.cc.TableFunction.Added = filterTVFs(c.cc.TableFunction.Added, spec)
+	c.cc.TableFunction.Deleted = append(c.cc.TableFunction.Deleted, spec)
+}
+
+func filterTVFs(specs []*TVFSpec, drop *TVFSpec) []*TVFSpec {
+	out := make([]*TVFSpec, 0, len(specs))
+	for _, spec := range specs {
+		if spec.TVFName() == drop.TVFName() {
+			continue
+		}
+		out = append(out, spec)
+	}
+	return out
+}
+
+func (c *Conn) addSchema(spec *SchemaSpec) {
+	c.cc.Schema.Added = append(c.cc.Schema.Added, spec)
 }
 
 func (c *Conn) deleteTable(spec *TableSpec) {

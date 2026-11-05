@@ -279,6 +279,7 @@ func (a *CreateTableFunctionStmtAction) exec(ctx context.Context, conn *Conn) er
 		return fmt.Errorf("failed to add new TVF spec: %w", err)
 	}
 	a.tvfMap[a.spec.TVFName()] = a.spec
+	conn.addTVF(a.spec)
 	return nil
 }
 
@@ -371,6 +372,7 @@ func (a *DropStmtAction) exec(ctx context.Context, conn *Conn) error {
 		if a.tvfMap != nil {
 			delete(a.tvfMap, spec.TVFName())
 		}
+		conn.deleteTVF(spec)
 	default:
 		return fmt.Errorf("currently unsupported DROP %s statement", a.objectType)
 	}

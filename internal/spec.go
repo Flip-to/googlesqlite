@@ -200,6 +200,35 @@ type tableOptionSpec struct {
 	Value string `json:"value"`
 }
 
+// SchemaSpec is a CREATE SCHEMA [IF NOT EXISTS] statement. A schema is a
+// BigQuery dataset: the driver reports the request through the
+// ChangedCatalog and leaves creating the dataset to the embedding layer.
+type SchemaSpec struct {
+	// NamePath is [dataset] or [project, dataset].
+	NamePath    []string `json:"namePath"`
+	IfNotExists bool     `json:"ifNotExists"`
+	// OrReplace is set for CREATE OR REPLACE SCHEMA.
+	OrReplace bool `json:"orReplace"`
+	// Options carries the OPTIONS(...) clause; Value is the SQL literal.
+	Options []*tableOptionSpec `json:"options,omitempty"`
+}
+
+// Option returns the value of the named option (case-insensitive) with
+// the quotes of a STRING literal removed.
+func (s *SchemaSpec) Option(name string) (string, bool) {
+	for _, opt := range s.Options {
+		if opt == nil || !strings.EqualFold(opt.Name, name) {
+			continue
+		}
+		v := opt.Value
+		if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+			v = strings.ReplaceAll(v[1:len(v)-1], "''", "'")
+		}
+		return v, true
+	}
+	return "", false
+}
+
 func (s *TableSpec) Column(name string) *ColumnSpec {
 	for _, col := range s.Columns {
 		if col.Name == name {
