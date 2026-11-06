@@ -79,6 +79,14 @@ type Catalog struct {
 	// wrapper does, so it must stay reachable for as long as catalog
 	// can resolve the TVF, or GC frees the TVF under the catalog.
 	tvfOwners []any
+	// tableHandles caches the SimpleTable built for each registered
+	// *TableSpec so resetCatalog can re-add a surviving table without
+	// rebuilding it column by column through wasm (see
+	// tableHandleForSpec). Keyed by spec identity: a recreated or
+	// replaced table always has a new *TableSpec, so it never picks up
+	// a stale handle. Entries for specs that leave the catalog are
+	// pruned by resetCatalog and addTableSpec.
+	tableHandles map[*TableSpec]*googlesql.SimpleTable
 	// descriptorPool is the protobuf DescriptorPool attached to the
 	// SimpleCatalog at construction time. Consumers register FileDescriptorProto
 	// payloads through Catalog.RegisterProto (Conn.RegisterProto on the
@@ -2175,6 +2183,15 @@ func (c *Catalog) resetCatalog(tables []*TableSpec, functions []*FunctionSpec, t
 	// pressure that pins thousands of catalogs in the wasm heap until
 	// it exhausts and `wasm_alloc` starts returning OOB.
 	c.subCatalogs = map[*googlesql.SimpleCatalog]map[string]*googlesql.SimpleCatalog{}
+	// Keep the handles of surviving tables only, so a dropped table's
+	// SimpleTable becomes unreachable once the old catalog is released.
+	handles := make(map[*TableSpec]*googlesql.SimpleTable, len(tables))
+	for _, spec := range tables {
+		if h, ok := c.tableHandles[spec]; ok {
+			handles[spec] = h
+		}
+	}
+	c.tableHandles = handles
 	for _, spec := range tables {
 		if err := c.addTableSpec(spec); err != nil {
 			return err
@@ -2395,6 +2412,7 @@ func (c *Catalog) addTableSpec(spec *TableSpec) error {
 		c.tableMap[tableName] = spec
 		for i := range c.tables {
 			if c.tables[i].TableName() == tableName {
+				delete(c.tableHandles, c.tables[i])
 				c.tables[i] = spec
 				break
 			}
@@ -2510,10 +2528,34 @@ func (c *Catalog) addTableSpecRecursiveImpl(cat *googlesql.SimpleCatalog, spec *
 // through, so handle.Name() is the storage name everywhere — no
 // side map / pointer-identity machinery needed at format time.
 //
-// We deliberately do NOT cache the handle across calls: a recreated
-// table may reuse the same storage name with a different column set,
-// and an old cached handle would then expose stale columns.
+// The handle is cached per *TableSpec (c.tableHandles) so a catalog
+// rebuild after DROP re-adds surviving tables without re-creating
+// every column through wasm, which dominated DROP cost with many wide
+// tables. The cache is keyed by spec identity, not storage name: a
+// recreated table reuses the storage name with a new spec (and maybe
+// a different column set), so it gets a fresh handle and never sees
+// stale columns. Sharing one handle between the retired and the new
+// SimpleCatalog is safe: SimpleCatalog.AddTable2 does not take
+// ownership (the native catalog stores a borrowed pointer and the Go
+// binding only keep-alives the *SimpleTable), so releasing the old
+// catalog never frees the table; the *SimpleTable's own finalizer
+// does, once neither the cache nor any catalog references it.
 func (c *Catalog) tableHandleForSpec(spec *TableSpec) (*googlesql.SimpleTable, error) {
+	if h, ok := c.tableHandles[spec]; ok {
+		return h, nil
+	}
+	tbl, err := c.buildTableHandle(spec)
+	if err != nil {
+		return nil, err
+	}
+	if c.tableHandles == nil {
+		c.tableHandles = map[*TableSpec]*googlesql.SimpleTable{}
+	}
+	c.tableHandles[spec] = tbl
+	return tbl, nil
+}
+
+func (c *Catalog) buildTableHandle(spec *TableSpec) (*googlesql.SimpleTable, error) {
 	storageName := spec.TableName()
 	columns := []googlesql.Googlesql_ColumnNode{}
 	colIndex := map[string]int32{}
