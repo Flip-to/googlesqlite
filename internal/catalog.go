@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS googlesqlite_catalog(
   createdAt TIMESTAMP NOT NULL
 )
 `
+	// Sync runs on every analyzed statement and asks for the rows changed
+	// since the last sync. Without this index that was a full scan paging in
+	// every stored spec; with it, an unchanged catalog reads nothing.
+	createCatalogUpdatedAtIndexQuery = `
+CREATE INDEX IF NOT EXISTS googlesqlite_catalog_updatedAt ON googlesqlite_catalog(updatedAt)
+`
 	upsertCatalogQuery = `
 INSERT INTO googlesqlite_catalog (
   name,
@@ -2288,6 +2294,9 @@ func (c *Catalog) saveFunctionSpec(ctx context.Context, conn *Conn, spec *Functi
 func (c *Catalog) createCatalogTablesIfNotExists(ctx context.Context, conn *Conn) error {
 	if _, err := conn.ExecContext(ctx, createCatalogTableQuery); err != nil {
 		return fmt.Errorf("failed to create catalog table: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, createCatalogUpdatedAtIndexQuery); err != nil {
+		return fmt.Errorf("failed to create catalog index: %w", err)
 	}
 	return nil
 }
