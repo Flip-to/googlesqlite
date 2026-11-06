@@ -195,7 +195,26 @@ type TableSpec struct {
 	PartitionBy string `json:"partitionBy,omitempty"`
 	// ClusterBy is the CREATE TABLE ... CLUSTER BY column list. Like PartitionBy it is metadata only.
 	ClusterBy []string `json:"clusterBy,omitempty"`
+	// CloneOf is the name path ([project, dataset, table]) of the table a
+	// CREATE TABLE ... CLONE copied, empty for a base table. It feeds the
+	// base_table_* columns of INFORMATION_SCHEMA.TABLES and the emulator's
+	// cloneDefinition. A deep copy (CREATE TABLE ... COPY) has no CloneOf.
+	CloneOf []string `json:"cloneOf,omitempty"`
+	// CloneTime is when the clone was taken (zero for a base table).
+	CloneTime time.Time `json:"cloneTime,omitempty"`
+	// CloneDepth is the length of the clone chain ending at this table:
+	// 0 for a base table, depth(source)+1 for a clone. BigQuery refuses a
+	// chain longer than MaxCloneChain.
+	CloneDepth int `json:"cloneDepth,omitempty"`
 }
+
+// MaxCloneChain is the longest chain of clones BigQuery allows
+// (t3 CLONE t2 CLONE t1 CLONE t0 is fine, a 4th clone is refused).
+const MaxCloneChain = 3
+
+// CloneChainError is the BigQuery error for cloning a table whose clone chain
+// is already MaxCloneChain long. The text is BigQuery's, verbatim.
+const CloneChainError = "Cannot have more than 3 chained clones or snapshots. Please use a deep copy to reset the chain."
 
 // TableOptionSpec captures a single CREATE TABLE OPTIONS entry. Type
 // follows the BigQuery convention (`STRING`, `ARRAY<STRING>`, etc).

@@ -73,6 +73,10 @@ func (a *CreateTableStmtAction) exec(ctx context.Context, conn *Conn) error {
 		a.spec.Query != "" && !a.spec.IsTemp && a.catalog.hasTableSpec(a.spec.TableName()) {
 		return nil
 	}
+	// BigQuery refuses a clone whose source already ends a chain of MaxCloneChain clones.
+	if a.spec.CloneDepth > MaxCloneChain {
+		return errors.New(CloneChainError)
+	}
 	// TEMP tables have "replace-on-recreate" semantics: re-running a
 	// `CREATE TEMP TABLE foo` is expected to overwrite the previous
 	// temp definition, not error out. The analyzer treats CREATE OR
