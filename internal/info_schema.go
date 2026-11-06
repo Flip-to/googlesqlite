@@ -96,6 +96,9 @@ var infoSchemaViews = []*infoSchemaView{
 			{Name: "is_insertable_into", Type: "STRING"},
 			{Name: "is_typed", Type: "STRING"},
 			{Name: "creation_time", Type: "TIMESTAMP"},
+			{Name: "base_table_catalog", Type: "STRING"},
+			{Name: "base_table_schema", Type: "STRING"},
+			{Name: "base_table_name", Type: "STRING"},
 		},
 		BuildRows: buildTablesRows,
 	},
@@ -283,6 +286,19 @@ func buildTablesRows(c *Catalog, schema string, _ rowCounter, _ tableScanner) []
 		if t.IsView {
 			tableType = "VIEW"
 		}
+		// A clone reports the table it was cloned from; every other table
+		// has NULL base_table_* columns.
+		var baseCat, baseSch, baseName value.Value
+		if n := len(t.CloneOf); n >= 2 && !t.IsView {
+			tableType = "CLONE"
+			baseName = value.StringValue(t.CloneOf[n-1])
+			baseSch = value.StringValue(t.CloneOf[n-2])
+			if n >= 3 {
+				baseCat = value.StringValue(t.CloneOf[n-3])
+			} else {
+				baseCat = value.StringValue(cat)
+			}
+		}
 		insertable := "YES"
 		if t.IsView {
 			insertable = "NO"
@@ -295,6 +311,9 @@ func buildTablesRows(c *Catalog, schema string, _ rowCounter, _ tableScanner) []
 			"is_insertable_into": value.StringValue(insertable),
 			"is_typed":           value.StringValue("NO"),
 			"creation_time":      timestampOrNull(t.CreatedAt),
+			"base_table_catalog": baseCat,
+			"base_table_schema":  baseSch,
+			"base_table_name":    baseName,
 		}
 		out = append(out, row)
 	}

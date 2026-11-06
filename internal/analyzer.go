@@ -178,6 +178,8 @@ var enabledLanguageFeatures = []googlesql.LanguageFeature{
 	googlesql.LanguageFeatureFeatureCreateTableClusterBy,
 	// CREATE TABLE ... CLONE <table> (a table clone is a copy here: SQLite has no copy-on-write).
 	googlesql.LanguageFeatureFeatureCreateTableClone,
+	// CREATE TABLE ... COPY <table>: a deep copy (a BASE TABLE that keeps the source's layout and options).
+	googlesql.LanguageFeatureFeatureCreateTableCopy,
 	googlesql.LanguageFeatureFeatureColumnDefaultValue,
 	// Function-set feature flags. Enable the families we have
 	// runtime support for so the analyzer recognises the new
@@ -2260,7 +2262,11 @@ func (a *Analyzer) newStmtAction(ctx context.Context, query string, args []drive
 		createTable := node.(*googlesql.ResolvedCreateTableStmt)
 		if cloneFrom, _ := createTable.CloneFrom(); cloneFrom != nil {
 			ctx = withUseColumnID(ctx)
-			return a.newCreateTableCloneStmtAction(ctx, args, createTable, cloneFrom)
+			return a.newCreateTableCloneStmtAction(ctx, args, createTable, cloneFrom, false)
+		}
+		if copyFrom, _ := createTable.CopyFrom(); copyFrom != nil {
+			ctx = withUseColumnID(ctx)
+			return a.newCreateTableCloneStmtAction(ctx, args, createTable, copyFrom, true)
 		}
 		return a.newCreateTableStmtAction(ctx, query, args, createTable)
 	case googlesql.ResolvedNodeKindResolvedCreateTableAsSelectStmt:
@@ -2410,8 +2416,11 @@ func (a *Analyzer) newCreateTableStmtAction(ctx context.Context, query string, a
 
 // newCreateTableCloneStmtAction handles CREATE [OR REPLACE] TABLE [IF NOT EXISTS] <t> CLONE <source>.
 // SQLite cannot share storage, so the clone is a copy of the source rows with the source's column
-// definitions (NOT NULL, defaults, collation) and PARTITION BY expression.
-func (a *Analyzer) newCreateTableCloneStmtAction(ctx context.Context, args []driver.NamedValue, node *googlesql.ResolvedCreateTableStmt, cloneFrom googlesql.ResolvedScanNode) (*CreateTableStmtAction, error) {
+// definitions (NOT NULL, defaults, collation) and PARTITION BY expression. A clone records the table
+// it came from and its chain depth (BigQuery allows 3 chained clones). With deepCopy set (CREATE TABLE
+// ... COPY) the result is an independent BASE TABLE that also keeps the source's OPTIONS, which the
+// statement's own OPTIONS override.
+func (a *Analyzer) newCreateTableCloneStmtAction(ctx context.Context, args []driver.NamedValue, node *googlesql.ResolvedCreateTableStmt, cloneFrom googlesql.ResolvedScanNode, deepCopy bool) (*CreateTableStmtAction, error) {
 	query, params, err := collectFormatParams(ctx, cloneFrom)
 	if err != nil {
 		return nil, err
@@ -2453,6 +2462,13 @@ func (a *Analyzer) newCreateTableCloneStmtAction(ctx context.Context, args []dri
 	if source != nil {
 		spec.PartitionBy = source.PartitionBy
 		spec.ClusterBy = source.ClusterBy
+		if deepCopy {
+			spec.Options = mergeTableOptions(source.Options, spec.Options)
+		} else {
+			spec.CloneOf = append([]string(nil), source.NamePath...)
+			spec.CloneTime = spec.CreatedAt
+			spec.CloneDepth = source.CloneDepth + 1
+		}
 	}
 	queryArgs, err := getArgsFromParams(args, params)
 	if err != nil {
@@ -2465,6 +2481,31 @@ func (a *Analyzer) newCreateTableCloneStmtAction(ctx context.Context, args []dri
 		catalog:         a.catalog,
 		isAutoIndexMode: a.isAutoIndexMode,
 	}, nil
+}
+
+// mergeTableOptions returns base with the entries of override added or replacing the same-named ones.
+func mergeTableOptions(base, override []*tableOptionSpec) []*tableOptionSpec {
+	out := make([]*tableOptionSpec, 0, len(base)+len(override))
+	for _, o := range base {
+		c := *o
+		out = append(out, &c)
+	}
+	for _, o := range override {
+		replaced := false
+		for i, existing := range out {
+			if strings.EqualFold(existing.Name, o.Name) {
+				c := *o
+				out[i] = &c
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			c := *o
+			out = append(out, &c)
+		}
+	}
+	return out
 }
 
 func (a *Analyzer) newCreateTableAsSelectStmtAction(ctx context.Context, _ string, args []driver.NamedValue, node *googlesql.ResolvedCreateTableAsSelectStmt) (*CreateTableStmtAction, error) {
