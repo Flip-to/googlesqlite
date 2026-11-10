@@ -578,6 +578,8 @@ var systemVariableTypes = []struct {
 	{[]string{"dataset_project_id"}, googlesql.TypeKindTypeString},
 	{[]string{"dataset_id"}, googlesql.TypeKindTypeString},
 	{[]string{"project_id"}, googlesql.TypeKindTypeString},
+	{[]string{"error", "message"}, googlesql.TypeKindTypeString},
+	{[]string{"error", "statement_text"}, googlesql.TypeKindTypeString},
 }
 
 func registerSystemVariables(opt *googlesql.AnalyzerOptions) error {
@@ -1343,7 +1345,8 @@ func (a *Analyzer) parseScript(query string) (*parsedScript, error) {
 			return nil, fmt.Errorf("failed to get statement from parser output: %w", err)
 		}
 		// ASTBeginEndBlock has a StatementListNode child — expand it.
-		if block, ok := stmt.(*googlesql.ASTBeginEndBlock); ok {
+		// A block with an EXCEPTION clause stays one statement: scriptBlockAction runs it.
+		if block, ok := stmt.(*googlesql.ASTBeginEndBlock); ok && !blockHasExceptionHandler(block) {
 			list, err := block.StatementListNode()
 			if err == nil && list != nil {
 				result.stmts = append(result.stmts, collectStatementsFromList(list)...)
@@ -1896,55 +1899,75 @@ func (a *Analyzer) Analyze(ctx context.Context, conn *Conn, query string, args [
 			})
 			continue
 		}
-		actionFuncs = append(actionFuncs, func() (StmtAction, error) {
-			mode, err := a.getParameterMode(stmt)
-			if err != nil {
-				return nil, err
-			}
-			if err := validateLiteralCasts(stmt, query); err != nil {
-				return nil, err
-			}
-			a.preRegisterWildcardTables(stmt)
-			stmtNode, foldedQuery, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, false)
-			if err != nil {
-				return nil, err
-			}
-			build := func(node googlesql.ResolvedStatementNode, foldedQuery string, allowRefold bool) (StmtAction, *zoneFoldState, error) {
-				sourceQuery := query
-				if foldedQuery != "" {
-					sourceQuery = foldedQuery
-				}
-				state := newZoneFoldState(sourceQuery, allowRefold && refoldableStmt(node))
-				sctx := a.context(ctx, funcMap, tvfMap)
-				sctx = withSystemVars(sctx, conn.systemVars)
-				sctx = withConn(sctx, conn)
-				sctx = withSourceQuery(sctx, sourceQuery)
-				sctx = withZoneFoldState(sctx, state)
-				action, err := a.newStmtAction(sctx, query, stmtArgs, node)
-				return action, state, err
-			}
-			action, state, err := build(stmtNode, foldedQuery, true)
-			if state.needRefold {
-				// A literal was folded in the analyzer's default time
-				// zone in a shape utcLiteralSQL cannot re-evaluate:
-				// analyze again without literal-cast folding so the
-				// conversion runs at runtime, in UTC.
-				unfolded, ufq, uerr := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, true)
-				if uerr != nil {
-					// Without folding the analyzer rejects some
-					// statements (a bare NULL typed as INT64 cannot be
-					// coerced to GEOGRAPHY); keep the folded form.
-					unfolded, ufq = stmtNode, foldedQuery
-				}
-				action, _, err = build(unfolded, ufq, false)
-			}
-			if err != nil {
-				return nil, err
-			}
-			return action, nil
-		})
+		if block, ok := stmt.(*googlesql.ASTBeginEndBlock); ok {
+			actionFuncs = append(actionFuncs, func() (StmtAction, error) {
+				return &scriptBlockAction{a: a, ctx: ctx, query: query, block: block, funcMap: funcMap, tvfMap: tvfMap, parsed: parsed}, nil
+			})
+			continue
+		}
+		actionFuncs = append(actionFuncs, a.statementActionFunc(ctx, conn, stmt, stmtArgs, query, funcMap, tvfMap))
 	}
 	return actionFuncs, nil
+}
+
+// statementActionFunc returns the function that analyzes stmt and builds its action. Analysis is
+// deferred to the call, so a script's later statements are analyzed only when they run.
+func (a *Analyzer) statementActionFunc(
+	ctx context.Context,
+	conn *Conn,
+	stmt googlesql.ASTStatementNode,
+	stmtArgs []driver.NamedValue,
+	query string,
+	funcMap map[string]*FunctionSpec,
+	tvfMap map[string]*TVFSpec,
+) stmtActionFunc {
+	return func() (StmtAction, error) {
+		mode, err := a.getParameterMode(stmt)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateLiteralCasts(stmt, query); err != nil {
+			return nil, err
+		}
+		a.preRegisterWildcardTables(stmt)
+		stmtNode, foldedQuery, err := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, false)
+		if err != nil {
+			return nil, err
+		}
+		build := func(node googlesql.ResolvedStatementNode, foldedQuery string, allowRefold bool) (StmtAction, *zoneFoldState, error) {
+			sourceQuery := query
+			if foldedQuery != "" {
+				sourceQuery = foldedQuery
+			}
+			state := newZoneFoldState(sourceQuery, allowRefold && refoldableStmt(node))
+			sctx := a.context(ctx, funcMap, tvfMap)
+			sctx = withSystemVars(sctx, conn.systemVars)
+			sctx = withConn(sctx, conn)
+			sctx = withSourceQuery(sctx, sourceQuery)
+			sctx = withZoneFoldState(sctx, state)
+			action, err := a.newStmtAction(sctx, query, stmtArgs, node)
+			return action, state, err
+		}
+		action, state, err := build(stmtNode, foldedQuery, true)
+		if state.needRefold {
+			// A literal was folded in the analyzer's default time
+			// zone in a shape utcLiteralSQL cannot re-evaluate:
+			// analyze again without literal-cast folding so the
+			// conversion runs at runtime, in UTC.
+			unfolded, ufq, uerr := a.analyzeStatementLocked(stmt, mode, stmtArgs, query, true)
+			if uerr != nil {
+				// Without folding the analyzer rejects some
+				// statements (a bare NULL typed as INT64 cannot be
+				// coerced to GEOGRAPHY); keep the folded form.
+				unfolded, ufq = stmtNode, foldedQuery
+			}
+			action, _, err = build(unfolded, ufq, false)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return action, nil
+	}
 }
 
 func (a *Analyzer) context(
